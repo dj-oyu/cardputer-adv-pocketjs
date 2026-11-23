@@ -22,10 +22,10 @@ arena は空のスクリプトで約 +90 KB（約 24 の size class が 1 ペー
 
 fork では 9de2921 を v0.18.0 に対して戻したもの（`89df4c3`、整形して `e08d22d`）をマージした。後から arena のマクロを使っていた 7955cfd と 849220c は残し、マクロの代わりにヘッダの欄を直接使う。上流の tests.conf（0/122）と test262（40/82,220、同じ 40 件）は arena の有無で変わらない。
 
-## 2. pocket の挙動を残したところ
+## 2. kobako の挙動を残したところ
 
 - **InternalError（out of memory を含む）は JS から捕まえられる。** 上流 90aa2c4・db0fe52 はこれを捕まえられなくした。固定のヒープで確保に失敗したアプリが捕まえて続けられることが、OOM まわりの硬化（[oom-parse-safety.md](oom-parse-safety.md)、`tools/vmtest/corpus/memory_device.js` と `oom_*`）の前提なので、fork の既定は捕まえられる方。`-DJS_UNCATCHABLE_INTERNAL_ERRORS=1` で上流の挙動になる。"interrupted" はどちらでも捕まえられない。
-- **`JSStackFrame` は 48 B のまま。** 上流の `cur_gc_obj` は入れず、pocket の `coro_kind` で持ち主を求める。上流が `CallSite.isConstructor` のために足した `is_constructor` は、最後の詰め物の 1 バイト（FLATCALLS で offset 39）に置いた。共有の prologue では `flags` が呼び出し側の値のことがあるので、C からの入口と flat call でそれぞれ書く。
+- **`JSStackFrame` は 48 B のまま。** 上流の `cur_gc_obj` は入れず、kobako の `coro_kind` で持ち主を求める。上流が `CallSite.isConstructor` のために足した `is_constructor` は、最後の詰め物の 1 バイト（FLATCALLS で offset 39）に置いた。共有の prologue では `flags` が呼び出し側の値のことがあるので、C からの入口と flat call でそれぞれ書く。
 - **関数のソースは捨てたまま。** 上流が `using` のために書き換えた関数本体の構文解析でも保存しない。
 - **ArrayBuffer の transfer。** v0.18 で外部メモリの API が `free_func` から `realloc_func` になった（`JS_NewArrayBuffer` の引数も変わる）。Shiki の窓は `realloc_func = NULL`（誰も解放しない）で作り、その種類の ArrayBuffer だけを transfer できなくした（[shiki-spec.md](../kasane/shiki-spec.md) §9.3）。`realloc_func` が所有するものは上流どおり transfer できる。
 
@@ -34,7 +34,7 @@ fork では 9de2921 を v0.18.0 に対して戻したもの（`89df4c3`、整形
 host の試験で見つけたもの。どれもマージの衝突の外にあった。
 
 - **`hash_atom` の幅。** v0.18 は shape のプロパティの位置を `uintptr_t` の幅の乗算ハッシュで決める（cad311e）。64 bit の host と 32 bit の実機で別のバケットになり、host で作る ROM の shape の表が実機で引けない。fork はどの host でも 32 bit の式にした。
-- **pocket の 2 か所が古いハッシュのまま。** 遅延組み込みの並べ直し（`lazy_reorder`）と ROM の生成器（`tools/vmtest/floor/gen_rom_intrinsics.c`）が `atom & mask` で表を作っていた。前者は `Array.prototype` を全部展開した後の引き当てをすべて外し（for-in と `Object.keys` が壊れる）、後者は ROM 版のコンテキストで組み込みのメソッドを全部 `undefined` にした（実機の構成。r5sim の hot/cold の学習で見つかった）。
+- **kobako の 2 か所が古いハッシュのまま。** 遅延組み込みの並べ直し（`lazy_reorder`）と ROM の生成器（`tools/vmtest/floor/gen_rom_intrinsics.c`）が `atom & mask` で表を作っていた。前者は `Array.prototype` を全部展開した後の引き当てをすべて外し（for-in と `Object.keys` が壊れる）、後者は ROM 版のコンテキストで組み込みのメソッドを全部 `undefined` にした（実機の構成。r5sim の hot/cold の学習で見つかった）。
 - 遅延の Uint8Array に base64/hex のメソッドが付かない、DOMException の 2 度目の登録で abort する、遅延の DOMException の `length` が 2 のまま、ROM 版のコンテキストが消えた `js_random_init` を呼ぶ（実機のビルドだけが通る経路）。
 - `to_propkey_obj`（最後の命令）を外した。上流 0db3949 が代入の ToPropertyKey を右辺の後にしたので、使う場所がなくなった。
 
@@ -94,12 +94,12 @@ v0.18 は 50b5fe4e（fork 55b82c7）、v0.14 は f5fe594a（fork cd51ea7）。�
 
 ## 8. fork の `main` に上げた（2026-11-21、fork `ff809dd`）
 
-fork の作業ブランチを `main`（`v0.14.0` から切った pocket の系統。`master` は上流の写しのまま）へマージした（fork PR #1、マージコミット。`cbf7803` は `main` から辿れる）。上流の CI（130 件）を初めて通すために直したもの:
+fork の作業ブランチを `main`（`v0.14.0` から切った kobako の系統。`master` は上流の写しのまま）へマージした（fork PR #1、マージコミット。`cbf7803` は `main` から辿れる）。上流の CI（130 件）を初めて通すために直したもの:
 
 - **`JS_UPSTREAM_COMPAT`。** fork 自身のビルド（CMakeLists.txt・meson.build、amalgam の CI）だけが定義し、上流の挙動に戻す: どのビルドでも行番号表を作る（`NDEBUG` で落とさない）、関数のソースを保つ、`Math.sin/cos/tan` は libm。pocketjs は `quickjs.c` を自分でコンパイルし、これを定義しない。
 - **`gen/*.c` を作り直した。** 上流の qjsc が上流の atom 番号で書いたバイトコードのままで、standalone と REPL が atom を別の atom として読んでいた。
 - **`libunicode-table.h` の綴り。** ESP-IDF 形式への整形の綴り直しが、script の別名 `Beng`・`Maka` を `Being`・`Make` にしていた。`\p{Script=Bengali}`・`\p{Script=Makasar}` が実機でも「unknown unicode script」だった。このファームで直る。
-- 使われない変数（`-Werror`）、`quickjs-vm.c` と pocket の見出しを amalgam と meson に、構造体の大きさの assert を実機の配置（32 bit・NaN boxing・int64 が 8 境界・GCC/Clang・Windows 以外）に限る、`ATOMIC_CHAR_LOCK_FREE` は tcc と MSVC で検査しない、`vmtest_seg_alloc_hint` の weak 参照は ELF だけ。
+- 使われない変数（`-Werror`）、`quickjs-vm.c` と kobako の見出しを amalgam と meson に、構造体の大きさの assert を実機の配置（32 bit・NaN boxing・int64 が 8 境界・GCC/Clang・Windows 以外）に限る、`ATOMIC_CHAR_LOCK_FREE` は tcc と MSVC で検査しない、`vmtest_seg_alloc_hint` の weak 参照は ELF だけ。
 - CI の Windows（clang-cl + ASan の debug）は、上流 v0.18.0 でも同じく落ちていた（runner の Visual Studio 同梱の ASan DLL が先に読まれる）。リンクした DLL を実行ファイルの隣に置いた。
 
 **実機のコードは変わらない。** このファームの `quickjs.c` を cbf7803 と ff809dd で同じコマンド（`build/compile_commands.json`）でコンパイルし、コードとデータのバイトが一致した（text 509,248 B）。hot/cold は quickjs.c 190 関数・不一致 0 のまま。変わるのは Unicode の表の 2 つの文字列だけ。
@@ -144,4 +144,44 @@ fork の `main` に入った PR #2（NEON と 128 bit の dtoa/atod）は、`__i
 | `indexOf` 4 KB（変更の外） | 185.6 | 184.8 | −0.4% |
 
 - **読み方。** 変更の外の項目は ±3% 以内。ビルドのアラインメントだけで同じコードが 15% 動くことがあるので、1 回ずつの 16% は幅の中に入る。しかしチェックサムは同じで、外の項目が動いていない。各値には JS 呼び出しの費用が入るので、dtoa の取り分はこれより小さい。PR #2 の 12 倍は Cortex-A53 の値で、この機体では `String(float)` が約 16%。`toFixed`/`toExponential`/`toString(radix)` は別の形式で、変わらない。
-- **測っていないもの。** (1) gitlink の `b716bd1` は PR #3（配列の遅延コピー、`quickjs.c` +568 行）を含み、A2/B2 の木にはない。S3 のヒープと速度への影響は未測定。(2) `quickjs.c` が変わったので、hot/cold を学習し直す必要がある（`tools/qjs_hotcold/train.sh`）。未実施。(3) ファーム全体の flash の増分（+12.6 KB は `dtoa.o` 単体）。
+- **測っていないもの。** (1) gitlink の `b716bd1` は PR #3（配列の遅延コピー、`quickjs.c` +568 行）を含み、A2/B2 の木にはない。S3 のヒープと速度への影響は未測定。(2) `quickjs.c` が変わったので、hot/cold を学習し直す必要がある（`tools/qjs_hotcold/train.sh`）。未実施（2026-11-22 に確かめた: PR #4 で `JS_CallInternal`・`build_arg_list`・`js_function_apply` が外れ、今のファームでは `JS_CallInternal` が並べ替えられていない。fork main が落ち着いてから学習し直す。[pr8-cold-outline.md](pr8-cold-outline.md) §4）。(3) ファーム全体の flash の増分（+12.6 KB は `dtoa.o` 単体）。
+
+## 11. fork の `main` `4492bd1` に上げ、改名し、hot/cold を学習し直した（2026-11-23、fork `c7d48fd`）
+
+gitlink を `b716bd1` から fork の PR #6〜#11 の後（`4492bd1`）へ上げ、同時にプロジェクトを `pocket` から `kobako` へ、fork のオプションを `POCKET_VM_*` から `QJS_LEAN_*` へ改名した（`tools/rename/kobako_rename.py`、fork 側は `c7d48fd`）。そのあと `quickjs.c` と `main/` の hot/cold を学習し直した。
+
+- **F2 は S3 では 1 のまま。** fork の PR #11 が `POCKET_VM_LAZY_BUILTINS`（今の `QJS_LEAN_LAZY_BUILTINS`）の既定を 0 にしたので、`components/quickjs-ng/CMakeLists.txt` と、`quickjs.c` をコンパイルする `tools/` の道具 37 本が 1 を渡す（ROM の atom の表の生成器だけは除く）。STRESS の起動直後のゲストは A・B とも `js=42800` で同じ（実測（実機））。
+- **プロファイル。** `quickjs.c` は 192 関数がすべて当たる（外れ 0）。`main/` の側は `kobako_derby.c` 5・`ksn_shiki.c` 3 が外れ、改名前と同じ数（[qjs-hotcold.md](qjs-hotcold.md) §13.7）。今の main（A）の `JS_CallInternal` は、fork の PR #4 から並べ替えが外れていた（§10）。
+- **改名だけの差は 0。** hot/cold を切って改名の前後を組むと、`.bin`・Flash Code・Flash Data・DIRAM がバイト単位で同じ（実測（静的））。
+
+実機の A/B（TURNPERF、固定の種、焼き順 B → A → B）。A は今の main（`e0ecbd9`、fork `b716bd1`）、B は上の木（`e245a78`）。B の 2 回は DERBY・STRESS とも 0.03% 以内で一致し、3 回とも DERBY の着順・タイムが同じ。生ログは [logs/fork-c7d48fd-ab-20261123.txt](logs/fork-c7d48fd-ab-20261123.txt)。
+
+| 実測（実機）、1 ターンあたり | DERBY A | DERBY B | 差 | STRESS A | STRESS B | 差 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| サイクル | 1,314,802 | 1,226,910 | **−6.7%** | 1,265,106 | 1,240,796 | **−1.9%** |
+| 時間 | 5.58 ms | 5.20 ms | −6.7% | 5.49 ms | 5.38 ms | −1.9% |
+| 退役命令 | 487,257 | 468,827 | −3.8% | 599,396 | 602,760 | +0.6% |
+| `istall` | 519,084 | 469,493 | −9.6% | 418,815 | 385,651 | −7.9% |
+| 振り分け（`insn_jx`） | 6,988 | 6,833 | −2.2% | 2,190 | 2,128 | −2.8% |
+| `dstall` | 38,058 | 30,799 | −19.1% | 36,070 | 31,785 | −11.9% |
+
+- **読み方。** 振り分けの減り（−2〜−3%）は fork の PR #6・#7 の比較と分岐の融合（2 命令を 1 回の振り分けで済ませる）、`istall` の減り（−8〜−10%）は `JS_CallInternal` の並べ替えが戻ったことと読む（推定。2 つを分けて測ってはいない）。どちらも配置の偶然では説明しにくい（命令と振り分けの数そのものが減っている）が、CLAUDE.md のビルド間の揺れ（15%）より小さいので、熱い領域をずらした像（[qjs-hotcold.md](qjs-hotcold.md) §7 の B''）では確かめていない。
+- **測っていないもの。** DERBY の評価の余裕とゲスト最大（heapprobe）、smoke と設定の試験（`smoke_device.py`・`test_settings.py` はブローカーからは走らない）、STRESS 以外の出荷アプリ。
+
+### 11.1 出荷アプリの smoke（2026-11-23、`665ad09`、fork `b227ff8`）
+
+ブローカーの `app_session`（新しく起動、20 秒、DERBY は 60 秒、キー入力なし、終わりに停止）で、ブローカーの目録で起動できる 13 本を 1 本ずつ回した。生ログの抜き出しは [logs/smoke-665ad09-20261123.txt](logs/smoke-665ad09-20261123.txt)。
+
+- 13 本とも `app_session_duration_elapsed` で終わり、ログに ERROR・EXECUTION FAILED・OOM・例外・Guru・abort・`E (` は無い（実測）。HELLO・IMU CAL・PET・COMPANION・STRESS・NET CHECK・TLS CYCLE・MEGADEMO・GRID LAB・VIDEO LAB・LCD CATCH・DERBY（デモレースが FINISH まで）・BIG WAVE。
+- 停止後のホームの空きは 221,368 → … → 220,544 B で、後半の 6 本は同じ値（漏れは見えない）。下がった 2 段（STRESS −580 B で最大の連続領域が 73,728 → 65,536、NET CHECK −496 B）は、Shiki のヒープと無線を初めて使った時と重なる（推定）。TLS CYCLE の直後だけ 186,776 B だが、次のアプリの前には戻っている（無線の後片付けが停止の行より後に走ると読む。推定）。
+- MEGADEMO と DERBY は `MEM_PRESSURE`（情報の行）を出したが、拒否も失敗も無い。
+- **走らせていないもの**: ブローカーが起動できないアプリ（MUSIC PLAYER は常駐の overlay、PLAYGROUND・TUTORIAL・WORK は動的ソース、DESK CLOCK は overlay、VM PROBE）と、目録に無い SHIKI TEST/DATA/API・CYCLE BENCH・DRAW COST・MESH BENCH。`smoke_device.py`（20 周の起動・停止）、`test_settings.py`、heapprobe（DERBY の評価の余裕）は生のシリアルのコマンドが要り、ブローカーからは走らせられない。
+
+### 11.2 fork PR #13（`f1d02d8`、`d857533`）の実機の確認（2026-11-23）
+
+`turnperf` 構成の像を 1 回焼き、DERBY のデモレースと STRESS を各 1 回、§11 の B（`e245a78`、同じ日の同じ機体の 2 回）と窓ごとに比べた（実測）。
+
+- 1 ターンのサイクル: DERBY +0.4%（B1 比 +0.38%、B2 比 +0.41%）、STRESS +0.3%。退役命令 ±0.1% 以内、振り分けの回数（`insn_jx`）は 6,833 / 2,128 で同じ。差は `istall` などの待ちの事象（1〜2 窓ずつ）に出ていて、CLAUDE.md のビルド間の揺れ（15%）よりずっと小さいので、変化なしと読む（同じ像の比較ではない）。
+- DERBY の着順・タイムは B と同じ（`order=1,6,2,3,5,7,8,4`）。STRESS は `oom=0 err=0`、評価後のゲストは `js=42832`（B は 42,800）。
+- smoke（同じ像、各 15 秒、キー入力なし）: HELLO・PET・MEGADEMO・GRID LAB・LCD CATCH・BIG WAVE・NET CHECK が最後まで動き、エラーの行は無い。停止後のホームの空きは 220,776 B で毎回同じ。PET の `jobs dropped at stop` と MEGADEMO の `MEM_PRESSURE` は §11.1 と同じ（この変更より前から）。
+- 実機は計測前の像（`60c4d8f`、`ay_characters`）に戻した。

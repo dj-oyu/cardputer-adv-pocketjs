@@ -1,6 +1,6 @@
 """The same program three ways, for comparing evaluation peaks
 (docs/vm/eval-peak.md section 9): one global script, three global scripts read
-with pocket.app.load(), and three ES modules reached by static import.
+with kobako.app.load(), and three ES modules reached by static import.
 
   python tools/heapprobe_import_gen.py OUTDIR [--parts N] [--app ID]
 
@@ -104,7 +104,7 @@ def main():
         write(f'imp_m{k}.mjs', body + f'export {{ p{k}_run }};\n')
         lst += [f'imps{k} imp_s{k}.js', f'impm{k} imp_m{k}.mjs']
     write('imp_chunks.txt', '\n'.join(lst) + '\n')
-    load = ''.join(f"pocket.app.load('imps{k}');" for k in range(1, n + 1)) + tail
+    load = ''.join(f"kobako.app.load('imps{k}');" for k in range(1, n + 1)) + tail
     imp = ''.join(f"import {{ p{k}_run }} from 'impm{k}';" for k in range(1, n + 1)) + tail
     write('imp_entry_load.js', load)
     write('imp_entry_import.mjs', imp)

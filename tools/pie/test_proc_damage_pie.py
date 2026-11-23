@@ -1,4 +1,4 @@
-"""Instruction-level check of pocket_shiki_frame.c's damage_pie_min/max
+"""Instruction-level check of kobako_shiki_frame.c's damage_pie_min/max
 (frame_damage's PIE bounding box, docs/vm/qjs-observe.md sec.19): each lane
 of the 40 halfwords out is the min (max) of that halfword over the groups."""
 
@@ -8,7 +8,7 @@ import random
 from piesim import Sim, extract_asm, load16, store16
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "main/pocket/pocket_shiki_frame.c"
+SOURCE = ROOT / "main/kobako/kobako_shiki_frame.c"
 LO, HI, SEG, OUT = 0x100, 0x110, 0x200, 0x2000
 
 

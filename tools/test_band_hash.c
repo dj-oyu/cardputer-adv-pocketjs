@@ -1,9 +1,9 @@
-// Host test of main/pocket/proc_band_hash.h against the murmur3 entry hash it
+// Host test of main/kobako/proc_band_hash.h against the murmur3 entry hash it
 // replaced (docs/vm/qjs-observe.md sec.22): avalanche (every input bit
 // flips every output bit with p ~ 0.5) and collisions on structured inputs
 // (coordinates and colours that differ a little, as frames do), compared
 // with what a random 32-bit function gives.
-//   gcc -std=gnu11 -O2 -Wall -Wextra -Werror -Imain -Imain/pocket tools/test_band_hash.c -o /tmp/t && /tmp/t
+//   gcc -std=gnu11 -O2 -Wall -Wextra -Werror -Imain -Imain/kobako tools/test_band_hash.c -o /tmp/t && /tmp/t
 #include "proc_band_hash.h"
 #include <math.h>
 #include <stdio.h>

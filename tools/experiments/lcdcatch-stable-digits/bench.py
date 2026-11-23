@@ -11,14 +11,14 @@ static size_t lc_frame_peak;
 static uint64_t lc_clock(clockid_t id){struct timespec t;clock_gettime(id,&t);return (uint64_t)t.tv_sec*1000000000+t.tv_nsec;}
 static int lc_tick(int index){
  if(lc_bot){int lane=(int)num(BOT),pl=(int)num("lcdCatch.pl");const char *key=lane>=0&&lane<pl?"a":lane>pl?"d":NULL;if(key){edge(key,true);edge(key,false);}}
- if(lc_input){const char *key=lc_tick_n++&1?"d":"a";edge(key,true);edge(key,false);}pocket_input_pump(0);
+ if(lc_input){const char *key=lc_tick_n++&1?"d":"a";edge(key,true);edge(key,false);}kobako_input_pump(0);
  JSValue b=JS_NewInt32(ctx,0);size_t calls=n_alloc,bytes=b_alloc,base=cur_bytes;turn_hi=base;
  uint64_t cpu=lc_clock(CLOCK_THREAD_CPUTIME_ID),start=lc_clock(CLOCK_MONOTONIC);
  JSValue v=JS_Call(ctx,lc_fn,JS_UNDEFINED,1,&b);
  uint64_t wall=lc_clock(CLOCK_MONOTONIC)-start,dt=lc_clock(CLOCK_THREAD_CPUTIME_ID)-cpu;
  if(JS_IsException(v)){JS_FreeValue(ctx,v);return 3;}JS_FreeValue(ctx,v);
  size_t nc=n_alloc-calls,nb=b_alloc-bytes,rise=turn_hi-base;if(index>=0&&turn_hi>lc_frame_peak)lc_frame_peak=turn_hi;
- JSContext *jobs;while(JS_ExecutePendingJob(rt,&jobs)>0){}pocket_kasane_end_turn();
+ JSContext *jobs;while(JS_ExecutePendingJob(rt,&jobs)>0){}kobako_kasane_end_turn();
  size_t pc=n_alloc,pb=b_alloc;int32_t mode,score;v=JS_GetProperty(ctx,lc_state,lc_mode);JS_ToInt32(ctx,&mode,v);JS_FreeValue(ctx,v);v=JS_GetProperty(ctx,lc_state,lc_score);JS_ToInt32(ctx,&score,v);JS_FreeValue(ctx,v);if(pc!=n_alloc||pb!=b_alloc)return 4;
  start=lc_clock(CLOCK_MONOTONIC);present();uint64_t pr=lc_clock(CLOCK_MONOTONIC)-start;
  if(index>=0){lc_rows[index]=(typeof(lc_rows[0])){wall,dt,pr,nc,nb,rise,mode,score};for(size_t i=0;i<sizeof panel;i++){lc_hash^=((unsigned char*)panel)[i];lc_hash*=1099511628211ull;}}

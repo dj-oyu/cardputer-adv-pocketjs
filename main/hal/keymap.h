@@ -26,7 +26,7 @@ bool keymap_poll(keystroke_t *out);
 bool keymap_shift(void);
 bool keymap_fn(void);
 
-// Physical key names for pocket.input.keys (docs/api/common-api.md section 6),
+// Physical key names for kobako.input.keys (docs/api/common-api.md section 6),
 // indexed row*14+col as in keystate.h. keymap_key_name writes the canonical
 // name ("e", ";", "enter", "shift"...) into buf and returns false outside the
 // matrix; keymap_key_index takes a canonical name or an alias (up/down/left/
@@ -34,7 +34,7 @@ bool keymap_fn(void);
 bool keymap_key_name(int index, char buf[8]);
 int keymap_key_index(const char *name);
 
-#ifdef POCKET_KEYTEST
+#ifdef KOBAKO_KEYTEST
 // Diagnostic builds: one USB byte of a key-injection frame (keymap.c). True
 // when the byte was taken.
 bool keymap_inject_usb(uint8_t c);

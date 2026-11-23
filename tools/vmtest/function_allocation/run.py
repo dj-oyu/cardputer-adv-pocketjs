@@ -113,7 +113,7 @@ def main():
             for variant in (['o2', 'asan'] if a.variant == 'all' else [a.variant]):
                 label = f'{"m32" if a.m32 else "native"}-{mode}-{debug}-{variant}' + suffix
                 env = dict(os.environ, VMTEST_QJS=str(folder), VMTEST_OUT=str(OUT / label),
-                           VMTEST_CFLAGS=flags + (' -DCONFIG_POCKET_VM_STRIP_DEBUG=1' if debug == 'strip' else ''),
+                           VMTEST_CFLAGS=flags + (' -DCONFIG_QJS_LEAN_STRIP_DEBUG=1' if debug == 'strip' else ''),
                            JOBS=os.environ.get('JOBS', '8'))
                 run(label + '-build', ['bash', 'tools/vmtest/build.sh', variant], env)
                 if mode == 'candidate':
@@ -136,7 +136,7 @@ def main():
                         '                 js_malloc(ctx, size + JS_FUNCTION_RESERVE);\n'
                         '    fa_function_allocation_active = 0;')
                     (frame_source / 'quickjs.c').write_text(frame_code)
-                    command = ['gcc', '-std=gnu11', '-w', '-DQUICKJS_NG_BUILD', '-D_GNU_SOURCE',
+                    command = ['gcc', '-std=gnu11', '-w', '-DQUICKJS_NG_BUILD', '-DQJS_LEAN_LAZY_BUILTINS=1', '-D_GNU_SOURCE',
                         '-I', str(OUT / label / 'include'), '-I', str(frame_source), *cflags,
                         *shlex.split(env['VMTEST_CFLAGS']),
                         *(['-DFA_EXPECT_ALIGN8'] if a.m32 else []),

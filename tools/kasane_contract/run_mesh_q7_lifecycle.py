@@ -12,7 +12,7 @@ def run(cmd,*args,**kwargs):
  cmd=list(map(str,cmd))
  if cmd and cmd[0]=='cc':
   cmd+=['-I'+str(out)]
-  if any(x.endswith('/pocket_shiki_frame.c') for x in cmd):
+  if any(x.endswith('/kobako_shiki_frame.c') for x in cmd):
    cmd+=[str(ROOT/'main/ui/kasane/ksn_mesh_prepared.c'),str(ROOT/'main/ui/kasane/ksn_mesh_q7_certified.c')]
   cmd=[x.replace('/test_mesh_depth_qjs.c','/test_mesh_q7_lifecycle.c') for x in cmd]
  if 'env' in kwargs:kwargs['env']=dict(kwargs['env'],ASAN_OPTIONS='detect_leaks=0:abort_on_error=1')

@@ -18,14 +18,14 @@ motion ../lib/ayatsuri_motion.js
 ```
 
 appは `display.kasane`、`kasane.shiki`、`kasane.shapes` の通常のcapabilityを必要とする。
-`pocket.app.load('native-scene')` と `pocket.app.load('motion')` をsetup中に一度ずつ
+`kobako.app.load('native-scene')` と `kobako.app.load('motion')` をsetup中に一度ずつ
 呼び、app所有の検証済みAYNM ArrayBufferを使う。任意ファイルの読込み・認可を
 libraryが代行する機能ではない。
 
 ```js
-pocket.app.load('native-scene');
-pocket.app.load('motion');
-const model = pocket.ayatsuri.modelOpen(modelBuffer);
+kobako.app.load('native-scene');
+kobako.app.load('motion');
+const model = kobako.ayatsuri.modelOpen(modelBuffer);
 const scene = AyatsuriNative.scene({model,
   camera: {position:[0,0,400], target:[0,0,0], zoom:1, center:[120,67]},
   light: {direction:[0,0,1], color:0xffffff}});
@@ -35,7 +35,7 @@ const track = AyatsuriMotion.track(new Float32Array([
 ]), {stride:2, timeUnit:'ms'});
 const playback = AyatsuriMotion.performance({track,channels:['time','angle']});
 const rotation=[0,0,0], patch={rotation};
-const P=pocket.kasane.shiki;
+const P=kobako.kasane.shiki;
 function draw(timeMs) { // Called by the app's clock/input/lifecycle adapter.
   const pose=playback.evaluate(timeMs); // Borrowed reusable output.
   rotation[2]=pose.angle; joint.place(patch);
@@ -119,7 +119,7 @@ snapshot/workspaceを分けて表示する。cold/arenaとtyped workはguestとr
 内数なので重ねて足さない。
 
 warm allocationは再利用patchと `JS_Call` を使い、frameごとの `JS_Eval` parseを除いた
-scene/motion/submit/present範囲を計数する。実 `pocket_app_load.c` と既存host chunk tableで
+scene/motion/submit/present範囲を計数する。実 `kobako_app_load.c` と既存host chunk tableで
 chunkロードと冪等性も検査する。namespaceはeager host shimで、製品lazy登録の総メモリと
 同じではない。host chunk file buffer/name/pathの要求bytesも別記してtotalへ含める
 （製品の同sourceはimmutable flash）。hostの静的panel・比較用buffer・ledger、

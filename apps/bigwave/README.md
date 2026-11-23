@@ -1,6 +1,6 @@
 # BIG WAVE（`apps/bigwave/big_wave.js`）
 
-崩れていく大波の面を、サーファーの背後・少し上（TPS）から見て滑るゲーム。描画は `pocket.kasane.shiki` の線分だけ（塗りも隠面消去も無い）。メニュー行は `local.bigwave`（APPS の BIG WAVE）。設計・検証・実機で詰める項目は [docs/apps/big-wave.md](../../docs/apps/big-wave.md)。ここはソースを読む人のための要点。
+崩れていく大波の面を、サーファーの背後・少し上（TPS）から見て滑るゲーム。描画は `kobako.kasane.shiki` の線分だけ（塗りも隠面消去も無い）。メニュー行は `local.bigwave`（APPS の BIG WAVE）。設計・検証・実機で詰める項目は [docs/apps/big-wave.md](../../docs/apps/big-wave.md)。ここはソースを読む人のための要点。
 
 ## 操作
 
@@ -30,12 +30,12 @@
 - **式は Shiki の組み込みの表（`bigwave.<name>`）。** `big_wave_prog.js` の `@shiki` 関数をビルドが flash の表にし、チャンクからは消す（`chunks.txt` の `prog`。アプリは読み込まない）。カメラ（消失点 160, 56、断面の間隔 1.8 m）と波の断面（`PF`）は式の中の定数で、`C`・`PF` と同じ値を保つこと。登録の引数は色と分割数（セットと負荷で変わる分）だけ。
 - **Shiki への移行（2026-11-02、v2.0 の手順 3）。** 旧版は MEGADEMO と同じ文字列表記（1 文字の命令）をアプリが実行時に復号して float の VM へ登録していた。`tools/games/bigwave_shiki/` が旧版のゲームを Node で走らせて全 draw（21,455）を捕らえ、旧い命令列（double）・新しい `@shiki` 関数（double）・Shiki の固定小数を比べた: 翻訳の差は最大 2.3e-5 px（旧い定数の float 丸め）、固定小数の誤差は最大 0.017 px（`se`）、画素がずれた端点は 539／1,200,452。host の検査（`run_big_wave.py`、ASan と m32）は全 PASS、全 draw が DONE。ゲストの評価の山は m32 で 121,484 B。sin の位相（`s.t * .21` など）は 2π で折り返して渡す（Shiki の sin は Q16 のラジアンで ±32,768 まで）。
 - **実機（dedda13、2026-11-02、入力なしのデモ画面で約 20 秒）。** 読み込みの失敗なし（`BIGWAVE READY plans=6`）、ターン 8.3〜9.7 ms・描画 4.4〜4.7 ms で 30 fps、起動後の空き 73,808 B（ゲスト 71,792 B）、Shiki heap 49,152 B。走行中（入力あり）の負荷はまだ測っていない。ログは [docs/kasane/logs/bigwave-shiki-20261102-dedda13.txt](../../docs/kasane/logs/bigwave-shiki-20261102-dedda13.txt)。
-- 音は `pocket.audio.tone`（1 声）。鳴っている間の次の音は捨てずに短いキューで待たせる。ノイズもミキシングも無いので、波の音は低い短音で代用した。アプリの音はホームの BGM を止める（`pocket_av_background_stop("tone")`）。
+- 音は `kobako.audio.tone`（1 声）。鳴っている間の次の音は捨てずに短いキューで待たせる。ノイズもミキシングも無いので、波の音は低い短音で代用した。アプリの音はホームの BGM を止める（`kobako_av_background_stop("tone")`）。
 
 ## ホストで遊ばせる
 
 ```bash
-# WSL。実物の QuickJS・pocket.kasane・pocket.input.keys で台本とボットを流し、全フレームを検証する
+# WSL。実物の QuickJS・kobako.kasane・kobako.input.keys で台本とボットを流し、全フレームを検証する
 python3 tools/games/run_big_wave.py            # ASan/UBSan
 python3 tools/games/run_big_wave.py --m32      # 実機と同じ 8 B JSValue（ゲストヒープの数字はこちら）
 python3 tools/games/run_big_wave.py --sheet    # docs/apps/big-wave-preview.png を作り直す

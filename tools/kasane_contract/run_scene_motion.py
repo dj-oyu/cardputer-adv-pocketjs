@@ -12,7 +12,7 @@ def main():
     chunk_list = ROOT/'tools/ayatsuri/model/scene_motion_chunks.txt'
     subprocess.run(['python3', 'tools/make_app_chunks.py', str(out/'generated'), str(chunk_list)], cwd=ROOT, check=True)
     binary, out, env = build_harness('tools/kasane_contract/test_scene_motion_host.c', 'scene-motion-host',
-                                   ['main/pocket/pocket_app_load.c', 'tools/hostshim/app_chunks_host.c'])
+                                   ['main/kobako/kobako_app_load.c', 'tools/hostshim/app_chunks_host.c'])
     inputs = ['apps/lib/ayatsuri_model.js', 'apps/lib/ayatsuri_motion.js',
               'tools/kasane_contract/scene_motion_scenario.js', '.cache/ayatsuri-native/scene-motion.aynm',
               '.cache/ayatsuri-native/scene-motion-double.aynm']

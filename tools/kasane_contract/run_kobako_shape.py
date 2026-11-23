@@ -1,0 +1,35 @@
+"""kobako.shapes (main/kobako/kobako_shape.c) against its contract,
+docs/api/shapes.md: tools/kasane_contract/shape_contract.js run by
+test_kobako_shape.c, built with the host's C compiler and the tree's QuickJS.
+Host only."""
+from __future__ import annotations
+
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+QJS = ROOT / "components/quickjs-ng/quickjs-ng"
+OUT = ROOT / ".cache/kobako_shape"
+
+
+def main() -> int:
+    cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
+    if not cc:
+        raise SystemExit("No host C compiler found")
+    OUT.mkdir(parents=True, exist_ok=True)
+    binary = OUT / "test_kobako_shape"
+    sources = [*(QJS / n for n in ("dtoa.c", "libregexp.c", "libunicode.c", "quickjs.c", "quickjs-vm.c")),
+               ROOT / "main/kobako/kobako_shape.c", ROOT / "main/ayatsuri/ayatsuri_model.c", ROOT / "main/ayatsuri/ayatsuri_visibility.c", ROOT / "main/ayatsuri/compact_opaque.c", ROOT / "main/ui/kasane/ksn_mesh_depth.c", ROOT / "main/ui/kasane/ksn_shiki_frame.c", ROOT / "tools/kasane_contract/proc_native_weak.c", ROOT / "tools/hostshim/kobako_api_stub.c",
+               ROOT / "tools/kasane_contract/test_kobako_shape.c"]
+    subprocess.run([cc, "-std=gnu11", "-O1", "-g", "-ffp-contract=off", "-fsanitize=address,undefined",
+                    "-DQUICKJS_NG_BUILD", "-DQJS_LEAN_LAZY_BUILTINS=1", "-D_GNU_SOURCE", "-I", str(QJS), "-I", str(ROOT / "main/kobako"),
+                    "-I", str(ROOT / "main"), "-I", str(ROOT / "main/ui/kasane"), "-I", str(ROOT / "tools/hostshim"),
+                    *map(str, sources), "-lm", "-o", str(binary)], cwd=ROOT, check=True)
+    return subprocess.run([str(binary), str(ROOT / "tools/kasane_contract/shape_contract.js")], cwd=ROOT,
+                          env={"ASAN_OPTIONS": "detect_leaks=0"}).returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

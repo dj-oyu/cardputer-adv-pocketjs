@@ -15,7 +15,7 @@ function prog() {
 // [LIGHT, MID, HEAVY]: stand tiers, crowd rows, dots per bay, roof arc
 // segments, rail post and turf stripe spacing (m), the crowd's head and body
 // patterns; then the crowd's skin, cloths, row shift, empty (its cells a m,
-// 2.5, go to pocket.derby as Q16: derby_view.js, derby_pan.js).
+// 2.5, go to kobako.derby as Q16: derby_view.js, derby_pan.js).
 const KN = [[3, 2, 3, 3, 8, 10, 263170, 921095], [4, 3, 4, 5, 5, 7, 1083458, 3792103],
   [5, 4, 6, 8, 4, 5, 2236962, 7829367], [0xf5d3, 0xc228, 0x3a7a, 7, -1],
   // The dust and the band (docs/apps/derby-finish-fx.md; sizes and colours

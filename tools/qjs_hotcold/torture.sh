@@ -32,8 +32,8 @@ for s in $SEEDS; do
     python "$R/tools/qjs_hotcold/selftest.py" "$B/shiki" --random 1 --seed "$s" --keep "$B/seed$s" | tail -1
     for w in $WORKLOADS; do
         D="$B/${w}_s$s"
-        "$R/tools/r5sim/fast.sh" "$D" -DR5SIM_DEVICE=1 -DR5SIM_APP="$w" -DPOCKET_QJS_HOTCOLD=use \
-            -DPOCKET_QJS_HOTCOLD_PROFILE="$B/seed$s/random0.json" > "$D.txt" 2>&1 || { cat "$D.txt"; exit 1; }
+        "$R/tools/r5sim/fast.sh" "$D" -DR5SIM_DEVICE=1 -DR5SIM_APP="$w" -DKOBAKO_QJS_HOTCOLD=use \
+            -DKOBAKO_QJS_HOTCOLD_PROFILE="$B/seed$s/random0.json" > "$D.txt" 2>&1 || { cat "$D.txt"; exit 1; }
         grep -h "hc_cc:" "$D.fast-build.log" | head -1
         if diff <(facts "$B/$w.txt") <(facts "$D.txt") > "$D.diff"; then
             echo "torture: seed $s $w: same as the plain image ($(grep -E 'R5SIM ccount turns' "$D.txt" | tr -d '\r'))"

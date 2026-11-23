@@ -100,10 +100,10 @@ RULES = [
     # included), calls, frames, the VM stack.
     ('interp-helpers', QJS, None),
     ('interp-helpers', r'\((dtoa|cutils|quickjs-libc)\.c\.obj\)', None),
-    # The pocket/Kasane side and the image's own glue (r5sim.c stands in for
+    # The kobako/Kasane side and the image's own glue (r5sim.c stands in for
     # app_session.c).
-    ('native boundary', r'\((pocket_|ksn_|app_|r5sim|jpfont|pet_|kasane)[^)]*\)', None),
-    ('native boundary', None, r'^(pocket_|ksn_|kasane_|app_)'),
+    ('native boundary', r'\((kobako_|ksn_|app_|r5sim|jpfont|pet_|kasane)[^)]*\)', None),
+    ('native boundary', None, r'^(kobako_|ksn_|kasane_|app_)'),
     ('libc/other', None, None),
 ]
 RULES_C = [(b, re.compile(o) if o else None, re.compile(n) if n else None) for b, o, n in RULES]

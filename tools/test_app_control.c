@@ -1,5 +1,5 @@
 #include "app_control.h"
-#include "pocket_wire.h"
+#include "kobako_wire.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -9,10 +9,10 @@
 
 enum { ESP_OK=0, ESP_ERR_INVALID_SIZE=1, ESP_ERR_INVALID_STATE=2, ESP_ERR_TIMEOUT=3 };
 typedef int esp_err_t;
-#define POCKET_BRIDGE_VERSION 1
-#define POCKET_BRIDGE_HEADER 12
-#define POCKET_BRIDGE_MAX_FRAME 496
-#define POCKET_BRIDGE_MAX_WIRE 995
+#define KOBAKO_BRIDGE_VERSION 1
+#define KOBAKO_BRIDGE_HEADER 12
+#define KOBAKO_BRIDGE_MAX_FRAME 496
+#define KOBAKO_BRIDGE_MAX_WIRE 995
 static uint8_t emitted[995], incoming[995], replies[256][132];
 static size_t emitted_size,incoming_size,incoming_at;
 static unsigned reply_count,starts,taps,stops;
@@ -30,7 +30,7 @@ enum { SCREEN_HOME, SCREEN_RUN };
 static int screen;
 static void *keys;
 static bool home_modal(void) { return false; }
-static bool pocket_text_active(void) { return false; }
+static bool kobako_text_active(void) { return false; }
 static bool app_can_suspend(void) { return can_suspend; }
 static esp_err_t app_suspend(void) { suspend_calls++;services_suspended=true;return suspend_result; }
 static uint32_t app_run_generation(void) { return guest_present?generation+(stop_fails?1:0):0; }
@@ -110,16 +110,16 @@ static void reset(void) {
 }
 static void make(uint8_t body[72],uint8_t op,uint32_t id,uint32_t seq,uint32_t run,uint8_t arg,const char *app) {
     memset(body,0,72);body[0]=1;body[1]=op;body[2]=60;
-    pocket_wire_write32(body+4,42);pocket_wire_write32(body+8,id);
-    pocket_wire_write32(body+12,42);pocket_wire_write32(body+16,0x12345678);
-    pocket_wire_write32(body+20,run);pocket_wire_write32(body+24,seq);
-    pocket_wire_write32(body+28,7);body[68]=arg;
+    kobako_wire_write32(body+4,42);kobako_wire_write32(body+8,id);
+    kobako_wire_write32(body+12,42);kobako_wire_write32(body+16,0x12345678);
+    kobako_wire_write32(body+20,run);kobako_wire_write32(body+24,seq);
+    kobako_wire_write32(body+28,7);body[68]=arg;
     if(app)memcpy(body+36,app,strlen(app));
 }
 static void feed(const uint8_t *body,size_t length) {
-    assert(pocket_bridge_emit_namespace('C',body,length)==ESP_OK);
+    assert(kobako_bridge_emit_namespace('C',body,length)==ESP_OK);
     memcpy(incoming,emitted,emitted_size);incoming_size=emitted_size;incoming_at=1;
-    assert(pocket_bridge_usb(incoming[0]));assert(incoming_at==incoming_size);
+    assert(kobako_bridge_usb(incoming[0]));assert(incoming_at==incoming_size);
 }
 static void inject_status(void) {
     uint8_t body[72];make(body,AC_STATUS,0,0,1,0,NULL);
@@ -130,22 +130,22 @@ static void send(uint8_t op,uint32_t id,uint32_t seq,uint32_t run,uint8_t arg,co
 }
 static uint8_t result(void) { assert(reply_count);return replies[reply_count-1][32]; }
 static uint8_t state(void) { assert(reply_count);return replies[reply_count-1][33]; }
-static uint32_t run(void) { return pocket_wire_read32(replies[reply_count-1]+20); }
-static uint32_t next(void) { return pocket_wire_read32(replies[reply_count-1]+36); }
+static uint32_t run(void) { return kobako_wire_read32(replies[reply_count-1]+20); }
+static uint32_t next(void) { return kobako_wire_read32(replies[reply_count-1]+36); }
 static void open_session(void) {
     uint8_t body[72];make(body,AC_OPEN,0,0,0,0,NULL);
-    pocket_wire_write32(body+32,90000);feed(body,72);app_control_pump(now_ms);
+    kobako_wire_write32(body+32,90000);feed(body,72);app_control_pump(now_ms);
     assert(result()==AC_OK && state()==AC_READY && next()==1);
 }
 int main(void) {
     reset();uint8_t body[72];memset(body,0,72);body[0]=1;body[1]=AC_CATALOG;body[2]=60;
     feed(body,72);app_control_pump(now_ms);
-    assert(result()==AC_OK && pocket_wire_read32(replies[0]+4)==42);
+    assert(result()==AC_OK && kobako_wire_read32(replies[0]+4)==42);
     assert(!strcmp((char *)replies[0]+52,"local.hello"));
-    pocket_wire_write32(body+24,0xffff);feed(body,72);app_control_pump(now_ms);
+    kobako_wire_write32(body+24,0xffff);feed(body,72);app_control_pump(now_ms);
     assert(result()==AC_OK && replies[1][52]==0xa5 && !strcmp((char *)replies[1]+84,"host-fixture"));
     open_session();now_ms=1000;open_session();
-    assert(pocket_wire_read32(replies[reply_count-1]+40)==89000); /* no TTL extension */
+    assert(kobako_wire_read32(replies[reply_count-1]+40)==89000); /* no TTL extension */
     send(AC_START,1,1,0,0,"missing");assert(result()==AC_UNKNOWN_APP && starts==0);
     send(AC_START,2,2,0,0,"local.vmprobe");assert(result()==AC_UNSUPPORTED && starts==0);
     send(AC_START,3,3,0,0,"local.hello");assert(result()==AC_OK && state()==AC_RUNNING && run()==1 && starts==1);
@@ -172,7 +172,7 @@ int main(void) {
     send(AC_STOP,12,12,2,0,NULL);assert(result()==AC_OK && state()==AC_STOPPED);
     send(AC_CLOSE,13,13,2,0,NULL);assert(result()==AC_OK && state()==AC_NO_SESSION);
     send(AC_CLOSE,13,13,2,0,NULL);assert(result()==AC_OK);
-    make(body,AC_OPEN,0,0,0,0,NULL);pocket_wire_write32(body+32,90000);feed(body,72);app_control_pump(now_ms);
+    make(body,AC_OPEN,0,0,0,0,NULL);kobako_wire_write32(body+32,90000);feed(body,72);app_control_pump(now_ms);
     assert(result()==AC_STALE_SESSION); /* retired OPEN cannot clear dedup */
     send(AC_START,14,14,0,0,"local.hello");assert(result()==AC_STALE_SESSION && starts==3);
 
@@ -187,7 +187,7 @@ int main(void) {
     reset();open_session();send(AC_START,1,1,0,0,"local.hello");
     now_ms=90000;app_control_pump(now_ms);assert(stops==1);
     send(AC_TAP,2,2,1,1,NULL);assert(result()==AC_STALE_SESSION && taps==0);
-    make(body,AC_OPEN,0,0,0,0,NULL);pocket_wire_write32(body+32,90000);feed(body,72);app_control_pump(now_ms);assert(result()==AC_STALE_SESSION);
+    make(body,AC_OPEN,0,0,0,0,NULL);kobako_wire_write32(body+32,90000);feed(body,72);app_control_pump(now_ms);assert(result()==AC_STALE_SESSION);
     reset();open_session();send(AC_START,1,1,0,0,"local.hello");stop_fails=true;
     now_ms=90000;app_control_pump(now_ms);send(AC_STATUS,0,0,1,0,NULL);assert(state()==AC_NEEDS_REVIEW);
     stop_fails=false;app_control_pump(now_ms);send(AC_STATUS,0,0,1,0,NULL);assert(state()==AC_STOPPED);
@@ -249,21 +249,21 @@ int main(void) {
     /* B and C parser isolation: fill guest inbox; native catalog still works. */
     reset();uint8_t legacy[12]={1,6};
     for(unsigned i=0;i<2;i++) {
-        assert(pocket_bridge_emit(legacy,12)==ESP_OK);memcpy(incoming,emitted,emitted_size);
-        incoming_size=emitted_size;incoming_at=1;assert(pocket_bridge_usb(incoming[0]));
+        assert(kobako_bridge_emit(legacy,12)==ESP_OK);memcpy(incoming,emitted,emitted_size);
+        incoming_size=emitted_size;incoming_at=1;assert(kobako_bridge_usb(incoming[0]));
     }
     assert(atomic_load(&inbox_head)==2);
     memset(body,0,72);body[0]=1;body[1]=AC_CATALOG;body[2]=60;
     feed(body,72);app_control_pump(now_ms);assert(result()==AC_OK && atomic_load(&inbox_head)==2);
-    assert(!pocket_bridge_usb('a'));
+    assert(!kobako_bridge_usb('a'));
     unsigned recorded=reply_count;
-    assert(pocket_bridge_emit_namespace('C',body,72)==ESP_OK);
+    assert(kobako_bridge_emit_namespace('C',body,72)==ESP_OK);
     emitted[emitted_size-3]^=1;memcpy(incoming,emitted,emitted_size);incoming_size=emitted_size;incoming_at=1;
-    assert(pocket_bridge_usb(incoming[0]));app_control_pump(now_ms);assert(reply_count==recorded);
+    assert(kobako_bridge_usb(incoming[0]));app_control_pump(now_ms);assert(reply_count==recorded);
     /* A trailing odd nibble is malformed, rather than silently ignored. */
-    assert(pocket_bridge_emit_namespace('C',body,72)==ESP_OK);
+    assert(kobako_bridge_emit_namespace('C',body,72)==ESP_OK);
     memcpy(incoming,emitted,emitted_size-1);incoming[emitted_size-1]='a';incoming[emitted_size]='\n';
-    incoming_size=emitted_size+1;incoming_at=1;assert(pocket_bridge_usb(incoming[0]));
+    incoming_size=emitted_size+1;incoming_at=1;assert(kobako_bridge_usb(incoming[0]));
     app_control_pump(now_ms);assert(reply_count==recorded);
     assert(atomic_load(&inbox_dropped)==0); /* malformed C does not disturb B */
     printf("APP_CONTROL PASS: identity/lifecycle/order/dedup/ACK loss/queue/rate/TTL/legacy CRC; static_bytes=%zu\n",app_control_static_bytes());

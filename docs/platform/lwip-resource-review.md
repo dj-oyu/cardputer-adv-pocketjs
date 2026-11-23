@@ -9,7 +9,7 @@
 - **計算**: 実測値や IDF のソースの定数からの算術。
 - **推定**: 根拠はあるが測っていない値（Kconfig の help の「約 1.6 KB」など）。
 
-測ったビルド: **`build_heapmap`**（2026-11-12 12:08 の map / ELF / sdkconfig。通常ビルドとの差は `CONFIG_POCKET_HEAP_MAP=y` だけ）。ネットワーク関連の `CONFIG_*`（242 行）は、手元の 7 つのビルドディレクトリ（`build_chunk` `build_gcstats` `build_heapmap` `build_icab` `build_obs` `build_origin` `build_origin2`）で同一（`diff` で確認）。IDF のソースは `/root/.espressif/v6.0.1/esp-idf`（v6.0.1）。
+測ったビルド: **`build_heapmap`**（2026-11-12 12:08 の map / ELF / sdkconfig。通常ビルドとの差は `CONFIG_KOBAKO_HEAP_MAP=y` だけ）。ネットワーク関連の `CONFIG_*`（242 行）は、手元の 7 つのビルドディレクトリ（`build_chunk` `build_gcstats` `build_heapmap` `build_icab` `build_obs` `build_origin` `build_origin2`）で同一（`diff` で確認）。IDF のソースは `/root/.espressif/v6.0.1/esp-idf`（v6.0.1）。
 
 ## 1. 結論
 
@@ -17,26 +17,26 @@
 2. **残る静的な DIRAM は約 25 KB で、うち約 18 KB は Wi-Fi のバイナリ（`libnet80211` `libpp` `libphy`）。設定では減らない。** `CONFIG_ESP_PHY_IRAM_OPT` は S3 では何もしない（`esp_phy/linker.lf` と Kconfig の help: esp32c2 だけ）。
 3. **効くのは「どこに置かれるか」と「無線を上げている間の量」。** 恒久ブロックの位置（§4）で約 42 KB の連続領域が得られる見込み（計算、§6.6 の地図から）。無線を上げている間の量は、Wi-Fi の静的 RX バッファで約 3 KB 減らせる見込み（推定、§5 の C1）。
 4. **§6.6 の 6 個の恒久ブロックのうち、4 個は lwIP のものではない。** カウンティングセマフォ 1 個と pthread の 12 B × 3 個は、Wi-Fi ドライバが「API を呼んだタスクごと」に作るセマフォ（`esp_wifi/esp32s3/esp_adapter.c:222`）と、その pthread のスレッド局所の記録。常駐の `wifi` タスクが持つので消えない。**`esp_netif_init()` を早く呼ぶだけでは、この 4 個は動かない**（§4.2）。
-5. **`sdkconfig.defaults` のコメント「nothing in this firmware streams」は古い。** いまは `pocket.net` の HTTP(S) と `opus_net` の HTTP ストリームがある（§2）。バッファを減らす案は、時刻同期だけでなく、この 2 つで確かめる必要がある。
+5. **`sdkconfig.defaults` のコメント「nothing in this firmware streams」は古い。** いまは `kobako.net` の HTTP(S) と `opus_net` の HTTP ストリームがある（§2）。バッファを減らす案は、時刻同期だけでなく、この 2 つで確かめる必要がある。
 
 ## 2. ファームがネットワークを何に使っているか
 
 | 利用者 | 場所 | 通信 | 同時数 | タスクのスタック |
 | --- | --- | --- | --- | --- |
-| 時刻同期（自動・手動） | `main/pocket/wifi_time.c`、`net_autosync.c`、`net_service.c` | DHCP、DNS 1 件、SNTP（UDP、`pool.ntp.org`、サーバ 1 つ） | 1 | 常駐の `wifi` 3,072 B と `timesync` 2,048 B（RTC FAST。`wifi-autostart.md` §13） |
-| `pocket.net` の HTTP / HTTPS | `main/pocket/pocket_net.c` | `esp_http_client`（バッファ 512 B）、TLS 1.2 クライアント、証明書バンドル | 1 件ずつ（2 件目は BUSY） | `pocket_http` 6,144 B（要求ごとに作って消す） |
-| Opus のストリーム | `main/pocket/opus_net.c` | `esp_http_client` の GET を読み続ける | 1 | `opusnet` 6,144 B（再生ごと） |
+| 時刻同期（自動・手動） | `main/kobako/wifi_time.c`、`net_autosync.c`、`net_service.c` | DHCP、DNS 1 件、SNTP（UDP、`pool.ntp.org`、サーバ 1 つ） | 1 | 常駐の `wifi` 3,072 B と `timesync` 2,048 B（RTC FAST。`wifi-autostart.md` §13） |
+| `kobako.net` の HTTP / HTTPS | `main/kobako/kobako_net.c` | `esp_http_client`（バッファ 512 B）、TLS 1.2 クライアント、証明書バンドル | 1 件ずつ（2 件目は BUSY） | `kobako_http` 6,144 B（要求ごとに作って消す） |
+| Opus のストリーム | `main/kobako/opus_net.c` | `esp_http_client` の GET を読み続ける | 1 | `opusnet` 6,144 B（再生ごと） |
 | スキャン | `wifi_time.c`（`radio_up(false)`） | 802.11 のスキャンだけ。IP は使わない | 1 | `wifi` タスク |
 
 - 3 つとも map に入っている（実測（host）: `.text.http_task`、`.text.net_task_fn`、`.text.opus_net_start`、`.text.esp_crt_bundle_attach` がある）。
 - **使っていないもの**: 待ち受け（listen / accept）、UDP ソケット（SNTP と DNS は lwIP の内部 PCB）、IPv6、マルチキャスト、ループバック（自分宛て）、TLS サーバ、エンタープライズ認証、SoftAP、ESP-NOW、mDNS の応答。
-- ソケットの同時数は最大 2（`pocket_http` と `opusnet` が重なる場合。計算）。`CONFIG_LWIP_MAX_SOCKETS=4` は表 `sockets[]` が 80 B（実測（host））なので、これ以上削る意味は無い。
+- ソケットの同時数は最大 2（`kobako_http` と `opusnet` が重なる場合。計算）。`CONFIG_LWIP_MAX_SOCKETS=4` は表 `sockets[]` が 80 B（実測（host））なので、これ以上削る意味は無い。
 
 ## 3. いま何に払っているか
 
 ### 3.1 静的な DIRAM（無線を使わないブートでも払う）
 
-実測（host）: `python -m esp_idf_size --archives --format csv build_heapmap/cardputer_pocketjs.map` と、map の節ごとの集計。
+実測（host）: `python -m esp_idf_size --archives --format csv build_heapmap/cardputer_kobako.map` と、map の節ごとの集計。
 
 | アーカイブ | DIRAM 計 | `.bss` | `.data` | IRAM の `.text` | 主な中身 |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -59,7 +59,7 @@
 
 ### 3.2 最初の `esp_netif_init()` で恒久に残るもの
 
-記録: 約 4.8 KiB（`linkRetainedBytes` 4,915 B、実測（実機）、`pocket_net.c:1392`）。`esp_netif_deinit()` は `ESP_ERR_NOT_SUPPORTED` を返す（`esp_netif/lwip/esp_netif_lwip.c:610-624` で確認）。
+記録: 約 4.8 KiB（`linkRetainedBytes` 4,915 B、実測（実機）、`kobako_net.c:1392`）。`esp_netif_deinit()` は `ESP_ERR_NOT_SUPPORTED` を返す（`esp_netif/lwip/esp_netif_lwip.c:610-624` で確認）。
 
 ソースから数えた内訳（計算。ブロックの大きさは §6.6 の実測（実機）と ELF の `sizeof`）:
 
@@ -79,14 +79,14 @@
 
 | もの | 値 | 種別 |
 | --- | ---: | --- |
-| `esp_wifi_init` | 27,192 B | 実測（実機）、2026-09-07、`pocket_net.c` の `NET_RADIO_MIN_FREE` のコメント |
+| `esp_wifi_init` | 27,192 B | 実測（実機）、2026-09-07、`kobako_net.c` の `NET_RADIO_MIN_FREE` のコメント |
 | netif とイベントループ | 約 21,000 B | 実測（実機）、同上（初回は §3.2 の恒久分を含む） |
 | うち静的 RX バッファ | 4 × 約 1.6 KB ＝ 約 6.4 KB | 推定（Kconfig の help の値） |
 | うち管理フレーム用の静的 RX バッファ | 5 × 約 500 B ＝ 約 2.5 KB | 推定（同上） |
 | イベントループ `sys_evt` のスタック | 2,304 ＋ 512 ＝ 2,816 B | 計算（`esp_task.h:52`） |
 | イベントのキュー | 32 件 × 16 B ＝ 512 B | 計算（`sizeof(esp_event_post_instance_t)` は 16、実測（host）） |
 | 動的 RX / TX バッファ | 上限 8 個ずつ、1 個はフレームの大きさ | 上限は設定値。実際の量は未測定 |
-| TLS のハンドシェイク | 空き −7,172 B、最大ブロックから 15,360 B | 実測（実機）、2026-09-08、`pocket_net.c:59-66`（1 サーバ、1 回） |
+| TLS のハンドシェイク | 空き −7,172 B、最大ブロックから 15,360 B | 実測（実機）、2026-09-08、`kobako_net.c:59-66`（1 サーバ、1 回） |
 
 ## 4. 恒久ブロックの位置（§6.6 の 6 個）
 
@@ -107,7 +107,7 @@
 
 - **効く範囲**: tcpip のスタック、TCB、mbox、ミューテックス、API 用セマフォ 2 個、lwIP の pthread キー。§6.6 の計算どおり、11,792 ＋ 3,584 ＋ 26,780 で約 42 KB の連続領域になる見込み（計算）。
 - **効かない範囲**: Wi-Fi のタスク別セマフォと pthread の 3 個（2,560 と 11,792 の間）。これも低い番地へ寄せるなら、**常駐の `wifi` タスクから**、起動の早い時点で `esp_wifi_init()` → `esp_wifi_deinit()` を 1 回通す必要がある（推定。セマフォが作られるのが `esp_wifi_init` の中か、その後の `esp_wifi_set_mode` などの API 呼び出しかは blob の中で、未確認）。費用は起動時の一過性の約 27 KB と時間（未測定）。寄せて得るのは 2,560 ＋ 11,792 ＋ α ＝ 約 14.5 KB の穴 1 個（計算）で、42 KB の方より価値は小さい。**先に esp_netif の分だけ動かして地図を取り直し、この 4 個がまだ大きな穴を分けているかを見てから決めるのがよい。**
-- **条件の付け方**: 「自動時刻同期が ON のとき」だけ早めると、OFF の機体で手動 sync・スキャン・`pocket.net` を最初に使ったとき、恒久ブロックはその時点の空きの真ん中に置かれる。**アプリの実行中に初めて使うと、アプリが終わった後も残る。** 条件を「資格情報が保存されている」にする方が、取りこぼしが少ない（資格情報が無ければ、IP を使う経路は動かない）。払うのは、無線を一度も使わないブートでの約 4.1 KB（計算、§3.2）。
+- **条件の付け方**: 「自動時刻同期が ON のとき」だけ早めると、OFF の機体で手動 sync・スキャン・`kobako.net` を最初に使ったとき、恒久ブロックはその時点の空きの真ん中に置かれる。**アプリの実行中に初めて使うと、アプリが終わった後も残る。** 条件を「資格情報が保存されている」にする方が、取りこぼしが少ない（資格情報が無ければ、IP を使う経路は動かない）。払うのは、無線を一度も使わないブートでの約 4.1 KB（計算、§3.2）。
 - **`esp_netif_init()` に前提は無い**（NVS もイベントループも要らない。乱数は `esp_fill_random` で、IDF のコメントが RF 無しでの使用を認めている。`esp_netif_lwip.c:556-565`）。ホーム画面を作る前に呼べる。
 - **代替（採らなくてよい）**: `--wrap=sys_thread_new` でスタックを静的領域に置く方法もあるが、早く呼ぶ方が単純で、同じ効果になる。RTC FAST の空きは 608 B（実測（実機）、`wifi-autostart.md` §13）で、3,584 B は載らない。
 
@@ -117,7 +117,7 @@
 
 | # | 変更 | 見込み | 種別 | リスク | 実機での確かめ方 |
 | --- | --- | ---: | --- | --- | --- |
-| C1 | `CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM` 4 → 2（範囲 2〜25） | 無線を上げている間 −約 3.2 KB | 推定 | 受信の取りこぼし（混んだ電波、スキャン中、Opus のストリーム）。AMPDU RX は切ってあるので窓との整合は不要 | `RADIO_INIT ... cost=` の差。自動同期 10 回（`AUTOSYNC_DONE ok` と `ms=`）。`pocket.net` の HTTPS 12 回（既存の 12/12 の試験）。Opus のストリームを 1 曲、アンダーランのログ |
+| C1 | `CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM` 4 → 2（範囲 2〜25） | 無線を上げている間 −約 3.2 KB | 推定 | 受信の取りこぼし（混んだ電波、スキャン中、Opus のストリーム）。AMPDU RX は切ってあるので窓との整合は不要 | `RADIO_INIT ... cost=` の差。自動同期 10 回（`AUTOSYNC_DONE ok` と `ms=`）。`kobako.net` の HTTPS 12 回（既存の 12/12 の試験）。Opus のストリームを 1 曲、アンダーランのログ |
 | C2 | `CONFIG_ESP_WIFI_RX_MGMT_BUF_NUM_DEF` 5 → 3（範囲 1〜10） | 同 −約 1 KB | 推定 | スキャンで AP の取りこぼし（プローブ応答が集中する）。接続の失敗 | 同上 ＋ 設定画面のスキャンで見える AP の数を前後で比べる |
 | C3 | `CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM` 8 → 4（静的の数以上が条件。C1 と組で） | 受信が集中したときの山の上限 −約 6.4 KB | 計算（4 × 1.6 KB、フレーム最大のとき） | TCP の再送が増える。ストリームの途切れ | `AUTOSYNC_DONE min_free=`、HTTPS の本文 64 KiB の読み出し時間、Opus |
 | C4 | `CONFIG_LWIP_TCPIP_TASK_STACK_SIZE` 3,072 → 2,560（下限 2,048） | 恒久 −512 B（2,048 なら −1,024 B） | 計算 | スタックあふれ。tcpip スレッドは DHCP・DNS・SNTP・ソケットの全操作を実行する。**最大使用量は未測定** | 先に HWM を測る（プローブが要る: `uxTaskGetStackHighWaterMark(xTaskGetHandle("tiT"))` を同期・HTTPS・Opus の後に出す）。余裕が 512 B 以上残る値にする |
@@ -131,8 +131,8 @@
 
 | # | 変更 | 見込み | 種別 | リスク | 確かめ方 |
 | --- | --- | ---: | --- | --- | --- |
-| K1 | `esp_netif_init()` を起動の早い時点で呼ぶ（別作業で実装中） | 連続領域 約 42 KB（11,792 ＋ 3,584 ＋ 26,780） | 計算 | §4.2 の条件の付け方 | `CONFIG_POCKET_HEAP_MAP` の「ゲストの前」の地図を取り直す |
-| K2 | Wi-Fi のタスク別セマフォを早い時点で作らせる（`wifi` タスクから init / deinit を 1 回） | 穴 1 個が約 14.5 KB に | 計算（効果）、推定（方法） | 起動が遅くなる（未測定）。起動時に約 27 KB の一過性 | K1 の後の地図で、要るかどうかを先に判断。やるなら `CONFIG_POCKET_HEAP_ORIGIN` でブロックの番地を見る |
+| K1 | `esp_netif_init()` を起動の早い時点で呼ぶ（別作業で実装中） | 連続領域 約 42 KB（11,792 ＋ 3,584 ＋ 26,780） | 計算 | §4.2 の条件の付け方 | `CONFIG_KOBAKO_HEAP_MAP` の「ゲストの前」の地図を取り直す |
+| K2 | Wi-Fi のタスク別セマフォを早い時点で作らせる（`wifi` タスクから init / deinit を 1 回） | 穴 1 個が約 14.5 KB に | 計算（効果）、推定（方法） | 起動が遅くなる（未測定）。起動時に約 27 KB の一過性 | K1 の後の地図で、要るかどうかを先に判断。やるなら `CONFIG_KOBAKO_HEAP_ORIGIN` でブロックの番地を見る |
 | K3 | `DNS_TABLE_SIZE` 4 → 2、`ARP_TABLE_SIZE` 10 → 4（Kconfig が無い。lwip のコンポーネントへコンパイル定義を足すか、`ESP_IDF_LWIP_HOOK_FILENAME` のヘッダで定義） | 静的 −552 B、−144 B | 計算（`dns_table` 1,104 ÷ 4 ＝ 276 B / 件、`arp_table` 240 ÷ 10 ＝ 24 B / 件。実測（host）の map から） | DNS は同時に引く名前が 2 つまで（NTP と HTTP の 1 つずつで足りる）。ARP は STA なのでゲートウェイと数台 | `tools/memlog.py --map` で `dns.c.obj` `etharp.c.obj` の減少。同期と HTTPS |
 | K4 | スキャンの経路（`radio_up(false)`）で `esp_netif_init()` と netif の生成を省く | スキャンだけのブートで恒久 約 4.1 KB を払わない | 計算（量）、推定（可否） | `esp_wifi_init` は lwIP を要らない（`wifi_init.c` は `esp_netif.h` を include するだけで、呼び出しは無い。ソースで確認）が、netif 無しの `esp_wifi_start` ＋ スキャンは**実機で未確認**。K1 を「資格情報があれば常に早く呼ぶ」にするなら、この項目は不要 | 設定画面のスキャン、`SCAN_DONE` |
 
@@ -154,7 +154,7 @@
 | mbedTLS: 相手の証明書の保持、TLS 1.3、DTLS | 切ってある | `MBEDTLS_SSL_KEEP_PEER_CERTIFICATE` n ほか |
 | `CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA` | 入れても効かない見込み（推定） | 返すのは自分の秘密鍵・DHM・CA の鎖。このファームはクライアント証明書を使わず、CA は鎖ではなくバンドル（flash）で照合する |
 | エンタープライズ認証（`CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=y`） | 既にリンクされていない | `esp_eap_client.c.obj` は flash 24 B（実測（host））。`--gc-sections` が落としている |
-| lwIP のスレッド別セマフォ（`LWIP_NETCONN_SEM_PER_THREAD`） | 恒久には残らない見込み | 作るのはソケットの API を呼ぶタスク（`pocket_http`、`opusnet`）。どちらも終わるので pthread の後始末で返る。常駐の `wifi` `timesync` は esp_netif の API（`esp_netif_tcpip_exec`、自前のセマフォ）しか呼ばない（ソースで確認。実機では未確認） |
+| lwIP のスレッド別セマフォ（`LWIP_NETCONN_SEM_PER_THREAD`） | 恒久には残らない見込み | 作るのはソケットの API を呼ぶタスク（`kobako_http`、`opusnet`）。どちらも終わるので pthread の後始末で返る。常駐の `wifi` `timesync` は esp_netif の API（`esp_netif_tcpip_exec`、自前のセマフォ）しか呼ばない（ソースで確認。実機では未確認） |
 
 ### 5.4 flash だけが減るもの（DRAM には効かない）
 
@@ -162,8 +162,8 @@
 
 | 変更 | flash の見込み | 種別 | リスク |
 | --- | ---: | --- | --- |
-| `CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y` | −約 5 KB（`ssl_tls12_server.c.obj` 4,724 B ＋ `esp_ssl_srv.c.obj` 274 B） | 実測（host）の現在の大きさ | サーバは使っていない。`pocket_tls_txfix.c` の wrap がクライアント側だけで足りることを確認 |
-| 証明書バンドルを FULL → CMN | `x509_crt_bundle` 67,536 B の一部 | 実測（host）の現在の大きさ。減る量は未測定 | 一部のサイトで検証に失敗する。`pocket.net` は相手を選ばない API なので、勧めない |
+| `CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y` | −約 5 KB（`ssl_tls12_server.c.obj` 4,724 B ＋ `esp_ssl_srv.c.obj` 274 B） | 実測（host）の現在の大きさ | サーバは使っていない。`kobako_tls_txfix.c` の wrap がクライアント側だけで足りることを確認 |
+| 証明書バンドルを FULL → CMN | `x509_crt_bundle` 67,536 B の一部 | 実測（host）の現在の大きさ。減る量は未測定 | 一部のサイトで検証に失敗する。`kobako.net` は相手を選ばない API なので、勧めない |
 | WPA3（SAE）を切る | −約 12.6 KB（`sae.c.obj` 9,103、`sae_pk.c.obj` 2,736、`dragonfly.c.obj` 779） | 実測（host）の現在の大きさ | WPA3 専用の AP につながらなくなる。勧めない |
 
 ## 6. 優先順位
@@ -183,11 +183,11 @@
 
 実機のロックと後始末は CLAUDE.md の「並行作業」に従う。コマンドは [test-commands.md](test-commands.md)。
 
-1. **K1 の後の地図**: `CONFIG_POCKET_HEAP_MAP=y` のビルドで DERBY を起動し、「ゲストの前」の空きの並びを §6.5 と比べる。3,584 B と 84 B のブロックが大きな穴の間から消えたか。Wi-Fi の 84 B ＋ 12 B × 3 がどの穴を分けているか（K2 の要否）。
+1. **K1 の後の地図**: `CONFIG_KOBAKO_HEAP_MAP=y` のビルドで DERBY を起動し、「ゲストの前」の空きの並びを §6.5 と比べる。3,584 B と 84 B のブロックが大きな穴の間から消えたか。Wi-Fi の 84 B ＋ 12 B × 3 がどの穴を分けているか（K2 の要否）。
 2. **tcpip スレッドの最大使用量**（C4）: 自動同期、HTTPS の要求、Opus のストリームのそれぞれの後で HWM。プローブのコードが要る。
-3. **C1〜C3 の前後**: `RADIO_INIT ... cost=`（`wifi_time.c`）、`AUTOSYNC_DONE ... ms= min_free= free_after=`、`TLSCOST`（`pocket_net.c:407`）、Opus の再生ログ。各設定を 1 つずつ。`sdkconfig.defaults` を変えても既存の `sdkconfig` には効かないので、ビルドディレクトリを新しく切る（`sdkconfig.defaults` の注記のとおり）。
-4. **静的な増減**: `python tools/memlog.py --map <build>/cardputer_pocketjs.map --port COM3 --check`。ファイル別の差（`dns.c.obj`、`netif.c.obj` など）と、アイドルの空きを記録する。
-5. **lwIP のスレッド別セマフォが残らないこと**（§5.3 の最後の行）: HTTPS を 10 回続けた後の空きが減っていかないこと。既存の「9 回の要求の後も最大ブロック 31,744」（`pocket_net.c:73-76`、実測（実機））と整合するが、セマフォを名指しでは見ていない。
+3. **C1〜C3 の前後**: `RADIO_INIT ... cost=`（`wifi_time.c`）、`AUTOSYNC_DONE ... ms= min_free= free_after=`、`TLSCOST`（`kobako_net.c:407`）、Opus の再生ログ。各設定を 1 つずつ。`sdkconfig.defaults` を変えても既存の `sdkconfig` には効かないので、ビルドディレクトリを新しく切る（`sdkconfig.defaults` の注記のとおり）。
+4. **静的な増減**: `python tools/memlog.py --map <build>/cardputer_kobako.map --port COM3 --check`。ファイル別の差（`dns.c.obj`、`netif.c.obj` など）と、アイドルの空きを記録する。
+5. **lwIP のスレッド別セマフォが残らないこと**（§5.3 の最後の行）: HTTPS を 10 回続けた後の空きが減っていかないこと。既存の「9 回の要求の後も最大ブロック 31,744」（`kobako_net.c:73-76`、実測（実機））と整合するが、セマフォを名指しでは見ていない。
 6. **「リンクで約 37 KiB」の内訳**: §3.1 の 24,965 B との差。必要なら、Wi-Fi を外したビルドとの `memlog` の比較で分ける。
 7. **回帰**: `test_settings.py`（設定の行は変えないので押下回数はそのまま）、`smoke_device.py`、手動の sync とスキャン（`wifi-autostart.md` §13 の未検証項目と同じ）。
 
@@ -197,7 +197,7 @@
 - K2 の方法（`esp_wifi_init` / `deinit` を早く 1 回通すとセマフォが作られる）は、blob の中の呼び出しに依存していて未確認。
 - §3.2 の内訳は、未帰属が約 0.8 KB ある。
 - §6.6 の 12 B × 3 個のうち、どれが lwIP のキーでどれが Wi-Fi のものかは、番地では分けていない（トレースの深さ 4 では呼び出し元が見えていない）。
-- `build_heapmap` は計測用のビルドで、`CONFIG_POCKET_HEAP_MAP` の分だけ `libmain.a` が通常ビルドと違う。ネットワークのアーカイブには影響しない見込みだが、通常ビルドの map では確かめていない。
+- `build_heapmap` は計測用のビルドで、`CONFIG_KOBAKO_HEAP_MAP` の分だけ `libmain.a` が通常ビルドと違う。ネットワークのアーカイブには影響しない見込みだが、通常ビルドの map では確かめていない。
 
 ## 9. 実機の結果（2026-11-12、Opus）
 
@@ -211,6 +211,6 @@
 - **HTTPS（`local.tlscycle`、2 回のリースで 16 回の GET）の後も tcpip の最小の空きは 1,716 B / 3,584 B のまま**（`b4cd3cb`）。HTTPS は tcpip スレッドの最大使用量を増やさない。1 回の TLS は約 5.9 KB を一時的に使い、全部戻る（`TLSCOST`）。
 - **`CONFIG_LWIP_TCPIP_TASK_STACK_SIZE` 3,072 → 2,560、`DNS_TABLE_SIZE` 4 → 2、`ARP_TABLE_SIZE` 10 → 4**（`6da834c`）。ELF で `dns_table` 1,104 → 552 B、`arp_table` 240 → 96 B（静的 −696 B）。tcpip の恒久のスタックが −512 B。実機で `tcpip_min_free=1204`（2,560 ＋ 512 のうち）、DERBY 一周と TLS CYCLE 16 回が通過。
 - **Wi-Fi ワーカーの駆動用セマフォを RTC FAST に置いた**（`9c59273` の前のコミット）。OS アダプタの表（`g_wifi_osi_funcs._wifi_thread_semphr_get`）を差し替え、ワーカーには RTC FAST の静的なカウンティングセマフォ（88 B）を返す。他のタスクは元の関数。主ヒープの 12 B のブロック 2 個（pthread の TLS）が消え、DERBY の起動直前の主ヒープの穴は 24.7・44.3 KB → **25.7・46.8 KB**、最大ブロック 43.0 → **45.1 KB**。TLS の間の最大ブロックも 45,056 B のまま動かない（修正前の別の実行では 43,008 → 34,816 B に落ちた）。RTC FAST の空きは 600 → 508 B。
-- **見つけて直した不具合:** `pocket_api.c` の class owner の表が 16 で、所有者は 18 あった（Kasane 11、net 2 ほか）。DERBY の後に `local.tlscycle` を起動すると assert で再起動した。24 に広げた（`6f5f65d`）。出荷アプリで pocket.net を使うのは PET COMPANION だけで、同じ並びで起きうる不具合だった。
+- **見つけて直した不具合:** `kobako_api.c` の class owner の表が 16 で、所有者は 18 あった（Kasane 11、net 2 ほか）。DERBY の後に `local.tlscycle` を起動すると assert で再起動した。24 に広げた（`6f5f65d`）。出荷アプリで kobako.net を使うのは PET COMPANION だけで、同じ並びで起きうる不具合だった。
 - Wi-Fi ワーカーのスタックの最小の空きが 700 B（3,072 のうち）だった。以前の測定（`b4cd3cb`）は 1,116 B。どの経路（走査・リンク）で深くなったかは分けていない。
 - 残り: Wi-Fi の静的 RX バッファ 4 → 2（約 3.2 KB、無線中のみ）は、Opus の流し込みを実機で試すまで変えない。

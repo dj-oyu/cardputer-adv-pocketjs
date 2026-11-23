@@ -10,7 +10,7 @@
 
 ### 1.1 問題
 
-アプリを起動するたびに `JSRuntime` と `JS_NewContext`（全 intrinsic、`components/pocketjs_guest/src/guest.c:612`）を
+アプリを起動するたびに `JSRuntime` と `JS_NewContext`（全 intrinsic、`components/kobako_guest/src/guest.c:612`）を
 新しく作る。出荷アプリの `js=` は 93〜117 KB で、その大半がこの**床**である（hello はソース 414 B で
 `js=93,310`、実測(device)）。[common-api.md](../api/common-api.md) §7.1 の「床 ＋ ソース 1 バイトあたり約 4.5 B」の
 床のほう。ゲスト上限 160 KiB（`main/app_session.c:756`）のうち床が 6 割近くを占め、capability を足すたびに
@@ -114,10 +114,10 @@ FLOOR now=28684 (after)
 
 `js=` の床は文書上 **約 77.3 KiB**（common-api §7.1、deskclock `js=80,653` からの逆算、実測(device)）で、
 ここで測った 64,420 B とは **約 13 KB** ずれる。差はファームが `JS_NewContext` の後に注入するもの
-（`console`、`pocket` の骨組みと `capabilities`、quickjs-libc の helper、`pocketjs_guest_quickjs_install_once`）と
+（`console`、`kobako` の骨組みと `capabilities`、quickjs-libc の helper、`kobako_guest_quickjs_install_once`）と
 考えられるが、**未計算**である。この文書の削減額はエンジン側の床（64,420 B）に対するもので、ファーム側の
 13 KB には効かない。F1 で組み込み名を ROM にすると、ファームが `JS_NewCFunction` 等で足す名前のうち
-ROM に載っていないもの（`pocket`、`capabilities`、…）は今までどおりヒープ atom になる。ファームの面の
+ROM に載っていないもの（`kobako`、`capabilities`、…）は今までどおりヒープ atom になる。ファームの面の
 名前も ROM 表に含めるかは F1 の実装時に決める（表は生成物なので追加は容易。FD5）。
 
 ## 3. データはどこにあるか（コードで確認したこと）
@@ -144,7 +144,7 @@ ROM に載っていないもの（`pocket`、`capabilities`、…）は今まで
 
 | 案 | 内容 | 捨てた理由 |
 | --- | --- | --- |
-| **A. intrinsic を群ごとに遅延** | TypedArrays・Date・Map/Set・DOMException・WeakRef・BigInt・Proxy を最初に触るまで作らない | 出荷アプリはどれも使わない（`pocket.fs/io/net/capture` が返す ArrayBuffer だけがネイティブ側で作られる）ので **約 21.5 KB**（計算、§2 の合計）減るが、使うアプリには 0。§5 の設計は群単位でなく名前・プロパティ単位で同じ節約を全アプリに与え、A を包含する。**F2 の後で群遅延を重ねる価値があるかは、F2 の実測で決める**（残る値プロパティ・オブジェクト本体 8,400 B の一部が対象） |
+| **A. intrinsic を群ごとに遅延** | TypedArrays・Date・Map/Set・DOMException・WeakRef・BigInt・Proxy を最初に触るまで作らない | 出荷アプリはどれも使わない（`kobako.fs/io/net/capture` が返す ArrayBuffer だけがネイティブ側で作られる）ので **約 21.5 KB**（計算、§2 の合計）減るが、使うアプリには 0。§5 の設計は群単位でなく名前・プロパティ単位で同じ節約を全アプリに与え、A を包含する。**F2 の後で群遅延を重ねる価値があるかは、F2 の実測で決める**（残る値プロパティ・オブジェクト本体 8,400 B の一部が対象） |
 | **B. bytecode の ROM 実行** | 組み込みや事前コンパイル済みアプリを flash の bytecode から直接動かす | `JS_READ_OBJ_ROM_DATA` が「IC で壊れた」として 0 固定。インラインキャッシュが bytecode に書き込む設計なので、この engine では in-place 実行できない。事前コンパイルが省けるのは解析の一時領域だけで、床には効かない |
 | **C. 名前を flash に置いたまま書き込みを握りつぶす** | `JSString` を `.rodata` に置き、ref_count の増減が flash への書き込みになっても無視されることに賭ける | ESP-IDF の cache エラーハンドラ（`components/esp_system/port/soc/esp32s3/cache_err_int.c`）は "Dbus write to cache rejected" と "Write back error occurred while dcache tries to write back to flash" を panic として列挙する。後者は cache line の追い出し後に来る**非同期の割り込み**なので、該当 store を飛ばす細工ができない。文書化されていない「黙って落ちる」挙動に依存するのは不健全。**実機で試していない**（IDF v6.0.1 `C:\esp\v6.0.1\esp-idf` の同ファイル 84 行・99 行に両文言があることは確認。挙動は IDF ソースからの推論。§10） |
 | **D. 参照数の増減すべてにアドレス判定を足す** | `JS_DupValue`/`JS_FreeValue` で flash 番地なら触らない | インタプリタの**最も熱い経路**に分岐を足す。名前だけのために全値の操作を遅くする理由が無い |
@@ -217,7 +217,7 @@ extern const char      js_rom_chars[];   /* one blob, all ASCII */
 - **1 オブジェクトが複数のリストを受ける場合**（global、TypedArray の base prototype 等。個数は F2 の
   生成器で数える。§10）は、リストの配列を持つか、リストごとに `insert_index` を持つ小さな配列にする。
 - **代償**: 外れ経路の表探索（§7）と、全展開が起きたときのまとまった確保（今日は起動時に払っているもの）。
-  Kasane や `pocket.*` の C 側が組み込みの prototype を列挙する箇所があれば起動時に全展開が走って節約が
+  Kasane や `kobako.*` の C 側が組み込みの prototype を列挙する箇所があれば起動時に全展開が走って節約が
   消えるので、F2 の計装で「どのオブジェクトがいつ全展開されたか」を出す（§8 F2 の計装）。
 
 **FD5. ファームが `JS_NewContext` の後に足す名前を ROM 表へ入れるかは F1 の実機計測後に決める。**
@@ -248,7 +248,7 @@ F1 を先に `vm/main` へ戻し、F2 は別の枝で進める。
 
 ## 7. 実行時の代償（F2）の実測(host)
 
-`tools/vmtest/floor/lazyprobe.sh`: 実物の QuickJS と実物の `pocket.kasane`、他の `pocket.*` は
+`tools/vmtest/floor/lazyprobe.sh`: 実物の QuickJS と実物の `kobako.kasane`、他の `kobako.*` は
 stub（JS 側の小さな代替）。300 フレーム、30 フレームごとに Enter。`find_own_property` に計数を挟んだ
 `quickjs.c` の写しを使う（リポジトリの `quickjs.c` は触らない）。数えたのは
 **`JS_NewContext` 直後に存在したオブジェクト（=組み込み）での own-property の外れ**と、
@@ -279,7 +279,7 @@ apps/kasane/demo.js         FAIL (stub 不足: TypeError: not a function)
 
 ## 8. 段階ごとの移行計画と関所
 
-各段は `CONFIG_POCKET_VM_*` のビルド時選択で従来経路へ戻せるようにする（仕様 §12.2）。関所は
+各段は `CONFIG_KOBAKO_VM_*` のビルド時選択で従来経路へ戻せるようにする（仕様 §12.2）。関所は
 「既存の合格項目を維持」（仕様 §12.1）に、**新しい機構ごとの負の対照**を足す — 検出器は、検出すべき
 ものを一度検出してみせるまで信用しない（[vm-L3-results.md](vm-L3-results.md) の毒の対照と同じ流儀）。
 
@@ -287,7 +287,7 @@ apps/kasane/demo.js         FAIL (stub 不足: TypeError: not a function)
 
 - 床の内訳・節約の計算・外れ回数の実測(host)。道具は `tools/vmtest/floor/`（§9）。
 
-### F1: ROM atom（`CONFIG_POCKET_VM_ROM_ATOMS`、既定 n → 関所後 y）
+### F1: ROM atom（`CONFIG_QJS_LEAN_ROM_ATOMS`、既定 n → 関所後 y）
 
 1. 生成器 `tools/vmtest/floor/gen_rom_atoms.py`（予定）: ホストで `JS_NewContext` 後の atom を dump し、
    `quickjs-rom-atoms.h`（記録・blob・検索表・並べ替えた `quickjs-atom.h`）を出す。生成物はリポジトリに
@@ -308,7 +308,7 @@ apps/kasane/demo.js         FAIL (stub 不足: TypeError: not a function)
    値は tlsf の実長課金なので多少ずれる）。既定ビルドの `idf.py size` で flash の増分 ≤ 15 KB（推定）を確認。
    `benchmark_app.py` で JS ターンが動いていないこと（同一バイナリ内比較でないので 15% 未満の差は主張しない）。
 
-### F2: 組み込みの索引を持たない（`CONFIG_POCKET_VM_LAZY_BUILTINS`、既定 n → 関所後 y）
+### F2: 組み込みの索引を持たない（`CONFIG_QJS_LEAN_LAZY_BUILTINS`、既定 n → 関所後 y）
 
 1. `JS_SetPropertyFunctionList` の遅延化、外れ経路の表探索、全展開の入口の列挙（§5.2）。
 2. 計装（既定 n）: オブジェクトごとの外れ回数・初回展開・全展開の発生と誘発元（C API か JS か）。
@@ -359,7 +359,7 @@ wsl -e bash tools/vmtest/floor/lazyprobe.sh   # §7: 出荷アプリの外れ回
 | 穴 | 状態 |
 | --- | --- |
 | F2 の外れ 1 回の単価 | **未計測**。0.1〜1 µs は推定。F2 の実装で `callbench` 流に同一バイナリ内で測る |
-| 床のうちファーム側の約 13 KB | **未計算**（§2.2）。`pocketjs_guest_quickjs_install_once` をホストでリンクして `floor32` と同じ課金で測るのが次の手 |
+| 床のうちファーム側の約 13 KB | **未計算**（§2.2）。`kobako_guest_quickjs_install_once` をホストでリンクして `floor32` と同じ課金で測るのが次の手 |
 | 実機の確認 | **無い**。数字はすべてホスト（実機レイアウト）か計算。実機の `js=` は tlsf の実長課金（backlog #9）なので、切り上げの分だけずれる |
 | Kasane デモの外れ回数 | stub 不足で未計測 |
 | 案 C（flash への書き込み）の実機挙動 | 未検証（IDF v6.0.1 の `cache_err_int.c` に panic 文言があることは確認。実際に書いて panic するかは実機で試していない） |
@@ -414,7 +414,7 @@ F1 の台帳の原型。処置の分類: **境界**（`< ROM_END` の分岐を�
 
 ## 12. F1 の結果（2026-09-25、`vm/f1-rom-atoms`）
 
-`CONFIG_POCKET_VM_ROM_ATOMS`。実装は `quickjs.c` の `#ifdef` の中、表は生成物
+`CONFIG_QJS_LEAN_ROM_ATOMS`。実装は `quickjs.c` の `#ifdef` の中、表は生成物
 `components/quickjs-ng/quickjs-ng/quickjs-rom-atoms{,-defs}.h`（`tools/vmtest/floor/gen_rom_atoms.sh`、
 `--check` で陳腐化を検出）。
 
@@ -464,7 +464,7 @@ flash の名前 **542 個**（予定義 214、組み込みの関数リスト由�
 ため、今回は取っていない）と、脱出文字列の回数（FD3 の計装）。
 ### 12.5 既定を y に（2026-09-25）
 
-関所を通したので `CONFIG_POCKET_VM_ROM_ATOMS` の既定を y にした。既定設定で作ったファームは、実機で測った
+関所を通したので `CONFIG_QJS_LEAN_ROM_ATOMS` の既定を y にした。既定設定で作ったファームは、実機で測った
 -rom ビルドとロードされる全セクションの大きさ・全シンボル（番地と大きさ）が一致する。ホストの
 `tools/vmtest/build.sh` も素の種類を ROM にし、従来の経路は `-norom` で作る（「素の種類はファームの既定と同じ
 経路」の決まり）。`-keepsrc` と組み合わせたときの確保番号は `// vmrun-rom-keepsrc-flags:`（914・932。
@@ -472,7 +472,7 @@ module は 849 のまま）。asan・o2・asan-norom・o2-norom・asan-keepsrc�
 o2/asan `--force-yield` のコーパスはすべて 77/77。
 ## 13. F2 の結果（2026-09-26、`vm/f2-lazy-builtins`）
 
-`CONFIG_POCKET_VM_LAZY_BUILTINS`（既定 y）。実装は `quickjs.c` の `#ifdef` の中。
+`CONFIG_QJS_LEAN_LAZY_BUILTINS`（既定 y）。実装は `quickjs.c` の `#ifdef` の中。
 
 ### 13.1 何をしたか
 
@@ -522,7 +522,7 @@ o2/asan `--force-yield` のコーパスはすべて 77/77。
 | pet | 85,328 | 67,288 | **−18,040** | −38,876（−37%） |
 | companion | 76,944 | 61,228 | **−15,716** | −37,168（−38%） |
 
-ホスト計算（−12.2 KB）より大きいのは、ファームが自分で入れる `pocket.*` の面も `JS_SetPropertyFunctionList` を
+ホスト計算（−12.2 KB）より大きいのは、ファームが自分で入れる `kobako.*` の面も `JS_SetPropertyFunctionList` を
 使っていて同じく遅延になったためと考えている（**推定、内訳は未計測**。§2.2 の「ファーム側の約 13 KB」の一部）。
 アプリ実行中の空き `app_free` は 157,940 → 172,700、最大空きブロック 114,688 → 131,072。アイドル時の空き・
 静的 DIRAM は不変。`memlog --check` 予算内、`smoke_device.py --cycles 20`・故障回復 6 種・`test_settings.py` 通過。
@@ -534,7 +534,7 @@ o2/asan `--force-yield` のコーパスはすべて 77/77。
 
 ## 14. 計測の穴を埋める（2026-09-26、`vm/f-measure`）
 
-`CONFIG_POCKET_VM_FLOORPROBE`（既定 n）。数えるのは `quickjs.c` の F1/F2 の経路で、カウンタとマクロは
+`CONFIG_KOBAKO_VM_FLOORPROBE`（既定 n）。数えるのは `quickjs.c` の F1/F2 の経路で、カウンタとマクロは
 `quickjs-vmprobe.h` に置き、`quickjs.c` では**既にある行の末尾に**呼び出しを足しただけ（`assert()` が `__LINE__` を
 埋め込むので、行が 1 本ずれると既定のビルドのコードが変わる。最初の版は `quickjs.c` と `main.c` に行を足して
 +8 B・`app_main` の 5 バイトが変わっていた）。既定のビルドは vm/main と `.flash.text`・`.iram0.text`・
@@ -554,14 +554,14 @@ o2/asan `--force-yield` のコーパスはすべて 77/77。
 | --- | --- | --- |
 | ゲスト作成直後（runtime + context） | 40,208 | — |
 | `console` | 40,352 | +144 |
-| `pocket`（土台と遅延名前空間） | 43,556 | **+3,204** |
+| `kobako`（土台と遅延名前空間） | 43,556 | **+3,204** |
 | `random`〜`bridge`（12 面） | 45,364 | +1,808（各 0〜288） |
 | `app` | 46,240 | +876 |
 | `workspace` | 46,372 | +132 |
 | `pet-hub`（pet・companion のみ） | +248 | |
 
-**ファームの面は合計 約 6.2 KB**（§2.2 の「ファーム側の約 13 KB」は F2 の前の値）。残る大物は `pocket` の土台だけで、
-各面は名前空間の遅延（`pocket_api_lazy()`）で小さく済んでいる。ゲスト作成直後の 40.2 KB がホスト計算の床
+**ファームの面は合計 約 6.2 KB**（§2.2 の「ファーム側の約 13 KB」は F2 の前の値）。残る大物は `kobako` の土台だけで、
+各面は名前空間の遅延（`kobako_api_lazy()`）で小さく済んでいる。ゲスト作成直後の 40.2 KB がホスト計算の床
 （35,444 B、§13.3）より 4.8 KB 大きい理由は未調査。
 
 ### 14.2 回数（F1-5・F2-4・F0-b、各 20 秒）
@@ -689,12 +689,12 @@ F2-5 の後で 35,444 B。runtime 8,536 B のうち **atom の表が約 6 KB**�
 
 ## 17. F3b: 型付き配列のクラスを初めて使うときに作る（2026-09-26、`vm/f3-floor`）
 
-`CONFIG_POCKET_VM_LAZY_INTRINSICS`（関所の後で既定 y）。
+`CONFIG_QJS_LEAN_LAZY_INTRINSICS`（関所の後で既定 y）。
 
 ### 17.1 何をしたか
 
 §4-A の群単位の遅延を、F2 の上で一番大きい TypedArrays（5,764 B）にだけ当てた。出荷アプリはどれも型付き配列の
-コンストラクタを使わず、ファームが `pocket.fs`・`pocket.io`・`pocket.capture` で返す `Uint8Array` はネイティブ側で
+コンストラクタを使わず、ファームが `kobako.fs`・`kobako.io`・`kobako.capture` で返す `Uint8Array` はネイティブ側で
 作られる。
 
 - `SharedArrayBuffer`・12 種の型付き配列・`DataView` のグローバル名は、`JS_AddIntrinsicTypedArrays` がコンストラクタを
@@ -739,7 +739,7 @@ F2-5 の後で 35,444 B。runtime 8,536 B のうち **atom の表が約 6 KB**�
 最大空きブロック 139,264。§13.4 の F2 の後は 172,700 と 131,072）。静的 DRAM は不変、書き込むイメージは
 コード +356 B・rodata +368 B。
 
-**実機で確かめていないこと**: ネイティブが `Uint8Array` を先に作る経路（`pocket.fs` の read など）は、ホストで同じ
+**実機で確かめていないこと**: ネイティブが `Uint8Array` を先に作る経路（`kobako.fs` の read など）は、ホストで同じ
 `JS_NewUint8ArrayCopy` を通して確かめただけで、それを使う出荷アプリが無いので実機では通っていない。
 
 ### 17.4 次の候補
@@ -749,7 +749,7 @@ F2-5 の後で 35,444 B。runtime 8,536 B のうち **atom の表が約 6 KB**�
 
 ## 18. F3c: Map/Set・WeakRef・DOMException も初めて使うときに作る（2026-09-26、`vm/f3c-lazy-intrinsics`）
 
-`CONFIG_POCKET_VM_LAZY_INTRINSICS`（F3b と同じ設定、既定 y）の対象を広げた。
+`CONFIG_QJS_LEAN_LAZY_INTRINSICS`（F3b と同じ設定、既定 y）の対象を広げた。
 
 ### 18.1 何をしたか
 

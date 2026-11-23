@@ -3,7 +3,7 @@
 // Every later VM level (docs/vm/quickjs-freertos-vm-spec.md L1..L5) is judged by
 // running the same corpus and Test262 subset through this driver and comparing
 // against the L0 baseline. So the parts that decide observable behaviour are
-// copied from components/pocketjs_guest/src/guest.c rather than re-imagined:
+// copied from components/kobako_guest/src/guest.c rather than re-imagined:
 //
 //   - the allocator: size header in front of the block, usable_size returning
 //     the REQUESTED size (not the malloc bucket), realloc as malloc+copy+free.
@@ -14,7 +14,7 @@
 //     "report only after the queue is empty" rule, same early return without
 //     reporting when a job itself throws.
 //   - from L1 on, the drain loop itself is not copied but LINKED:
-//     components/pocketjs_guest/src/vm_sched.c is the same object file the
+//     components/kobako_guest/src/vm_sched.c is the same object file the
 //     firmware builds. The harness therefore tests the scheduler that ships.
 //   - JS_SetMemoryLimit / JS_SetMaxStackSize with the device's values
 //     (main/app_session.c: 160 KiB heap, 20 KiB stack) unless overridden.
@@ -39,8 +39,8 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "pocketjs/vm_clock.h"
-#include "pocketjs/vm_sched.h"
+#include "kobako/vm_clock.h"
+#include "kobako/vm_sched.h"
 #include "quickjs-libc.h"
 #include "quickjs-vm.h"
 #include "quickjs.h"
@@ -89,7 +89,7 @@ static alloc_state_t A;
 // accounting above, so those, and every pinned corpus number, are unchanged
 // whether it is built or not. Its classes are the device's (tlsf lengths) plus
 // this header, since here the stored block carries one.
-#include "pocketjs/block_cache.h"
+#include "kobako/block_cache.h"
 static void *bc_backend_malloc(void *ctx, size_t n) { (void)ctx; return malloc(n); }
 static void bc_backend_free(void *ctx, void *p) { (void)ctx; free(p); }
 static size_t bc_backend_length(void *ctx, const void *p) {
@@ -342,8 +342,8 @@ static void promise_rejection(JSContext *context, JSValueConst promise, JSValueC
 }
 
 // Copied from guest.c report_rejections(). Returns 0 on ESP_OK, -1 on
-// ESP_FAIL. The report line keeps the guest's wording; the "E pocketjs_guest:"
-// prefix stands in for ESP_LOGE's "E (ticks) pocketjs_guest:" without the
+// ESP_FAIL. The report line keeps the guest's wording; the "E kobako_guest:"
+// prefix stands in for ESP_LOGE's "E (ticks) kobako_guest:" without the
 // timestamp.
 static int report_rejections(guest_t *guest) {
   bool failed = guest->rejection_tracking_failed;
@@ -357,7 +357,7 @@ static int report_rejections(guest_t *guest) {
     failed = true;
     const char *text = JS_ToCString(guest->context, entry->reason);
     fflush(stdout);
-    fprintf(stderr, "E pocketjs_guest: Unhandled Promise rejection: %s\n", text ? text : "<value>");
+    fprintf(stderr, "E kobako_guest: Unhandled Promise rejection: %s\n", text ? text : "<value>");
     if (text)
       JS_FreeCString(guest->context, text);
     else
@@ -451,8 +451,8 @@ static void arm_budget(guest_t *guest) {
 
 // ------------------------------------------------------- --host-events
 //
-// The device's completion path in miniature: pocket_api_complete() records a
-// completion from outside JS at any moment, and pocket_api_pump() is what
+// The device's completion path in miniature: kobako_api_complete() records a
+// completion from outside JS at any moment, and kobako_api_pump() is what
 // settles it -- and the pump does not run on a continuation turn. host.request(k)
 // asks for a completion that becomes ready at the k-th job boundary, and
 // host_pump() settles every ready one, in the order they were requested, only
@@ -485,7 +485,7 @@ static JSValue host_request(JSContext *ctx, JSValueConst this_val, int argc, JSV
   return promise;
 }
 
-// pocket.app.exit() in miniature. The flag is set from inside a job, and the
+// kobako.app.exit() in miniature. The flag is set from inside a job, and the
 // stop it asks for is delivered as an interrupt -- so honouring it at the top
 // of a CONTINUATION turn would kill job k+1 of a drain that pre-L1 ran to its
 // end, and whether an app's .finally ran would depend on where the budget
@@ -530,8 +530,8 @@ static void host_requests_free(void) {
     }
 }
 
-// host.bytes(n): a Uint8Array of n bytes 0..n-1 made the way pocket.fs and
-// pocket.io make theirs (JS_NewUint8ArrayCopy), i.e. through class_proto
+// host.bytes(n): a Uint8Array of n bytes 0..n-1 made the way kobako.fs and
+// kobako.io make theirs (JS_NewUint8ArrayCopy), i.e. through class_proto
 // without ever reading the global Uint8Array -- the native way into the F3b
 // lazy classes (docs/vm/builtin-floor-plan.md sec.17).
 static JSValue host_bytes(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
@@ -991,7 +991,7 @@ static void usage(void) {
           "  --require-frame        like the guest: no frame() -> no drain after eval\n"
           "  --module               evaluate FILE as a module\n"
           "  --strict               prefix FILE with \"use strict\";\n"
-          "  --harden               JS_PocketHarden the context, as the device (docs/vm/harden.md)\n"
+          "  --harden               JS_LeanHarden the context, as the device (docs/vm/harden.md)\n"
           "  --immortal             after --harden: build every lazy builtin, then make the intrinsics\n"
           "                         immortal as in ROM (docs/vm/rom-intrinsics.md R1); exits without\n"
           "                         teardown. --immortal=lazy skips the build: a negative control, the\n"
@@ -1028,7 +1028,7 @@ static void usage(void) {
           "  --vm-budget N[K|M]     D10: frame-segment byte budget alone (0 = off), leaving the\n"
           "                         C-stack limit at --stack-limit; default: same as --stack-limit\n"
           "  --host-events          install host.request(k) (a completion recorded at the k-th job\n"
-          "                         boundary) and host.exit() (pocket.app.exit)\n"
+          "                         boundary) and host.exit() (kobako.app.exit)\n"
           "  --time                 print '#info time_ns=...' (eval + drains + frames)\n"
           "  --stats                print '#info' allocator/queue statistics\n"
           "exit: 0 ok, 1 uncaught exception in eval, 2 job threw or unhandled rejection, 3 usage,\n"
@@ -1054,7 +1054,7 @@ int main(int argc, char **argv) {
   const char *file = NULL;
   int frames = 0;
   bool require_frame = false, module = false, strict = false, test262 = false;
-  bool harden = false;   // --harden: JS_PocketHarden (docs/vm/harden.md)
+  bool harden = false;   // --harden: JS_LeanHarden (docs/vm/harden.md)
   int immortal = 0;      // --immortal: 2, --immortal=lazy: 1 (rom-intrinsics.md R1)
   bool force_yield = false, want_gaps = false, want_time = false, want_stats = false;
   size_t vm_seg_size = 0;  // --vm-seg-size; 0 = whatever the build compiled in
@@ -1171,7 +1171,7 @@ int main(int argc, char **argv) {
             sizeof(allocation_header_t));
   }
 
-  // Same order as pocketjs_guest_create().
+  // Same order as kobako_guest_create().
   memset(&G, 0, sizeof(G));
   G.runtime = JS_NewRuntime2(&VM_ALLOCATOR, &G);
   if (!G.runtime) {
@@ -1185,7 +1185,7 @@ int main(int argc, char **argv) {
   if (heap_limit != 0 && heap_limit / 2U < JS_GetGCThreshold(G.runtime))
     JS_SetGCThreshold(G.runtime, heap_limit / 2U);
   JS_SetMaxStackSize(G.runtime, stack_limit);
-  JS_SetRuntimeInfo(G.runtime, "PocketJS ESP-IDF guest");
+  JS_SetRuntimeInfo(G.runtime, "kobako ESP-IDF guest");
   if (reloc_keep_old) JS_VMStackRelocKeepOld(G.runtime, 1);
   if (reloc_pin) { force_reloc = true; JS_VMStackPin(G.runtime, +1); }
   if (reloc_fault != JS_VM_RELOC_FAULT_NONE) JS_VMStackRelocFault(G.runtime, reloc_fault);
@@ -1240,10 +1240,10 @@ int main(int argc, char **argv) {
   js_std_init_handlers(G.runtime);
   if (module) JS_SetModuleLoaderFunc2(G.runtime, NULL, js_module_loader, js_module_check_attributes, NULL);
   G.context = JS_NewContext(G.runtime);
-  // --harden: as pocketjs_guest_create() with CONFIG_POCKET_VM_HARDEN, before
+  // --harden: as kobako_guest_create() with CONFIG_KOBAKO_VM_HARDEN, before
   // the helpers, so console/print stay the host's (docs/vm/harden.md).
-  if (G.context && harden && JS_PocketHarden(G.context) < 0) {
-    fprintf(stderr, "vmrun: JS_PocketHarden failed\n");
+  if (G.context && harden && JS_LeanHarden(G.context) < 0) {
+    fprintf(stderr, "vmrun: JS_LeanHarden failed\n");
     return 1;
   }
   if (immortal && !harden) {
@@ -1261,8 +1261,8 @@ int main(int argc, char **argv) {
     A.fail_at = 0;
     JS_ComputeMemoryUsage(G.runtime, &u0);
     JS_SetMemoryLimit(G.runtime, 0);
-    if (JS_PocketImmortalizeIntrinsics(G.context, immortal == 2) < 0) {
-      fprintf(stderr, "vmrun: JS_PocketImmortalizeIntrinsics failed\n");
+    if (JS_LeanImmortalizeIntrinsics(G.context, immortal == 2) < 0) {
+      fprintf(stderr, "vmrun: JS_LeanImmortalizeIntrinsics failed\n");
       return 1;
     }
     JS_ComputeMemoryUsage(G.runtime, &u1);
@@ -1274,7 +1274,7 @@ int main(int argc, char **argv) {
   }
   if (G.context) {
     js_std_add_helpers(G.context, 0, NULL);
-    // Mirrors pocketjs_guest_create(): js_std_add_helpers drops its own
+    // Mirrors kobako_guest_create(): js_std_add_helpers drops its own
     // failures, and the canary (cleared by JS_NewRuntime2, untouched by a
     // JS_NewContext that succeeded) is the only record of one. Nothing is
     // lost from the "#info oom" line below: on success the count is 0 here.
@@ -1560,7 +1560,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "vmrun: job queue runaway: one drain never emptied\n");
   }
 
-  // Same teardown order as pocketjs_guest_destroy().
+  // Same teardown order as kobako_guest_destroy().
   if (A.trace) {
     JS_FreeValue(G.context, probe);
     fprintf(A.trace, "# teardown\n");

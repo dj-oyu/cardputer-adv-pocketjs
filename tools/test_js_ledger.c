@@ -3,9 +3,9 @@
 //   wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs &&
 //     bash tools/build_js_ledger.sh && /tmp/test-js-ledger apps/hello/main.js ..."
 //
-// WHY THIS EXISTS. `js=` is pocketjs_guest_stats()'s heap_used, which is
-// JS_ComputeMemoryUsage()'s malloc_size (.cache/pocketjs/.../guest.c:435), and
-// pocket.device.metrics() reports the same field as jsHeapBytes. Every memory
+// WHY THIS EXISTS. `js=` is kobako_guest_stats()'s heap_used, which is
+// JS_ComputeMemoryUsage()'s malloc_size (.cache/kobako/.../guest.c:435), and
+// kobako.device.metrics() reports the same field as jsHeapBytes. Every memory
 // argument on this device reaches for it. On 2026-09-09 two builds whose app
 // sources differed by 1,418 bytes -- one of them with every ui.* call removed --
 // reported a byte-identical 107,587, which means the field did not respond to
@@ -13,8 +13,8 @@
 //
 // This measures the ledger at each stage a guest goes through, so the fixed part
 // and the per-source part can be told apart without a board. It cannot see the
-// native side (the pocket.* namespaces are C objects built by the firmware), so
-// a source that reads pocket.* costs MORE on the device than it does here. That
+// native side (the kobako.* namespaces are C objects built by the firmware), so
+// a source that reads kobako.* costs MORE on the device than it does here. That
 // gap is the point: what this prints is the JS-only floor and the JS-only slope.
 #include "quickjs.h"
 #include <stdio.h>

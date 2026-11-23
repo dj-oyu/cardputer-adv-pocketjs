@@ -17,7 +17,7 @@ def part(f):
     if re.match(r'^(__call_)?(memcpy|memset|memcmp|memmove|strlen|strcmp|__memcpy_aux|bzero)$',f): return 'mem*/str*'
     if f in qjs: return 'quickjs.c'
     if re.search(r'Isr|Tick|tick|systimer|_xt_|xt_|UserException|Interrupt|_frxt|vTask|xTask|esp_timer|usb_serial|Idle',f): return 'rtos/isr'
-    return 'kasane/pocket/other'
+    return 'kasane/kobako/other'
 P=collections.Counter(); Pt=collections.Counter(); Pl=collections.Counter(); Pr=collections.Counter()
 for f,v in ins.items():
     p=part(f); P[p]+=v; Pt[p]+=tk.get(f,0); Pl[p]+=lu.get(f,0); Pr[p]+=l32.get(f,0)

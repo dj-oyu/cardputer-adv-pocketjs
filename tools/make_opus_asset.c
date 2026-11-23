@@ -1,4 +1,4 @@
-// Encode a 24 kHz mono PCM16 WAV into the container main/pocket/opus_feed.h
+// Encode a 24 kHz mono PCM16 WAV into the container main/kobako/opus_feed.h
 // describes, for embedding in assets:/ or dropping on a card.
 //
 //     bash tools/make_opus_asset.sh IN.wav OUT.pok [bitrate]
@@ -39,7 +39,7 @@ static void put16(unsigned v){ unsigned char b[2]={v&255,(v>>8)&255}; put(b,2); 
 static void put32(unsigned long v){
     unsigned char b[4]={v&255,(v>>8)&255,(v>>16)&255,(v>>24)&255}; put(b,4); }
 
-// The same predicate as opus_pak_toc_ok() in main/pocket/opus_feed.h. Duplicated
+// The same predicate as opus_pak_toc_ok() in main/kobako/opus_feed.h. Duplicated
 // rather than shared because this program builds on a host against upstream
 // headers and that one builds into the firmware; the cost of the duplication is
 // four lines and the benefit is that the generator has no include path into

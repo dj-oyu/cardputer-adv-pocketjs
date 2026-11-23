@@ -5,14 +5,14 @@
   const blocks = 11;
   const blockBytes = 2048;
   const perBlock = 1 + (blockBytes - 4) * 2;
-  const view = pocket.kasane.mount({version: 1,
+  const view = kobako.kasane.mount({version: 1,
     slots: {elapsed: {type: 'text', capacity: 8},
             frames: {type: 'u32'}, starved: {type: 'u32'}, streamId: {type: 'u32'}},
     nodes: [
       {type: 'rect', bounds: [0, 0, 96, 24], color: 0x060c1aff},
       {type: 'text', bounds: [4, 4, 92, 16], text: {slot: 'elapsed'}, color: 0xe2f0ffff}
     ]}, {elapsed: '--------', frames: 0, starved: 0, streamId: 0});
-  const source = pocket.audio.outputSource({sampleMs: 33});
+  const source = kobako.audio.outputSource({sampleMs: 33});
   let bound = false;
   let playerHandle = null;
   let stateSubscription = null;
@@ -54,7 +54,7 @@
                 ' message=' + ((error && error.message) || ''));
     if (playerHandle && !closed) { closed = true; playerHandle.close(); }
     if (fileHandle) { fileHandle.close(); fileHandle = null; }
-    if (ownedFile) pocket.fs.remove(path).catch(function () {});
+    if (ownedFile) kobako.fs.remove(path).catch(function () {});
   }
   function finish() {
     if (closed) return;
@@ -63,7 +63,7 @@
     console.log('KSN_OUTPUT_SOURCE FINAL positionMs=' + status.positionMs +
                 ' underruns=' + status.underruns);
     playerHandle.close();
-    pocket.fs.remove(path).then(function () {
+    kobako.fs.remove(path).then(function () {
       ownedFile = false;
       console.log('KSN_OUTPUT_SOURCE REMOVED');
       console.log('KSN_OUTPUT_SOURCE CLOSED');
@@ -72,13 +72,13 @@
   async function prepare() {
     try {
       try {
-        await pocket.fs.stat(path);
+        await kobako.fs.stat(path);
         throw new Error('the diagnostic file already exists');
       } catch (error) {
         if (error.code !== 'NOT_FOUND') throw error;
       }
       prepareStep = 'open';
-      fileHandle = await pocket.fs.open(path, {mode: 'create'});
+      fileHandle = await kobako.fs.open(path, {mode: 'create'});
       ownedFile = true;
       prepareStep = 'write header';
       await fileHandle.write(wavHeader());
@@ -90,7 +90,7 @@
       fileHandle = null;
       console.log('KSN_OUTPUT_SOURCE CREATED bytes=' + (48 + blocks * blockBytes));
       prepareStep = 'player open';
-      const player = await pocket.audio.player.open({source: path});
+      const player = await kobako.audio.player.open({source: path});
       playerHandle = player;
       const info = player.info();
       console.log('KSN_OUTPUT_SOURCE OPEN codec=' + info.codec +
@@ -105,14 +105,14 @@
       });
       prepareStep = 'play';
       await player.play();
-      playStartMs = pocket.time.now();
+      playStartMs = kobako.time.now();
       phase = 'playing';
       console.log('KSN_OUTPUT_SOURCE PLAY');
     } catch (error) { fail('PREPARE', error); }
   }
   globalThis.frame = function () {
     if (playStartMs && !closed) {
-      const now = pocket.time.now();
+      const now = kobako.time.now();
       if (now - playStartMs > 6000) { fail('TIMEOUT', now - playStartMs); return; }
       if (phase === 'playing' && now - playStartMs >= 200) {
         phase = 'seeking';
@@ -123,7 +123,7 @@
           phase = 'seeked';
           console.log('KSN_OUTPUT_SOURCE SEEK_ACCEPT positionMs=' +
                       playerHandle.status().positionMs +
-                      ' latencyMs=' + (pocket.time.now() - seekStartMs));
+                      ' latencyMs=' + (kobako.time.now() - seekStartMs));
         }, function (error) { fail('SEEK', error); });
       } else if (phase === 'seeked' && playerHandle.status().positionMs >= 1200) {
         phase = 'progress';

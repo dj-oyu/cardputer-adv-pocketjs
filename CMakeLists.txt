@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.22)
-# quickjs-ng and pocketjs_guest are vendored under components/ (default search
+# quickjs-ng and kobako_guest are vendored under components/ (default search
 # path, no EXTRA_COMPONENT_DIRS needed). Every app draws through Kasane
 # (main/ui/kasane); the Rust UI core, its QuickJS binding and the rgb565
 # renderer are no longer part of the image, so nothing is built out of the
-# pinned .cache/pocketjs checkout.
+# PocketJS (third-party) checkout that once lived in .cache/pocketjs.
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
-project(cardputer_pocketjs)
+project(cardputer_kobako)
 # lwIP's DNS and ARP tables (docs/platform/lwip-resource-review.md K3). No
 # Kconfig for either and lwipopts.h leaves both to opt.h's #ifndef defaults
 # (4 and 10), which only dns.c and etharp.c read. A station that asks for one
@@ -19,11 +19,11 @@ if(CONFIG_AYATSURI_P384_G_TABLE)
 endif()
 # Profile-guided QuickJS (docs/vm/qjs-pgo.md), off by default.
 include("${CMAKE_SOURCE_DIR}/tools/pgo/qjs_pgo.cmake")
-if(CONFIG_POCKET_VM_QJS_PGO)
-    pocket_qjs_pgo(use "${CMAKE_SOURCE_DIR}/tools/pgo/qjs")
+if(CONFIG_KOBAKO_QJS_PGO)
+    kobako_qjs_pgo(use "${CMAKE_SOURCE_DIR}/tools/pgo/qjs")
 endif()
 add_custom_target(flash_budget ALL
-    COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/check_flash.py" "${CMAKE_BINARY_DIR}/cardputer_pocketjs.bin"
+    COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/check_flash.py" "${CMAKE_BINARY_DIR}/cardputer_kobako.bin"
     DEPENDS gen_project_binary VERBATIM)
 # DRAM is the scarcer budget on a part with no PSRAM, and until this existed
 # nobody was adding up what each capability took. Static only -- reading the
@@ -32,7 +32,7 @@ add_custom_target(flash_budget ALL
 # rather than of the builds.
 add_custom_target(memory_log ALL
     COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/memlog.py"
-            --map "${CMAKE_BINARY_DIR}/cardputer_pocketjs.map"
+            --map "${CMAKE_BINARY_DIR}/cardputer_kobako.map"
             --log "${CMAKE_BINARY_DIR}/memory.jsonl" --only-changes
     DEPENDS gen_project_binary VERBATIM)
 # Stack accesses beyond the 1,020-byte reach of l32i/s32i: each costs 1-2 extra

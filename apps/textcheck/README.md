@@ -1,10 +1,10 @@
-# textcheck — `pocket.input.text` を実機で確かめる
+# textcheck — `kobako.input.text` を実機で確かめる
 
 `docs/api/common-api.md` §6 の TextOptions 段落が**実際に強制されているか**を1行1主張で出す。
 表示は持たない（編集欄はホストが描く）。出力の各行は `TXT ...`。
 
 ```
-tools/pocket_bridge.py demo --source apps/textcheck/textcheck.js
+tools/kobako_bridge.py demo --source apps/textcheck/textcheck.js
 ```
 
 `main/shell.c` の一覧には入れていない。Playground に貼るか、`main/CMakeLists.txt` の
@@ -96,7 +96,7 @@ TXT OPEN-D (the replacement). Type, then ENTER.
 
 C の `onEdit` が自分を `close()` して D を開く。ホスト側はこのコールバックから
 戻った時点で「セッションが入れ替わった」ことを世代番号で知り、C のために計算していた
-残りを D に書かない。**シリアルログに `pocket.text: TEXT_STALE` が出たら、それは
+残りを D に書かない。**シリアルログに `kobako.text: TEXT_STALE` が出たら、それは
 拒否が働いた証拠**であって失敗ではない（出ないのが普通）。
 
 D で打った文字は `EDIT-D`、Enter で `SUBMIT-D`。ここまで出れば全段通し。
@@ -106,12 +106,12 @@ D で打った文字は `EDIT-D`、Enter で `SUBMIT-D`。ここまで出れば�
 | 主張 | 実装 |
 | --- | --- |
 | ホストが欄を所有 | `main/main.c` `tick_run()` がキーをゲストへ渡さない |
-| 画面へ合成 | `main/app_session.c` のストリップループ内 `pocket_text_overlay()` |
-| 未確定文字を渡さない | `pocket_text.c` が `ime_text()`（IME_TEXT）だけを写す |
+| 画面へ合成 | `main/app_session.c` のストリップループ内 `kobako_text_overlay()` |
+| 未確定文字を渡さない | `kobako_text.c` が `ime_text()`（IME_TEXT）だけを写す |
 | Enterの二重配送なし | `textfield.c` `tf_key()` の `ime_took` |
 | Escapeの二義 | 同上。engineが食えば `IME_TAKEN`、食わなければ `TF_CANCEL` |
 | 自動close | `finish_submit()` / `finish_cancel()` が callback より先に detach |
-| 画面変更でclose | `app_stop()` の `pocket_text_reset()` |
+| 画面変更でclose | `app_stop()` の `kobako_text_reset()` |
 | 同時1セッション | `live` ポインタ1本、2本目は `BUSY` |
 | 遅延commit拒否 | `tf_commit()` の世代照合。host側の証明は `tools/test_textfield.c` |
 | maxBytesはバイト数 | `tf_insert()` が丸ごと拒否する（途中で切らない） |

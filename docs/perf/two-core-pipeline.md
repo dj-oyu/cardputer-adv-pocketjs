@@ -2,7 +2,7 @@
 
 [性能と描画の文書](README.md) / [1 フレームの内訳](frame-breakdown.md)
 
-状態: **P0 の探針、P1b（表示タスク、すぐ join、`CONFIG_POCKET_DISP_TASK` 既定 n）、P1a の 1〜6 まで実装（§7）。** 実測は [frame-breakdown.md](frame-breakdown.md) §8（P0）と §11（P1）。CPU 0 に置くと描画＋転送が +0.9 ms（+9.6%）延びた。IMU を読み手がいるときだけ読み、キーボードを INT ピンで門にした後は +0.41 ms。残りは LCD の SPI 完了割り込み（1 フレーム約 29 回、CPU 0）で、割り込みを CPU 1 に移すと −0.09 ms になり、合格の基準（+0.15 ms）を満たす（frame-breakdown.md §11）。送信をレジスタ直書き（`lcd_spi.c`、割り込みなし）にすると、表示タスクで 9.13 ms、inline 9.21 ms（キューの inline は 9.62 ms）で、表示タスクを使うビルドの既定にした。同じコアなら +0.10 ms。以下の本文は 2026-11-10 にコードを読んで作った（HEAD 881887f、ビルド・測定なし）。行番号は ±数行の目安。数値は「実測（出典）」か「推定（式）」を付けてある。未確認の前提は §6 にまとめた。
+状態: **P0 の探針、P1b（表示タスク、すぐ join、`CONFIG_KOBAKO_DISP_TASK` 既定 n）、P1a の 1〜6 まで実装（§7）。** 実測は [frame-breakdown.md](frame-breakdown.md) §8（P0）と §11（P1）。CPU 0 に置くと描画＋転送が +0.9 ms（+9.6%）延びた。IMU を読み手がいるときだけ読み、キーボードを INT ピンで門にした後は +0.41 ms。残りは LCD の SPI 完了割り込み（1 フレーム約 29 回、CPU 0）で、割り込みを CPU 1 に移すと −0.09 ms になり、合格の基準（+0.15 ms）を満たす（frame-breakdown.md §11）。送信をレジスタ直書き（`lcd_spi.c`、割り込みなし）にすると、表示タスクで 9.13 ms、inline 9.21 ms（キューの inline は 9.62 ms）で、表示タスクを使うビルドの既定にした。同じコアなら +0.10 ms。以下の本文は 2026-11-10 にコードを読んで作った（HEAD 881887f、ビルド・測定なし）。行番号は ±数行の目安。数値は「実測（出典）」か「推定（式）」を付けてある。未確認の前提は §6 にまとめた。
 
 フレーム N の描画・転送を別のタスク（CPU 0）で回している間に、UI タスク（CPU 1）がフレーム N+1 の JS を進める。JS が描画の読む状態に触れる所でだけ待ち合わせる（join）。
 
@@ -33,7 +33,7 @@
 
 | 状態 | 表示相で表示タスクがすること | 表示相で UI がしてよいこと | 守る仕組み |
 | --- | --- | --- | --- |
-| Shiki のフレームの前面 `[0,count)` とヘッダ | 読む | 読むだけ。書く `merge()`（`pocket_shiki_frame.c:743`）は join の後 | `commit_impl:756` の先頭で join |
+| Shiki のフレームの前面 `[0,count)` とヘッダ | 読む | 読むだけ。書く `merge()`（`kobako_shiki_frame.c:743`）は join の後 | `commit_impl:756` の先頭で join |
 | 後ろ `[tail_base, …)` と `tail_*`、`building` | 触らない | 読み書き | `tail_base ≥ count`（§5 P1a の 5b） |
 | `candidate_color` / `candidate_sig` / `sig_ready` | 読む | 書かない | 5a・5c |
 | `committed_*` / `pending` / `has_committed` / `repair_required` / `committed_lost` | 読む | join の中（`present_result:1186`）と、join 後の commit でだけ書く | join |
@@ -94,9 +94,9 @@ ksn_result disp_join(void);  // UI だけ。IDLE なら atomic load 1 回で戻�
 
 **A. JS から見える入口**（先頭で `disp_join()`）
 - Shiki: `commit`（`:756`）、`resource`、`createSurface`。
-- `kasane` 名前空間のメソッド（`pocket_kasane.c:2717-2723, 2803`）、scene と schema のメソッド、`animation.*`。
-- `pocket_kasane.c` が他のモジュールに出している関数のうち、状態を読むもの。
-- **join しないもの**: `beginFrame`、`draw*`、`pocket_proc_native_*`、`P.heap()`、`pocket_kasane_invalidate(_bands)`。
+- `kasane` 名前空間のメソッド（`kobako_kasane.c:2717-2723, 2803`）、scene と schema のメソッド、`animation.*`。
+- `kobako_kasane.c` が他のモジュールに出している関数のうち、状態を読むもの。
+- **join しないもの**: `beginFrame`、`draw*`、`kobako_proc_native_*`、`P.heap()`、`kobako_kasane_invalidate(_bands)`。
 
 **B. `app_tick_body`**
 - 表示相なら `prior_submission` は false とみなす。
@@ -106,7 +106,7 @@ ksn_result disp_join(void);  // UI だけ。IDLE なら atomic load 1 回で戻�
 
 **C. 遷移と解体**
 - `app_stop`、`app_suspend`、`app_resume`、`app_start*`、`app_overlay_tick`、`app_vm_prepare_stop` の先頭で join する。
-- `pocket_kasane_reset` は `presenting` の間 BUSY を返すので、必ず先に join する。
+- `kobako_kasane_reset` は `presenting` の間 BUSY を返すので、必ず先に join する。
 - 表示タスクは起動時に 1 回だけ作り、壊さない。
 
 **D. UI ループの直接描画**
@@ -133,7 +133,7 @@ ksn_result disp_join(void);  // UI だけ。IDLE なら atomic load 1 回で戻�
 - **WDT**: 表示タスクは notification か SPI の待ちで block する。UI の「idle が 500 ms 走れていなければ 1 tick 譲る」（6d04053）はそのまま要る。join は 1 s で timeout のエラーを出し、そのあとも待ち続ける。
 - **ISR**: SPI2 の ISR は `app_main`（CPU 0）が登録するので、CPU 0 にあるはず（未確認）。
 
-### 2.6 違反を安く見つける（`CONFIG_POCKET_DISP_ASSERT`、既定 n）
+### 2.6 違反を安く見つける（`CONFIG_KOBAKO_DISP_ASSERT`、既定 n）
 
 1. **持ち主のタグ**: `xPortGetCoreID()` を比べ、`ASSERT_UI_JOINED`、`ASSERT_DISPLAY_OR_JOINED`、`ASSERT_NOT_DISPLAY` を要所に置く。
 2. **入力のチェックサム**: handoff のときに前面と bank の FNV を取り、join で比べる（推定 50〜100 µs）。
@@ -147,7 +147,7 @@ ksn_result disp_join(void);  // UI だけ。IDLE なら atomic load 1 回で戻�
 - **UI の stack**: 未使用の最小は実測 23,788 B（vm-L2-results.md:818）。28,672 B に縮めても約 19.7 KB の余裕がある（推定）。全アプリで最高水位を取り直してから、別のコミットで縮める。
 - **CPU 0 の他のタスク**: Wi-Fi のリンク中は表示が 6〜8% 延びる見込み（類推）。sfx が CPU 0 を占める割合は未測定。
   - **実測（P1、frame-breakdown.md §11）**: CPU 0 では、STRESS の描画＋転送が +0.9 ms 延びた（描画 +9%、転送 +0.3 ms）。`input_task`（CPU 0、優先度 6、I2C）が 1 秒に約 130 ms 走るが、表示タスクを優先度 6 にしても 0.15 ms しか戻らない。残りの原因は未特定。
-- **CPU 1 に置く変種**（`CONFIG_POCKET_DISP_CORE=1`）: 重なるのは転送の待ち（実測 2.8〜5.2 ms）だけ。STRESS は約 15.7 ms、DERBY のレースは 11.6〜14.3 ms の見込み（推定）。CPU 0 だと表示が 10% 以上延びるときや、命令キャッシュの取り合いが大きいときの退避先。
+- **CPU 1 に置く変種**（`CONFIG_KOBAKO_DISP_CORE=1`）: 重なるのは転送の待ち（実測 2.8〜5.2 ms）だけ。STRESS は約 15.7 ms、DERBY のレースは 11.6〜14.3 ms の見込み（推定）。CPU 0 だと表示が 10% 以上延びるときや、命令キャッシュの取り合いが大きいときの退避先。
 
 ## 4. 命令キャッシュ
 
@@ -178,7 +178,7 @@ ksn_result disp_join(void);  // UI だけ。IDLE なら atomic load 1 回で戻�
 P1a の中身:
 1. `render_rects_body`（`ksn_render.c:1946`〜）から `ksn_core_presented/failed/defer_repair` の呼び出し（約 20 か所）を抜き、結果を返り値にする。
 2. `ksn_view_host_present_complete`（`ksn_view.c:190`）を begin / run / end に分ける。
-3. `pocket_kasane_present_complete`（`pocket_kasane.c:3042`）を prepare / finish に分ける。
+3. `kobako_kasane_present_complete`（`kobako_kasane.c:3042`）を prepare / finish に分ける。
 4. `present_frame`（`app_session.c:2514`）を `present_prepare`、`present_run(job)`、`present_finish(job)` に分け、ログの塊を外に出す。
 5. Shiki の直し:
    - (a) `tail_color` を足す。
@@ -192,10 +192,10 @@ P1a の中身:
 
 - **R1** 命令キャッシュと SPI0 の取り合い、キャッシュの置換方式（§4 の測定 1〜3）。
 - **R2** CPU 0 の負荷で表示が延びるか（音あり・なし、音楽、Wi-Fi、BLE で比べる）。**音なしの STRESS でも +0.9 ms 延びた**（frame-breakdown.md §11）。input の横取りは 0.15 ms 分だけで、残りは割り込みか I2C ドライバの待ち方か、未切り分け。
-- **R3** SPI の ISR がどのコアにあるか。**CPU 0（`app_main` が初期化）で、表示タスクを CPU 0 に置いたときの上乗せの残り（約 0.4 ms）の正体だった。** `CONFIG_POCKET_LCD_ISR_CORE` で移せる（frame-breakdown.md §11）。
+- **R3** SPI の ISR がどのコアにあるか。**CPU 0（`app_main` が初期化）で、表示タスクを CPU 0 に置いたときの上乗せの残り（約 0.4 ms）の正体だった。** `CONFIG_KOBAKO_LCD_ISR_CORE` で移せる（frame-breakdown.md §11）。
 - **R4** 表示タスクの stack の深さ、コプロセッサの退避域、`StaticTask_t` の大きさ。
 - **R5** DRAM の余裕: レースの空き約 42 KB から 4.7 KB を引くと、逼迫を抜ける条件（36,864 B）までの余裕は約 0.4 KB（推定）。UI stack を縮める交換が前提になる。
-- **R6** まだ数えていない入口（`pocket_shape.c`、`pocket_derby.c`、`pocket_overlay.c`、`pocket_grid/pixel/video` ほか）。
+- **R6** まだ数えていない入口（`kobako_shape.c`、`kobako_derby.c`、`kobako_overlay.c`、`kobako_grid/pixel/video` ほか）。
 - **R7** 表示経路の副作用（`ksn_font.c`、静的アセットの image port など）。
 - **R8** PIE を 2 つ目のタスクで使えるか（コードには「owner task only」とある）。
 - **R9** 続きのターン・park・Back の保存ターン・強制停止と表示相の組み合わせ。
@@ -211,8 +211,8 @@ P1a の中身:
 | 項目 | 入れたもの | コミット |
 | --- | --- | --- |
 | 1 | `render_rects_body` は `const ksn_core *` と準備済みの frame を受け取り、失敗の記録（defer repair／failed）を値で返す。中で使う 5 つの helper も `const` にし、core を書かないことをコンパイラに保証させた | aa84cfd |
-| 2〜4 | `ksn_render_begin/run/end`、`ksn_view_host_present_begin/end`、`ksn_runtime_present_begin/end`、`pocket_kasane_present_begin/end`。begin と end が core を変え（UI）、run（描画と completion の finish）は読むだけ。`app_session.c` は advance・begin・end・集計・ログを UI に残し、`present_run`（描画・送信・`board_present_frame_end`）だけを表示タスクに渡す | aa84cfd |
-| 5a〜5d | `tail_color`、tail の起点を pending の frame の後ろにも、`sig_ready=false` と image band・carry の無効化を `merge` へ、`half_carry` の確保を `pocket_proc_prepare_render`（present の前、UI）へ | 6c5cc69 |
+| 2〜4 | `ksn_render_begin/run/end`、`ksn_view_host_present_begin/end`、`ksn_runtime_present_begin/end`、`kobako_kasane_present_begin/end`。begin と end が core を変え（UI）、run（描画と completion の finish）は読むだけ。`app_session.c` は advance・begin・end・集計・ログを UI に残し、`present_run`（描画・送信・`board_present_frame_end`）だけを表示タスクに渡す | aa84cfd |
+| 5a〜5d | `tail_color`、tail の起点を pending の frame の後ろにも、`sig_ready=false` と image band・carry の無効化を `merge` へ、`half_carry` の確保を `kobako_proc_prepare_render`（present の前、UI）へ | 6c5cc69 |
 | 6 | `board_host_overlays`: pet・マイク・文字欄・notice の重ね描きを止めるスイッチ（今は常に on） | 6c5cc69 |
 
 - host: `test_kasane_dma_overlap`、`test_dma_completion_owners`、Kasane の一式（`KASANE_DMA_OVERLAP` あり・なし）、Shiki の proc・turn・api、STRESS の digest `84a31336`（4 行・8 行 × 範囲あり・なしで変更前と同じ）、DERBY の全 tier、board の half・transport・overlap、session dispatch。
@@ -226,11 +226,11 @@ P1a の中身:
 - 印: `JSObject.u.cfunc` の `cproto` を 7 bit にして空いた 1 bit、`JSCFunctionDataRecord` の `data_len` の最上位 bit（data は 127 個まで。超えると RangeError）。オブジェクトの大きさは変わらない。
 - 付け方: 印は「印を立てたスタックフレーム」から直接作られた関数にだけ付く（`rt->cfunc_marking` と `rt->cfunc_mark_sf`）。`JS_MarkCFunctions` / `JS_SetCFunctionMark` は呼び手のフレームで立て・下ろし、印のある関数の呼び出しは自分のフレームで立てる。したがって面が実行中に作る関数（cancel トークン、購読の `close` など）には付き、その呼び出しが走らせる JS（Kasane の scene の build など）と、その JS が作る・初めて使う組み込み（`Promise.finally` の thunk、`Array.prototype.map` など）には付かない。
   - 最初の版は「数を足す」形で、印のある呼び出しの中で初めて使われた組み込みにまで永久に印が付いた（Fable のレビュー F1）。重なりが黙って消える種類の誤りなので、フレームで限る形に直した。
-- 遅延生成: 関数表（`JS_SetPropertyFunctionList`）の関数は最初に読まれたときに作られるので、登録の時点の印を残し、作るときはその印に**置き換える**（読み手の印は使わない）。autoinit は未使用だった id 3（`JS_AUTOINIT_ID_PROP_JOIN`）、遅延リストは `len` の 1 bit。入れ子の `JS_OBJECT_DEF` にも伝わる。エンジンの遅延 intrinsic（`Map` など）は常に印なし。遅延名前空間（`pocket_api_lazy`）も貢献者ごとに登録時の印に置き換える。
+- 遅延生成: 関数表（`JS_SetPropertyFunctionList`）の関数は最初に読まれたときに作られるので、登録の時点の印を残し、作るときはその印に**置き換える**（読み手の印は使わない）。autoinit は未使用だった id 3（`JS_AUTOINIT_ID_PROP_JOIN`）、遅延リストは `len` の 1 bit。入れ子の `JS_OBJECT_DEF` にも伝わる。エンジンの遅延 intrinsic（`Map` など）は常に印なし。遅延名前空間（`kobako_api_lazy`）も貢献者ごとに登録時の印に置き換える。
 - 呼び出し側: `js_call_c_function` と `js_call_c_function_data` の 2 か所（ほかの経路は iterator の近道だけで、印のある関数は近道を通らない）。印の無い関数の費用は分岐 1 つ（推定。未計測）。
 - 外す: `JS_SetCFunctionJoin(func, false)`。
 - 検査: `tools/vmtest/cfunc_join.sh`（asan）。直接作った関数・data 関数・関数表・getter・入れ子・実行中に作った関数・`call`/`bind`/`map` 経由・例外の後で数が 0 に戻ること・エンジンの関数には付かないこと。フックの呼び出しを消す変異、遅延リストの印を消す変異は、どちらも検査が落ちる。`tools/vmtest/run.sh` の 88 件は変わらず通る。
-- 外す面（`app_session.c` の `TRY_NOJOIN`）: 表示相の状態に触れない面を調べた結果（pocket の土台、memory、random、storage、app、fs、av、imu、io、net、ble、input、text、bridge、workspace、derby、shiki-debug、shapes）。kasane・capture・pet-hub・overlay は外さない。av の `outputSource`・`playbackSource` は Kasane に届くので、av 自身が印を付ける。`kasane.shiki` は `beginFrame`・`draw*`・slot/region/list・`heap`・`sin/cos` を外し、`commit`・`resource`・`createSurface` は join する。載っていない面は join する（安全側）。
+- 外す面（`app_session.c` の `TRY_NOJOIN`）: 表示相の状態に触れない面を調べた結果（kobako の土台、memory、random、storage、app、fs、av、imu、io、net、ble、input、text、bridge、workspace、derby、shiki-debug、shapes）。kasane・capture・pet-hub・overlay は外さない。av の `outputSource`・`playbackSource` は Kasane に届くので、av 自身が印を付ける。`kasane.shiki` は `beginFrame`・`draw*`・slot/region/list・`heap`・`sin/cos` を外し、`commit`・`resource`・`createSurface` は join する。載っていない面は join する（安全側）。
 - `disp_start` / `disp_join`（`main/hal/disp.c`）: start は表示タスクに渡してすぐ戻り、join は待ってから finish を UI タスクで走らせる。タスクが無いときはその場で走らせ、finish は join まで待つ。フックは `disp_join`。present はまだ `disp_run`（同期）なので、今は何も重ならない。
 
 #### 配線の前に直すこと（Fable のレビュー、2026-11-11）
@@ -239,14 +239,14 @@ P1a の中身:
 - F7: host の重ね描き（text・pet・capture）を、遅延するフレームでは止める（`board_host_overlays` を job ごとに）。それまでは text の `TRY_NOJOIN` は成り立たない。
 - F8: `beginFrame` の BUSY を、表示中のフレームについては緩める。そのとき `commit` は join の後・`merge()` の前に `any_pending()||any_repair()` を見直す。`buffers()` が `image_band_buf` を確保するのは `resource` / `prepare_render` だけにする。
 - F11: `port`・`stats`・`display_state`・`completion` は `present_frame_body` の局所変数。job から指しているので、遅延すると宙に浮く。静的にする。
-- F12: `disp_join` を UI タスク以外から呼んだら止める assert（`CONFIG_POCKET_DISP_ASSERT`）。表示タスクから呼ぶと永久に待つ。
+- F12: `disp_join` を UI タスク以外から呼んだら止める assert（`CONFIG_KOBAKO_DISP_ASSERT`）。表示タスクから呼ぶと永久に待つ。
 - F13: §2.3 の B・C・D の join（`app_stop` は面の reset とランタイムの解放の前）。
 - F14: 待ちに 1 秒の診断、join した場所の計数（重なりが消えた原因を見えるように）。
 - F3・F4（済・記録）: `js_call_math_fast` は印のある関数を通さない。GC の finalizer は join しない native の入口なので、表示相が読むものを finalizer で解放しない。
 
 ### 7.3 P2a: join を遅らせる（2026-11-11）
 
-- `CONFIG_POCKET_DISP_DEFER`（`POCKET_DISP_TASK` が y のときだけ、既定 y）。`app_tick_body` の末尾の present だけが対象で、`present_deferrable()` が §1.3 を判定する: フォアグラウンド、Back・停止・続きのターンでない、ジョブの待ちが無い、表示タスクで動く、capture・text・録音・pet の alert・通知が無い、pixel・video・grid の保留が無い、Kasane 側（`pocket_kasane_present_deferrable`: schema・provider・video/pixel/grid の resource・animation block・modal・notice が無い）、前に転送の失敗が無い。
+- `CONFIG_KOBAKO_DISP_DEFER`（`KOBAKO_DISP_TASK` が y のときだけ、既定 y）。`app_tick_body` の末尾の present だけが対象で、`present_deferrable()` が §1.3 を判定する: フォアグラウンド、Back・停止・続きのターンでない、ジョブの待ちが無い、表示タスクで動く、capture・text・録音・pet の alert・通知が無い、pixel・video・grid の保留が無い、Kasane 側（`kobako_kasane_present_deferrable`: schema・provider・video/pixel/grid の resource・animation block・modal・notice が無い）、前に転送の失敗が無い。
 - 遅らせたフレームは `board_host_overlays=false` で描き、`present_ack`（join の中）で戻す。集計（`present_account`）は `present_settle()` で、次の present の冒頭・次のターンの冒頭・遷移で行う。
 - 次のターンの冒頭（§2.3 B）: まだ表示中で、フレームが条件を満たし続けていれば join しない。そのときは `set_animation_time` と `needs_present` の門を飛ばし、`prior_submission` は false とみなす（表示中のフレームは core から見ると submission）。条件を外れていれば先に join する。続きのターンの `has_submission`/`proc_pending` は settle の後に読む。
 - 転送の失敗（`KSN_IO`）を見たら、そのセッションの残りは遅らせない（§2.3 E）。
@@ -258,7 +258,7 @@ P1a の中身:
 
 ### 8.0 結論
 
-- **遅延モード（P2a、`CONFIG_POCKET_DISP_DEFER`）は、実機で一度も測られていない。** コードは入っている（§8.1）が、文書に遅延モードの `FRAME_P0`（`defer=` `hook_ms=` `settle_ms=`）の記録もジョブ名も無い。実機の記録は P1（すぐ join）まで（frame-breakdown.md §11、lcd-dma-driver.md §9.14）。この checkout の履歴では `main/hal/disp.c` が `a767306` の 1 コミットに畳まれていて、測定用コミットの有無は履歴からは確かめられない。§2.6 の検査（チェックサム、影の再描画、host の「遅い join」）も未実装。
+- **遅延モード（P2a、`CONFIG_KOBAKO_DISP_DEFER`）は、実機で一度も測られていない。** コードは入っている（§8.1）が、文書に遅延モードの `FRAME_P0`（`defer=` `hook_ms=` `settle_ms=`）の記録もジョブ名も無い。実機の記録は P1（すぐ join）まで（frame-breakdown.md §11、lcd-dma-driver.md §9.14）。この checkout の履歴では `main/hal/disp.c` が `a767306` の 1 コミットに畳まれていて、測定用コミットの有無は履歴からは確かめられない。§2.6 の検査（チェックサム、影の再描画、host の「遅い join」）も未実装。
 - **2 コア化の値打ちは、11-10 の見込みから変わった。**
   - 出荷の周期 33 ms では、どの場面も 1 フレームの仕事が 11〜16 ms（推定、§8.3）で周期に収まる。**33 ms のままなら 2 コア化で fps は変わらず、払うのは DRAM（静的 約 +6.6 KB）と危険だけ。**
   - 16 ms では、inline のままでも STRESS・パドック・軽いレースは平均で 16.67 ms を下回る見込み（推定 11.4〜15.9 ms。11-09 の実測は 13.4〜17.5 ms）。**inline で届かないのは JS が長い窓（DERBY の WIDE 2、MEGADEMO の WAKE）と、ログ・GC・続きのターンのフレーム**。2 コア化はそこに 4〜7 ms の余裕を作る（推定）。
@@ -272,33 +272,33 @@ P1a の中身:
 | P0 探針 | 済 | `main/hal/frame_bd.c` の `FRAME_P0`（`js_pre`/`js_post`、適格、`nodefer=` の 17 項目） | 実測済（frame-breakdown.md §8） |
 | P1a 整理 1〜6 | 済 | `present_run`（`app_session.c:2885`）は `ksn_present_job_run` と `board_present_frame_end` だけ。`board_host_overlays`（`:850-895`） | 実測済（§7.1） |
 | P1a 7（host の「遅い join」） | **未実装** | `tools/` に `disp_start` を遅らせて実行する試験は無い。あるのはエンジンの印の検査 `tools/vmtest/cfunc_join.sh` だけ。`tools/test_session_dispatch.c:105` は「`present_defer_block()` は常に 1」で、遅延の経路を通らない | — |
-| P1b 表示タスク | 済、既定 n | `disp.c`: 静的タスク、`CONFIG_POCKET_DISP_CORE` 既定 0、優先度 5、**stack は `CONFIG_POCKET_DISP_STACK` 既定 6,144 B**（§0 の 4,096 B ではない） | 実測済。直書きの送信で inline 9.21 / 表示タスク 9.13 ms（frame-breakdown.md §11）。音の途切れ・10 分の WDT・影の再描画は未確認のまま |
+| P1b 表示タスク | 済、既定 n | `disp.c`: 静的タスク、`CONFIG_KOBAKO_DISP_CORE` 既定 0、優先度 5、**stack は `CONFIG_KOBAKO_DISP_STACK` 既定 6,144 B**（§0 の 4,096 B ではない） | 実測済。直書きの送信で inline 9.21 / 表示タスク 9.13 ms（frame-breakdown.md §11）。音の途切れ・10 分の WDT・影の再描画は未確認のまま |
 | P2a エンジンの印 | 済 | `JS_SetCFunctionJoinHook(join_rt, js_join_hook)`（`app_session.c:1855`）、`TRY_NOJOIN`（`:1861-1948`） | 未測定（印の無い関数の費用「分岐 1 つ」は推定のまま） |
 | P2a join を遅らせる | 実装済、**実機未測定** | `present_defer_block`（`:2518`）、`present_frame_body`（`:2934`: `may_defer` なら `board_host_overlays=false` → `disp_start` → join せず戻る）、`present_ack`（`:2911`、確認だけ = F6）、`present_settle`（`:2920`）、`present_account`（`:3011`、`KSN_IO` で `defer_off`）、`app_tick_body` の冒頭（`:2585-2590`）、遷移の `present_settle()`（`:913, 1241, 1417, 1484, 1717, 2315`）、`main.c:920, 988, 990, 1027, 1274` の `disp_join()` | **無し** |
-| F8（`beginFrame` の BUSY） | 済 | `pocket_shiki_frame.c:944`（`any_pending() && !disp_busy()`）、`commit_impl:1247` で join 後に見直し、`buffers():336` は `image_band_buf` の確保の前に join | 未測定 |
+| F8（`beginFrame` の BUSY） | 済 | `kobako_shiki_frame.c:944`（`any_pending() && !disp_busy()`）、`commit_impl:1247` で join 後に見直し、`buffers():336` は `image_band_buf` の確保の前に join | 未測定 |
 | F11（job の静的化） | 済 | `pf_display`/`pf_port`/`pf_stats`/`pf_completion`（`app_session.c:2895-2898`） | — |
-| F12（持ち主の assert） | 済 | `disp.c:20-33`（`CONFIG_POCKET_DISP_ASSERT`） | — |
+| F12（持ち主の assert） | 済 | `disp.c:20-33`（`CONFIG_KOBAKO_DISP_ASSERT`） | — |
 | F14（1 秒の診断、join の計数） | 済 | `disp.c` の `join waiting > 1 s`、`frame_bd_join_wait` | — |
 | §2.6 の 1（要所の持ち主タグ）・2（入力のチェックサム）・3（影の再描画） | **未実装** | `ASSERT_UI_JOINED` などの語は木に無い | — |
-| 3 モードの巡回（`inline\|sync\|defer`） | **形が違う** | `POCKET_FRAME_BD_DISP_AB` は `inline / task5 / task6`（`frame_bd.c:189-191`）。`DISP_DEFER=y` のビルドでは task の窓が遅延になり、**sync の腕が無い** | — |
+| 3 モードの巡回（`inline\|sync\|defer`） | **形が違う** | `KOBAKO_FRAME_BD_DISP_AB` は `inline / task5 / task6`（`frame_bd.c:189-191`）。`DISP_DEFER=y` のビルドでは task の窓が遅延になり、**sync の腕が無い** | — |
 | P2b・P3・P4 | 未着手 | — | — |
 
-実装が §7.3 の記述と合うことは読んで確かめた。合わない点は 2 つ: stack の既定（上）、`CONFIG_POCKET_DISP_DEFER` は `DISP_TASK` に従属して既定 y（`DISP_TASK=y` にしたビルドは、そのまま遅延する）。
+実装が §7.3 の記述と合うことは読んで確かめた。合わない点は 2 つ: stack の既定（上）、`CONFIG_KOBAKO_DISP_DEFER` は `DISP_TASK` に従属して既定 y（`DISP_TASK=y` にしたビルドは、そのまま遅延する）。
 
-**Shiki の 1 フレームの形（§8.4 の前提）。** 面のバッファは 1 本で、表示中のフレームは前面 `[0, count)`、新しいフレームは後ろ（tail）に積む。`commit_impl` は、join（印）→ `old_box` → `merge()`（tail を前面へ写す）→ `band_signature` → `box_damage` → publish の順（`pocket_shiki_frame.c:1238-1335`）。つまり **commit の仕事はすべて join の後 = `js_post`** にある。
+**Shiki の 1 フレームの形（§8.4 の前提）。** 面のバッファは 1 本で、表示中のフレームは前面 `[0, count)`、新しいフレームは後ろ（tail）に積む。`commit_impl` は、join（印）→ `old_box` → `merge()`（tail を前面へ写す）→ `band_signature` → `box_damage` → publish の順（`kobako_shiki_frame.c:1238-1335`）。つまり **commit の仕事はすべて join の後 = `js_post`** にある。
 
 ### 8.2 改訂した段階
 
-共通の道具: ブローカーの変種（`sdkconfig.variant.<name>` の Kconfig 断片）。今あるのは `kasane_ab`（`POCKET_KASANE_AB`）と `turnperf`（`POCKET_VM_TURNPERF` ＋ `POCKET_FIXED_RANDOM_SEED`）。測定用コミットを積んで revert する方式は使わない。
+共通の道具: ブローカーの変種（`sdkconfig.variant.<name>` の Kconfig 断片）。今あるのは `kasane_ab`（`KOBAKO_KASANE_AB`）と `turnperf`（`KOBAKO_TURNPERF` ＋ `KOBAKO_FIXED_RANDOM_SEED`）。測定用コミットを積んで revert する方式は使わない。
 
 | 段 | 中身 | 合格 | 中止 | 実機の測定 |
 | --- | --- | --- | --- | --- |
-| **M0** 測定の道具（挙動は変えない） | (1) 周期を Kconfig に: `VM_DISPLAY_PERIOD_MS`（`app_session.h:103` の `#define 33`）を `CONFIG_POCKET_VM_DISPLAY_PERIOD_MS`（既定 33）から取る。(2) `DISP_AB` の腕を `inline / sync / defer` にする（優先度 6 の腕は外す: 直書きの後は 5 と 6 の差が −0.08 / −0.06 ms で無い、実測 frame-breakdown.md §11）。(3) `sdkconfig.variant.frame_bd`（`POCKET_FRAME_BREAKDOWN` ＋ 周期 16）、`sdkconfig.variant.twocore_ab`（それに `POCKET_DISP_TASK`・`POCKET_DISP_DEFER`・`POCKET_FRAME_BD_DISP_AB`・`POCKET_DISP_ASSERT`） | 既定のビルドの bin が変わらない（周期の既定 33）。host の一式 | — | なし |
+| **M0** 測定の道具（挙動は変えない） | (1) 周期を Kconfig に: `VM_DISPLAY_PERIOD_MS`（`app_session.h:103` の `#define 33`）を `CONFIG_KOBAKO_VM_DISPLAY_PERIOD_MS`（既定 33）から取る。(2) `DISP_AB` の腕を `inline / sync / defer` にする（優先度 6 の腕は外す: 直書きの後は 5 と 6 の差が −0.08 / −0.06 ms で無い、実測 frame-breakdown.md §11）。(3) `sdkconfig.variant.frame_bd`（`KOBAKO_FRAME_BREAKDOWN` ＋ 周期 16）、`sdkconfig.variant.twocore_ab`（それに `KOBAKO_DISP_TASK`・`KOBAKO_DISP_DEFER`・`KOBAKO_FRAME_BD_DISP_AB`・`KOBAKO_DISP_ASSERT`） | 既定のビルドの bin が変わらない（周期の既定 33）。host の一式 | — | なし |
 | **M1** 遅延モードの最初の実測 | `twocore_ab` で DERBY（デモのレース 1 本、WIDE 2 を含む）と STRESS LV1。窓ごとに `FRAME_BD`（`js` `rn` `sd` 周期）と `FRAME_P0`（`js_pre` `js_post` `defer` `hook_ms` `settle_ms` `nodefer=`） | 判定ではなく記録。読むもの: ① inline の窓の仕事の和（今の木の 16 ms の実力）、② defer の窓の周期、③ JS の CPU 時間 = `js − hook_ms`（defer と inline の差 = 命令キャッシュの共有、R1）、④ `rn + sd` の sync と inline の差（CPU 0 の費用の再確認）、⑤ `defer / presents`、⑥ 表示タスクの stack の空き | 止まる・WDT・`join waiting > 1 s`・画面の乱れ → 遅延を切って原因を調べる（P2a の検査を先に入れる） | DERBY 1、STRESS 1。持ち主の目視（下） |
 | **G1** 判断（持ち主） | M1 の ①〜③ で、2 コア化を続けるか決める（§8.5） | — | — | — |
-| **P2a-V** 遅延の正しさの検査 | §2.6 の 2（handoff で前面・bank・`candidate_sig`・`band_bits` の FNV、join で比較）と P1a の 7（host の「遅い join」＋ TSan）を入れる。`CONFIG_POCKET_DISP_ASSERT` の下 | host: 遅い join で STRESS・DERBY の digest が変わらない、TSan 0 件。実機: チェックサムの不一致 0（DERBY 1 レース、STRESS 2 分） | 不一致が 1 件でも出たら、その入口を join に戻す（`TRY_NOJOIN` から外す） | `twocore_ab`（`DISP_ASSERT` 入り）で DERBY・STRESS |
+| **P2a-V** 遅延の正しさの検査 | §2.6 の 2（handoff で前面・bank・`candidate_sig`・`band_bits` の FNV、join で比較）と P1a の 7（host の「遅い join」＋ TSan）を入れる。`CONFIG_KOBAKO_DISP_ASSERT` の下 | host: 遅い join で STRESS・DERBY の digest が変わらない、TSan 0 件。実機: チェックサムの不一致 0（DERBY 1 レース、STRESS 2 分） | 不一致が 1 件でも出たら、その入口を join に戻す（`TRY_NOJOIN` から外す） | `twocore_ab`（`DISP_ASSERT` 入り）で DERBY・STRESS |
 | **P2a** 遅延を「使える」と認める | 上の 2 つの後で、合格の線を引き直す（右） | 16 ms の defer の窓で、1 フレームの仕事（周期 − 待ち）が **STRESS ≤ 10.0 ms、DERBY レース（WIDE 2 以外）≤ 10.5 ms、WIDE 2 ≤ 13.5 ms、パドック ≤ 9.5 ms**（§8.3 の推定＋約 0.8 ms）。JS の CPU 時間が inline の窓の +10% 以下、`rn + sd` が +0.15 ms 以下。`defer` がレースで 95% 以上、STRESS で 90% 以上（続きのターンは設計どおり重ねない、実測 54/60）。10 分で WDT の警告なし。DERBY の効果音に途切れなし（耳）。`memlog.py --port --check` で空きヒープを記録 | JS の CPU 時間 +25% 超 → P4（`render_band` を IRAM、DRAM −3.2 KB）を試し、それでも越えるなら 2 コア化を止める。**CPU 1 の変種は退避先にしない**（重なるのは転送の待ち 2.0〜4.4 ms だけで、inline がすでに 12〜14 ms なら得が小さい、推定） | `twocore_ab` で DERBY・STRESS・BIG WAVE・MEGADEMO |
-| **P3'** commit の署名を join の前へ | §8.4 の形（署名とビット表を 2 面にして入れ替える）。#2 が入った後、P2a の合格の後 | 16 ms の defer の窓で STRESS の 1 フレームの仕事 **−0.4 ms 以上**（旧 −0.5。`box_reuse` で commit が縮んだ分を引いた）。digest と `POCKET_PROC_SIG_CHECK` が不変 | −0.3 ms 未満、または digest が動く | 同じバイナリの腕（`g_pocket_proc_sig_early`）を `DISP_AB` と掛ける |
+| **P3'** commit の署名を join の前へ | §8.4 の形（署名とビット表を 2 面にして入れ替える）。#2 が入った後、P2a の合格の後 | 16 ms の defer の窓で STRESS の 1 フレームの仕事 **−0.4 ms 以上**（旧 −0.5。`box_reuse` で commit が縮んだ分を引いた）。digest と `KOBAKO_PROC_SIG_CHECK` が不変 | −0.3 ms 未満、または digest が動く | 同じバイナリの腕（`g_kobako_proc_sig_early`）を `DISP_AB` と掛ける |
 | **P2b** 適格を広げる | notice・animation・text を 1 つずつ。M1 の `nodefer=` で、実際に遅延を止めている項目だけ | P2a と同じ | — | 項目ごと |
 | **P4** | `render_band` を IRAM に | P2a の中止の線に掛かったときだけ。配置を変えた A/B（同じカーネルが配置で 15% 動く） | 逼迫判定の回数が増える | — |
 | **60 fps の出荷**（別の文書の範囲） | 周期 16 ms を既定に、µs の期限（frame-breakdown.md §6 の `deadline`）、ログのフレーム | 持ち主の判断 | — | — |
@@ -306,7 +306,7 @@ P1a の中身:
 M1 を P2a-V より先に置く理由: 時間の測定は検査なしでも成り立ち、G1 で「続けない」になれば検査の実装が要らない。ただし **M1 の結果を「遅延は正しく動く」の根拠にしない**（競合は黙って画素を壊す種類の誤りで、`board_capture` は遅延を止めるのでソフトウェアでは見えない）。M1 では持ち主に DERBY のレースと STRESS の画面の目視を頼む。
 
 M1 で初めて起きる組み合わせ（未確認の前提）:
-- **PIE を 2 つのタスクが同時に使う。** 描画（表示タスク、CPU 0）と `pocket.derby` の `ser()`（`CONFIG_POCKET_DERBY_SER_PIE`、UI、CPU 1）。どちらもコアに固定されていて、コプロセッサの状態はコアごと・タスクごとなので成り立つはず（推定）。P1 は表示タスクが描く間 UI が待っていたので、同時には使っていない。R8 は P1 で半分だけ解けた。
+- **PIE を 2 つのタスクが同時に使う。** 描画（表示タスク、CPU 0）と `kobako.derby` の `ser()`（`CONFIG_KOBAKO_DERBY_SER_PIE`、UI、CPU 1）。どちらもコアに固定されていて、コプロセッサの状態はコアごと・タスクごとなので成り立つはず（推定）。P1 は表示タスクが描く間 UI が待っていたので、同時には使っていない。R8 は P1 で半分だけ解けた。
 - **DRAM。** 静的 +約 6.6 KB（推定: stack 6,144 ＋ TCB・セマフォ 約 0.5 KB）。表示タスクの stack の空きは 3,288〜3,384 B（実測、frame-breakdown.md §11）なので、4,096 B に縮めると空き 約 1.2〜1.3 KB（推定）で、§5 の条件（1 KB 以上）の際。DERBY のレースの空きは逼迫の線（24,576 B）のすぐ上（実測 26.1〜26.3 KB、frame-breakdown.md §8。その後の変更で動いているので取り直す）。R5 は未解決。
 
 ### 8.3 1 フレームの見込み（すべて推定。元の値は実測）
@@ -344,11 +344,11 @@ M1 で初めて起きる組み合わせ（未確認の前提）:
 | 候補 | 中身 | 置く場所 | inline での見込み | 2 コアでの見込み |
 | --- | --- | --- | --- | --- |
 | **#1** 模様線のフレームで、捨てる entry ごとの `packet_next` を近道に（`ksn_shiki_frame.c` の ext の歩み） | 描画側 | **#2 の後で要否を決める。** #2 のビット表が有効な帯は、掛かる entry しか訪れない（作業ツリーの `BAND_FOR(start)`）ので、捨てる entry がほぼ無くなる。残るのは、表が無い（確保できない・帯をまたぐ行・`candidate_sig` 以外）ときの道だけ | 描画 −0.1〜0.3 ms、フレーム −0.05〜0.2 ms（推定、lcd-dma-driver.md §9.17）。#2 の後は、そのうち残る道の分だけ | 同じ。描画は表示側なので、効くのは「送信が隠していない描画」の範囲（実測の上限: レース 0.44〜1.5、STRESS 0.56〜0.69 ms） |
-| **#2** 帯ごとの「掛かる entry」のビット表（`band_bits`、実装中） | commit（署名の歩みで作る）＋描画（表だけを歩く） | **P2a より前、inline で入れて測る。** `kasane_ab` に腕 `band_bits`（`g_pocket_proc_band_bits`）を足し、`KASANE_PIECES` の「隠れない描画」と、ターン（commit が延びる分）の両方を見る | 描画 −0.2〜0.6 ms、commit ＋0.03〜0.06 ms（どちらも推定、根拠は弱い: memset 約 2.2 KB と entry×帯ごとの OR）。フレームに届くのは隠れない描画まで | **差し引きが変わる。** commit の増分は `js_post`（直列）に丸ごと乗り、描画の得は表示側の隠れない分だけ。表示が律速の場面では得がそのまま届き、JS が律速の窓（WIDE 2）では commit の増分だけが残る（推定 +0.03〜0.06 ms、小さい） |
+| **#2** 帯ごとの「掛かる entry」のビット表（`band_bits`、実装中） | commit（署名の歩みで作る）＋描画（表だけを歩く） | **P2a より前、inline で入れて測る。** `kasane_ab` に腕 `band_bits`（`g_kobako_proc_band_bits`）を足し、`KASANE_PIECES` の「隠れない描画」と、ターン（commit が延びる分）の両方を見る | 描画 −0.2〜0.6 ms、commit ＋0.03〜0.06 ms（どちらも推定、根拠は弱い: memset 約 2.2 KB と entry×帯ごとの OR）。フレームに届くのは隠れない描画まで | **差し引きが変わる。** commit の増分は `js_post`（直列）に丸ごと乗り、描画の得は表示側の隠れない分だけ。表示が律速の場面では得がそのまま届き、JS が律速の窓（WIDE 2）では commit の増分だけが残る（推定 +0.03〜0.06 ms、小さい） |
 | **#3** 汚れた帯の中で送信を狭める | 送信 | 採らない（lcd-dma-driver.md §9.15・§9.17: 狭い窓が Shiki の遅い道に落ちる、開き直しの費用、差し引き ±0.3 ms、推定） | — | 2 コア化の後は表示側が律速なので、送る bytes を減らす価値は上がる（host の計数で STRESS 56〜70%）。**P2a の実測で表示が律速と確かまったら見積もり直す。** 遅い道の問題はそのまま |
 | **#4** 不透明のパネル | 描画（画素が変わる） | 持ち主の判断。2 コア化と独立。入れるなら M1 の後（基準を動かさない） | 未見積もり | 効くのは隠れない描画の範囲。2 コア化で価値は増えも減りもしない |
 | **#5** 2 コアの重ね合わせ | — | M0 → M1 → G1 → P2a-V → P2a | — | §8.3 |
-| **#6a** `pocket_derby.c` の soft-double の残り（`cam_q` `:482-495`、`js_aim` `:922-940`、レーンの pan、`PART_PANVIS`/`PART_PANPOLES` `:1041-1055`） | JS のターン（`pocket.derby` は `TRY_NOJOIN` なので `js_pre`） | **2 コア化と独立、いつでも。** 先に `turnperf` で事象ごとのサイクルを取り、0.1 ms 未満なら手を付けない | −0.1〜0.4 ms（推定、根拠は弱い: 1 フレームに double の演算 100〜数百回 ＋ sqrt 数回。S3 の FPU は単精度だけ） | **表示が律速の場面では 0。** JS が律速の窓（WIDE 2）では inline と同じだけ縮む。60 fps を inline で狙うなら、WIDE 2 を縮める手はここと `drawMany` の類しかない |
+| **#6a** `kobako_derby.c` の soft-double の残り（`cam_q` `:482-495`、`js_aim` `:922-940`、レーンの pan、`PART_PANVIS`/`PART_PANPOLES` `:1041-1055`） | JS のターン（`kobako.derby` は `TRY_NOJOIN` なので `js_pre`） | **2 コア化と独立、いつでも。** 先に `turnperf` で事象ごとのサイクルを取り、0.1 ms 未満なら手を付けない | −0.1〜0.4 ms（推定、根拠は弱い: 1 フレームに double の演算 100〜数百回 ＋ sqrt 数回。S3 の FPU は単精度だけ） | **表示が律速の場面では 0。** JS が律速の窓（WIDE 2）では inline と同じだけ縮む。60 fps を inline で狙うなら、WIDE 2 を縮める手はここと `drawMany` の類しかない |
 | **#6b** `derby_prog.js` `prail()` の Newton 3 段（`:390-397`、Shiki の VM で走る） | JS のターン（commit の前 = `js_pre` のはず。`FRAME_P0` で確かめる） | 同上 | −0.05 ms 以下（推定: 柱 1 本あたり掛け算 2〜4 回の差）。精度の検討（遠→近で発散しない条件）が要るので、測ってから | 同上 |
 | **#6c** Gouraud の double の辺関数（`ksn_shiki_frame.c:335-372`、`gouraud_band`） | **JS のターンではなく描画**（帯を描くときに画素ごとに評価する） | #1・#2 と同じ扱い: 描画側。どのアプリのどの場面が通るかを先に数える（未確認） | 未見積もり（画素あたり double の積和 3 本 ＋ 補間。面積に比例） | 表示側。隠れない描画の範囲で効く。Gouraud の帯は描画が送信より重くなりやすいので、通る場面があるなら隠れない分は大きいはず（推定） |
 

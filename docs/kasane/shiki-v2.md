@@ -32,20 +32,20 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 | 所 | 旧 API の使い方 | 移し先 |
 | --- | --- | --- |
 | DERBY の JS（`derby_view.js` など） | `H.beginFrame`・`H.resource`・`H.register`・`H.draw`・`H.commit`（`derby_view.js` の先頭で `H = V.procedural`） | `SK.*` へ書き換える。`register`・`draw` は §2.3 の移行の後 |
-| DERBY の C（`pocket_derby.c`） | `side()`・`part()`・`aim()`・`wide()`・`ser()` の中の `draw()` から `pocket_proc_draw_numbers` を 8 か所で呼び、`view.hl`・`view.crowd` など旧 API の handle を持つ（レビュー R2） | すべての draw を Shiki の fixed の経路（`pocket_proc_shiki_draw_inputs`）に。`plan_handle` が Shiki の handle を受ける |
+| DERBY の C（`kobako_derby.c`） | `side()`・`part()`・`aim()`・`wide()`・`ser()` の中の `draw()` から `kobako_proc_draw_numbers` を 8 か所で呼び、`view.hl`・`view.crowd` など旧 API の handle を持つ（レビュー R2） | すべての draw を Shiki の fixed の経路（`kobako_proc_shiki_draw_inputs`）に。`plan_handle` が Shiki の handle を受ける |
 | DERBY の `@plan` 18 本 | 柵・芝・スタンド・観客・距離標・ゲート・大型画面・首振りの列 `prail`・`pt`・`hl`・ダスト・ボケ・帯・地図・紙吹雪・写真・絹・`nil` | `@shiki` に書き直す |
 | DERBY の型付きの点 | 大写しの馬のコマ 6 枚（各約 80 点）、HEAD ON の `hd` | `i16` の領域と `EMIT_POINTS`・`EMIT_LINES`（§6.2、v1.3 の決定） |
 | MEGADEMO | `proc_megademo.js`・`megademo_view.js` | `@shiki` |
 | BIG WAVE | `big_wave.js` | `@shiki` |
 | 検査用 | `proc_limits_probe.js`・`proc_multi_surface_probe.js`・`overlay_proc_multi_probe.js`・`proc_news_zoom.js`・`grid_fold_device_probe.js`（グローバルの `gridFold`）、`apps/heapprobe/derby_v0/`（旧 DERBY の複製、評価の余裕の二分探索に使う） | Shiki の検査へ置き換えるか廃止。heapprobe の DERBY は今の DERBY から作り直す |
-| `pocket_shape.c` | 旧 API のフレームに直接書く（`pocket_proc_native_*`） | **残す**（フレームの部品は残る、§2.2） |
+| `kobako_shape.c` | 旧 API のフレームに直接書く（`kobako_proc_native_*`） | **残す**（フレームの部品は残る、§2.2） |
 
 ### 2.2 消すもの・残すもの
 
-`beginFrame`・`commit`・`resource`・`createSurface`・`grid` は今も `pocket.kasane.shiki` から呼べる（`pocket_shiki_api.c` の `share()` が `procedural` の関数を写している）が、**実装は `pocket_shiki_frame.c` にある**（レビュー R1）。したがって `pocket_shiki_frame.c` は丸ごと消せない。
+`beginFrame`・`commit`・`resource`・`createSurface`・`grid` は今も `kobako.kasane.shiki` から呼べる（`kobako_shiki_api.c` の `share()` が `procedural` の関数を写している）が、**実装は `kobako_shiki_frame.c` にある**（レビュー R1）。したがって `kobako_shiki_frame.c` は丸ごと消せない。
 
-- **消す:** JS の `pocket.kasane.procedural` 名前空間とグローバルの `gridFold`。`pocket_shiki_frame.c` の plan の部分（plan の slot、`draw_run`、点の読み込みと結び付け、組み込み plan の登録、bgcost の計装）。float の VM（`ksn_shiki_frame.c`・`ksn_proc_plan*.c`・`ksn_proc_analysis.c`・`ksn_proc_points*.c`）。`derby_runner_affine.c`（実験、既に未使用）。ビルドの経路の `@plan` の部分（`lower_plans.mjs` の詰めた形式と `emit_rom_plans.mjs`）。
-- **残す:** フレーム（`beginFrame`・`commit`）、面（`createSurface`）、`resource`、image mode、帯の差分（band damage）、作業領域、`pocket_proc_native_*`（`pocket_shape.c` が使う）、`grid`。これらは `pocket.kasane.shiki` から直接載せる（`share()` をやめる）。
+- **消す:** JS の `kobako.kasane.procedural` 名前空間とグローバルの `gridFold`。`kobako_shiki_frame.c` の plan の部分（plan の slot、`draw_run`、点の読み込みと結び付け、組み込み plan の登録、bgcost の計装）。float の VM（`ksn_shiki_frame.c`・`ksn_proc_plan*.c`・`ksn_proc_analysis.c`・`ksn_proc_points*.c`）。`derby_runner_affine.c`（実験、既に未使用）。ビルドの経路の `@plan` の部分（`lower_plans.mjs` の詰めた形式と `emit_rom_plans.mjs`）。
+- **残す:** フレーム（`beginFrame`・`commit`）、面（`createSurface`）、`resource`、image mode、帯の差分（band damage）、作業領域、`kobako_proc_native_*`（`kobako_shape.c` が使う）、`grid`。これらは `kobako.kasane.shiki` から直接載せる（`share()` をやめる）。
 - 効果（推定、未測定）: flash と、旧 API の `.bss`・作業領域の DRAM。§8 の手順で消す前後を測る。
 - 文書の更新: CLAUDE.md の「`@plan` が無いアプリは Node 不要」は、`@shiki` の組み込みの表（`emit_shiki_rom.mjs`）も Node を要るので「`@plan` か `@shiki` が無いアプリは」に直す（レビュー M6）。
 
@@ -53,7 +53,7 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 
 | 旧 API にあって Shiki に無いもの | v2 での扱い |
 | --- | --- |
-| native からの draw（`pocket.derby` の全部） | `pocket_proc_shiki_draw_inputs`（Q 形式の整数）で描く。`ser` の内部は倍精度のまま（[derby-ser-native.md](../apps/derby-ser-native.md)）なので、C の中で §2.4 of spec と同じ丸めで Q 形式に直す |
+| native からの draw（`kobako.derby` の全部） | `kobako_proc_shiki_draw_inputs`（Q 形式の整数）で描く。`ser` の内部は倍精度のまま（[derby-ser-native.md](../apps/derby-ser-native.md)）なので、C の中で §2.4 of spec と同じ丸めで Q 形式に直す |
 | 型付きの点（`affineQ14Points`） | `i16` の領域と `EMIT_POINTS`・`EMIT_LINES`。大写しの馬のコマは 6 枚を 1 つの領域に並べ、開始レコードで選ぶ（§4.1 の `EACH`・`EMIT` の開始位置） |
 | plan の解析・予算（`ksn_proc_analysis.c`） | Shiki の登録時の検査（§6.1 of spec）が代わる |
 | 実数の入力（`H.draw(handle, ...numbers)`） | 決めること **D2**（§2.4） |
@@ -67,9 +67,9 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 
 ### 2.5 移す順
 
-0. **フレームの関数を Shiki に載せ替える**（レビュー R1）: `pocket.kasane.shiki` に `beginFrame`・`commit`・`resource`・`createSurface`・`grid` を直接載せ、全アプリの `H.beginFrame` などを `SK.` に書き換える（`procedural` の名前はまだ残す）。
-1. DERBY: `pocket.derby` の全 draw を Shiki に（R2）、`@plan` 18 本と点を `@shiki` に。
-   - 進み（2026-11-02）: `@plan` は `nil`（型付きの点）だけを残して `@shiki` に移した。`pocket.derby` の C の描画は handle の種類で engine を選ぶ（`pocket_proc_draw_numbers`）。誤差と `@q` は [apps/derby/README.md](../../apps/derby/README.md)「背景の式もすべて Shiki」。残りは点（`i16` の領域と `EMIT_LINES`）と、実機の確認。
+0. **フレームの関数を Shiki に載せ替える**（レビュー R1）: `kobako.kasane.shiki` に `beginFrame`・`commit`・`resource`・`createSurface`・`grid` を直接載せ、全アプリの `H.beginFrame` などを `SK.` に書き換える（`procedural` の名前はまだ残す）。
+1. DERBY: `kobako.derby` の全 draw を Shiki に（R2）、`@plan` 18 本と点を `@shiki` に。
+   - 進み（2026-11-02）: `@plan` は `nil`（型付きの点）だけを残して `@shiki` に移した。`kobako.derby` の C の描画は handle の種類で engine を選ぶ（`kobako_proc_draw_numbers`）。誤差と `@q` は [apps/derby/README.md](../../apps/derby/README.md)「背景の式もすべて Shiki」。残りは点（`i16` の領域と `EMIT_LINES`）と、実機の確認。
 2. MEGADEMO。
    - 済（2026-11-02）: 24 本を `@shiki`（`apps/kasane/megademo_prog.js`）に。`eg` の `s²·noise` が Q16 を超えたので位相を差分で持つ形にした。猫の船 `sh` は i16 の窓。誤差と host・実機の結果は [megademo-story.md](../apps/megademo-story.md)「Shiki へ」。
 3. BIG WAVE。
@@ -77,7 +77,7 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 4. 検査用のアプリと heapprobe の DERBY。
    - 済（2026-11-02）: `proc_limits_probe.js`・`proc_multi_surface_probe.js`・`overlay_proc_multi_probe.js`・`proc_news_zoom.js` と、float の VM を測っていた実機の probe（`ksn_procedural_device_probe.c`・`ksn_proc_compiler_device_probe.c`・`ksn_proc_limits_device_probe.c`・`ksn_megademo_device_probe.c`）を消した。D2 の 2 つの面の probe は、overlay のセッションに Shiki の heap が無いので移せない（CMake のオプションを ON にすると configure が止まる）。`KASANE_PROC_DEVICE_PROBE` も同じ（grid・pixel の probe は残るが、呼ぶ入口が要る）。heapprobe の DERBY は、旧 DERBY の複製（`apps/heapprobe/derby_v0/`）をやめ、configure の時に今の DERBY から 1 本のスクリプトを作る形に作り直した（`tools/heapprobe_derby.py`、[derby-watch.md](../apps/derby-watch.md)「heapprobe の変種」）。`grid_fold_device_probe.js` は grid（残る）の検査なので残した。
 5. 旧 API の削除（§2.2）と、関係する host の検査・CI の整理。
-   - 済（2026-11-02）: `pocket.kasane.procedural`、`pocket_shiki_frame.c` の plan の部分（slot は Shiki の handle だけ、float の register・draw・型付きの点・組み込み plan の表・bgcost の計装・runner affine）、float の VM（`ksn_shiki_frame.c` は frame と帯の描画だけに）、`ksn_proc_plan*`・`ksn_proc_analysis*`・`ksn_proc_points*`、`@plan` の詰めた形式（`lower_plans.mjs` は `@shiki` を消すだけ）と `emit_rom_plans.mjs`・`pack.mjs`。`beginFrame`・`commit`・`resource`・`createSurface` は `pocket.kasane.shiki` だけに載る。`grid` と、`grid` の書き方の層 `gridFold`（グローバル）は grid の一部なので残した（§2.2 の「`gridFold` を消す」は取り消し）。
+   - 済（2026-11-02）: `kobako.kasane.procedural`、`kobako_shiki_frame.c` の plan の部分（slot は Shiki の handle だけ、float の register・draw・型付きの点・組み込み plan の表・bgcost の計装・runner affine）、float の VM（`ksn_shiki_frame.c` は frame と帯の描画だけに）、`ksn_proc_plan*`・`ksn_proc_analysis*`・`ksn_proc_points*`、`@plan` の詰めた形式（`lower_plans.mjs` は `@shiki` を消すだけ）と `emit_rom_plans.mjs`・`pack.mjs`。`beginFrame`・`commit`・`resource`・`createSurface` は `kobako.kasane.shiki` だけに載る。`grid` と、`grid` の書き方の層 `gridFold`（グローバル）は grid の一部なので残した（§2.2 の「`gridFold` を消す」は取り消し）。
    - 実機（e7b6d28、2026-11-02、入力なし）: DERBY はデモのレースを FINISH まで（読み込み後の空き 47,640 B、ゲスト 97,556 B、ターン 4.9〜16.8 ms）、MEGADEMO は tier 2 で 1 周余り（空き 37,356 B、旧 API があった 427b308 の 36,820 B から +536 B）、BIG WAVE はデモ画面で 40 秒（空き 74,108 B、dedda13 の 73,808 B から +300 B）。いずれも失敗なし。ファームは DIRAM 180,924 B・flash 1,601,184 B（CI の memlog、削除前の値はまだ同じ形で採っていない）。ログは logs/v2-removal-device-20261102-e7b6d28.txt。
    - CI: BIG WAVE を v2.0 より前の固定の版と並べて走らせる実験の 3 本（`validate-curl-section.yml`・`adopt-rock-distance.yml`・`bigwave-input-literals.yml`）は、旧版の側が動かないので外した（2026-11-02、利用者の了承。スクリプトは `tools/` に記録として残る）。
 
@@ -134,7 +134,7 @@ v2.0 で入れるもの（利用者の決定、2026-11-02: 構想の 1〜5 を�
 
 DERBY の走者（今は 1 頭 7 入力 × 2 本を毎フレーム `bput`）を例にすると:
 
-- **消せる:** 入力の組み立て（`BI` の `Int32Array` への書き込み）。式が `DRAW_INDEX` でレーン番号を得て、状態の領域（位置・奥行き・色）を `LOAD` で読む。さらに `pocket.derby.lanes()` が投影の結果（今は `PO` へ書く `X`・`S`・`Y`）を状態の領域の窓へ直接書けば、JS のレーンごとの仕事は位置と奥行きを書くことだけになる（推定、未測定）。
+- **消せる:** 入力の組み立て（`BI` の `Int32Array` への書き込み）。式が `DRAW_INDEX` でレーン番号を得て、状態の領域（位置・奥行き・色）を `LOAD` で読む。さらに `kobako.derby.lanes()` が投影の結果（今は `PO` へ書く `X`・`S`・`Y`）を状態の領域の窓へ直接書けば、JS のレーンごとの仕事は位置と奥行きを書くことだけになる（推定、未測定）。
 - **残る（レビュー R3）:** 毎フレームの選択。(a) 画面外の走者を飛ばす（Shiki は座標が −480〜720 の外だと `INVALID` でフレームを捨てるので、間引きは必須）、(b) 中継で描く頭数を `FN[tier]` に絞る、(c) 奥から手前への順（毎フレーム変わる）。(a) は式の中で `REPEAT 1` と `BREAK_IF_GT` で書ける（1 条件 3〜4 命令、`run` は 42 命令なので収まる見込み）。(b)・(c) は `drawList` の順番の表（§5.1）で表す。式は順番を知らない。**「JS の仕事が 0」ではなく「レーンの状態を書くことと、並びの表の更新」**になる。
 - 3 と 2 の関係: 投影の式がレーンごとの `X`・`S`・`Y` を `STORE` し、`drawList` が順番の表の順に `run`・`legs` を描き、式は `DRAW_INDEX`（リストの中の番号）→ そのレーンのレコードを `LOAD`、という流れで、DERBY の R1 の問題（投影を C に置いた理由）が Shiki の中で解ける（レビュー L5）。
 
@@ -148,7 +148,7 @@ DERBY の走者（今は 1 頭 7 入力 × 2 本を毎フレーム `bput`）を�
 - **リストは入力を持たない。** 状態はデータ領域（§4）。
 - **途中の draw が失敗したら止める**（`drawMany` と同じ。後の draw は行わない）。
 
-実装（2026-11-02）: `pocket_shiki_api.c` の `list`・`setList`・`drawList`・`releaseList`、`limits.maxLists` 8。リストの id は「枠 + 1 + 8 × 世代」で、解放した id は枠を使い回しても `CLOSED` のまま。`unregister` はリストが参照している間 `BUSY`。検査は `apps/shikitest/shiki_api_test.js`（host の QuickJS、ASan/UBSan で 75/75。実機は未実施）。
+実装（2026-11-02）: `kobako_shiki_api.c` の `list`・`setList`・`drawList`・`releaseList`、`limits.maxLists` 8。リストの id は「枠 + 1 + 8 × 世代」で、解放した id は枠を使い回しても `CLOSED` のまま。`unregister` はリストが参照している間 `BUSY`。検査は `apps/shikitest/shiki_api_test.js`（host の QuickJS、ASan/UBSan で 75/75。実機は未実施）。
 
 リスト自体の利点（§4 の状態の置き場とは別に）: 項目の handle の検査が作る時の 1 回になる、参照中の handle の `unregister` を `BUSY` で守れる、handles の型付き配列がゲストのヒープから消える。
 
@@ -250,14 +250,14 @@ v1.5 で PIE に下ろすのは「本体全体が `.H` の列の `EACH`」の自
 | | 指摘 | 対応 |
 | --- | --- | --- |
 | R1（重大） | `beginFrame` などは `procedural` の実装で、Shiki は写しているだけ。DERBY は `H.beginFrame` を使う | §2.2 を「消す・残す」に分け、§2.5 に手順 0 を足した。指摘のうち「Shiki に載っていない」は誤り（`share()` で載っている） |
-| R2（重大） | `pocket.derby` の C が旧 API で 8 か所描いている | §2.1・§2.3・§2.5 の 1 |
+| R2（重大） | `kobako.derby` の C が旧 API で 8 か所描いている | §2.1・§2.3・§2.5 の 1 |
 | R3（重大） | DERBY は毎フレーム間引き・頭数・コマの選択があり、`handles` 不変・JS の仕事 0 は成り立たない。`EACH`・`EMIT` はレコード 0 からしか始まらない | 開始レコードの旗（§4.1）、§4.3 の主張を弱めた |
 | M1 | 版を上げるのは §3 の方針と衝突 | 版 `1` のまま（§1）、D1 を消した |
 | M2 | D2-a は引数と検証の行の書式も変える | §2.4 に費用を書いた |
 | M3 | `DRAW_INDEX` の配管と失敗の後の `STORE` | §4.1 |
 | M4 | `VEACH` の件数の上限、`VOUT` の書き戻し、`EMIT` のステップ | §6.2 の表 |
 | M5 | §8.4 の条件と、`.H` と `V*` の一致の検証 | §3.3、§6.2 |
-| M6 | 移行表の抜け（heapprobe、`derby_view.js`、`pocket_shape.c`、`gridFold`、CLAUDE.md の Node の記述） | §2.1・§2.2 |
+| M6 | 移行表の抜け（heapprobe、`derby_view.js`、`kobako_shape.c`、`gridFold`、CLAUDE.md の Node の記述） | §2.1・§2.2 |
 | L1〜L5 | `aux` の当てはめ、`S` の式、`vectorRegisters`、`vraw` の大きさ、§3 と §4 の関係 | §3.1・§4.2・§6.2・§4.3 |
 
 ## 11. 差分レビュー（SLOW、2026-11-02、`885fb18..f585848`）と対応
@@ -270,7 +270,7 @@ C の重大なバグは見つからず、host の検査はすべて通った（�
 - **端数ブロックのレーン:** `VEACH` の最後のブロックの `live` 未満のレーンだけがレコードに当たる。マスクの外のレーンは、`VLOAD` が 0 を入れる。`VIOTA` は外でも `ブロックの先頭のレコード番号 + レーン`（飽和）。`VSPLAT`・`VADD`/`VSUB`/`VMIN`/`VMAX`・蓄積器の命令（`VZACC`/`VMAC`/`VMACK`/`VACCSET`/`VOUT`）は 8 レーン全部で動く。`VSTORE` だけが `live` のレーンに限る。蓄積器は draw の間残るので、端数ブロックで外のレーンに溜めた値は、後のループの満杯ブロックの `VOUT`・`VSTORE` に出る（決定的）。
 - **自動の下ろし（§8.4 of spec）は未実装:** エンジンの PIE は `VEACH` のベクトル命令だけ。§8.4 は「下ろしてよい」の許可で、実装したときに §10.2（スカラー・C モデル・PIE の一致）を満たす。§6.2 の「自動の下ろしは v1.5 のまま残す（両方ある）」と、末尾の「`.H` と `V*` の 3 つで一致」は、この意味に読み替える。
 - **`EMIT_POINTS`/`EMIT_LINES` の `imm`:** 0〜15 の Q として各座標を `floor((x + 2^(imm-1)) / 2^imm)` で画素にする（`imm` が 0 なら x のまま）。領域の Q と一致するかは検査しない。`@shiki` は領域の Q を置く。
-- **`limits.vectorRegisters: 8`** を足した（`pocket_shiki_api.c`、`dst < 8` を登録時に強制している値）。
+- **`limits.vectorRegisters: 8`** を足した（`kobako_shiki_api.c`、`dst < 8` を登録時に強制している値）。
 - §9.4 に `list`・`setList`・`drawList`・`releaseList` の行を入れ、`drawList` の誤りの `index` が「`order` の中の位置」であることと、`count` を省くと `R` であることを書く。§3.1 のステップの数え方（命令ごとに 1、`EMIT_*` は命令全体で 1）と、§4.1 の `EMIT` の旗は、§4.3 の命令表 1 本にまとめる。
 - §9.2 の注記: (a) USB の `'J'` 診断（manifest 無しで MEGADEMO を走らせる）は Shiki heap を取る例外で、そのとき使う大きさは直前に選ばれたアプリの manifest の `shiki_bytes`（既定 48 KiB）。(b) Shiki heap の無いセッションでも `register`・`draw` はシステム heap で通るが、`data`・`list` は Shiki heap にしか取らないので予算の誤りで失敗する（`kasane.shiki.available` が false のとき）。
 
@@ -279,7 +279,7 @@ C の重大なバグは見つからず、host の検査はすべて通った（�
 - `ksn_shiki.c` の `EMIT_*` の座標の丸めを、負数の `>>`（実装定義）から `floor_shift` に揃えた（GCC の結果は同じ。`shiki_diff` 20,000 件・ベクトルの検査は通る）。
 - `register` の `options.data` を読む間に、getter が先に読んだ窓を `release()` できた。読み終えた後に、窓がまだ生きていて同じメモリかを確かめ、違えば `CLOSED`。
 - BIG WAVE と MEGADEMO で、`data()` で窓を作った後に `register()` が投げると窓が解放されなかった。失敗したら `release` してから投げ直す（DERBY は既にそうしている）。
-- `tools/kasane_contract/run.sh` に `test_shiki_data_compile.mjs`・`test_shiki_vector_compile.mjs`・`run_pocket_shiki_api_qjs.py` を足した（誰も走らせていなかった）。
+- `tools/kasane_contract/run.sh` に `test_shiki_data_compile.mjs`・`test_shiki_vector_compile.mjs`・`run_kobako_shiki_api_qjs.py` を足した（誰も走らせていなかった）。
 
 **実機（凍結の条件）:** `apps/shikitest/shiki_api_test.js`（`LOAD`/`STORE`/`DRAW_INDEX`/リスト）の実機の実行と、現在の番号（op 30〜45）での C モデルと PIE の照合を 1 回ずつ。**→ 済み（2b4dbc9、§11.1）。**
 
@@ -333,7 +333,7 @@ CORE の最悪は 15.0 → 約 13 ms、NEWS は 11.7 → 約 10.8 ms。空きの
 
 **後に回す（凍結を止めない）**
 
-- DERBY の投影誤差の門: float の VM の照合と一緒に消えた（`newton_screen < 0.1`）。`pocket.derby` の C の投影の誤差を自動で縛るものが今は無い（`tools/kasane_ir/q16_error.mjs` は `@plan` 時代の分析で、検査に繋がっていない）。native の draw の入力を double で計算し直して比べる門を DERBY の host 検査に戻す。
+- DERBY の投影誤差の門: float の VM の照合と一緒に消えた（`newton_screen < 0.1`）。`kobako.derby` の C の投影の誤差を自動で縛るものが今は無い（`tools/kasane_ir/q16_error.mjs` は `@plan` 時代の分析で、検査に繋がっていない）。native の draw の入力を double で計算し直して比べる門を DERBY の host 検査に戻す。
 - LINE_PATTERN の決定的な幾何の検査（重み 1:4 の 8 弦）と CUBIC の誤差の記録（§4.6 の 0.597 px）は、float の VM の試験と一緒に消えた。残るのは `shiki_diff` の乱択（C と参照の独立した実装の一致）と `test_shiki_vec.c`。
 - DERBY の host 検査の再生の比較は面 0 だけ（面 1 は数えるだけ）。
 - MEGADEMO の翻訳の誤差（旧い行との差 1.5e-4 px、固定小数 0.053 px）は、作業用の一回の採取（427b308 の前の旧テンプレートを読んだもの）で、検査としては残していない。BIG WAVE は `tools/games/bigwave_shiki/compare.mjs` が残っている。

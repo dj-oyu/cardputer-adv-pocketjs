@@ -2,7 +2,7 @@
 
 [VM の文書](README.md) / 前提: [turn-icache.md](turn-icache.md)（1 ターンの作業集合と行の使用率）、[qjs-pgo.md](qjs-pgo.md)（PGO は実機で差なし）、[p1-iram-placement.md](p1-iram-placement.md)（helper 8 KiB の IRAM 化）
 
-**状態: 既定 ON（`CONFIG_POCKET_VM_QJS_HOTCOLD`、実機の A/B の後に切り替えた。§7.1）。** §7.1 は実機の計数。それ以外の数字は断りの無いかぎり QEMU の記録をキャッシュの模型（`tools/r5sim/`）に通した**模型の値**で、実機の計数ではない。区分は「模型」「実測（静的）＝ビルドした像から読んだ値」「実測（コンパイラ）＝コンパイラに通して確かめた挙動」「推定」で書き分ける。生の出力は [logs/qjs-hotcold-20261113.txt](logs/qjs-hotcold-20261113.txt)。
+**状態: 既定 ON（`CONFIG_KOBAKO_QJS_HOTCOLD`、実機の A/B の後に切り替えた。§7.1）。** §7.1 は実機の計数。それ以外の数字は断りの無いかぎり QEMU の記録をキャッシュの模型（`tools/r5sim/`）に通した**模型の値**で、実機の計数ではない。区分は「模型」「実測（静的）＝ビルドした像から読んだ値」「実測（コンパイラ）＝コンパイラに通して確かめた挙動」「推定」で書き分ける。生の出力は [logs/qjs-hotcold-20261113.txt](logs/qjs-hotcold-20261113.txt)。
 
 ## 0. 結論
 
@@ -177,7 +177,7 @@ IRAM の関数の中を hot/cold に分けて「IRAM には熱いブロックだ
 tools/qjs_hotcold/train.sh [<build root>]     # 既定 .cache/hc_train、4 コアで約 20 分
 ```
 
-r5sim を `-DPOCKET_QJS_HOTCOLD=gen` で 3 つの負荷（`shiki`＝STRESS 120 ターン、`derby`＝デモレース全体 1,773 ターン、`hud`＝LCD CATCH 240 ターン）について組み、QEMU の記録を FIFO で `hc_profile.py run` に流す。`gen` はブロックの先頭にシンボルを足すだけで、命令は変わらない（`selftest.py` が全節の逆アセンブルを突き合わせる。アセンブラが自分で決める「狭い命令か広い命令か」と詰め物だけは、ラベルの有無で 2 関数が変わる）。
+r5sim を `-DKOBAKO_QJS_HOTCOLD=gen` で 3 つの負荷（`shiki`＝STRESS 120 ターン、`derby`＝デモレース全体 1,773 ターン、`hud`＝LCD CATCH 240 ターン）について組み、QEMU の記録を FIFO で `hc_profile.py run` に流す。`gen` はブロックの先頭にシンボルを足すだけで、命令は変わらない（`selftest.py` が全節の逆アセンブルを突き合わせる。アセンブラが自分で決める「狭い命令か広い命令か」と詰め物だけは、ラベルの有無で 2 関数が変わる）。
 
 今のプロファイル（実測（静的）、命令数）:
 
@@ -210,7 +210,7 @@ r5sim を `-DPOCKET_QJS_HOTCOLD=gen` で 3 つの負荷（`shiki`＝STRESS 120 �
 
 行の使用率（部品ごと、`lineuse.py`）: STRESS は core 75.4% → 89.8%、helpers 52.1% → 77.5%、alloc 66.7% → 81.4%、builtins 65.9% → 79.4%。DERBY は core 74.0% → 92.5%、helpers 54.2% → 81.1%。`quickjs.c` の外（native boundary、STRESS 71%・DERBY 76%）は変わらない。
 
-**残りの一番大きな塊は native boundary**（Kasane・Shiki・`pocket.*`: STRESS 14 KiB、DERBY 22 KiB）で、予算の 12 KiB を超えている。合計は STRESS 34 KiB、DERBY 48 KiB で、まだ 32 KiB に収まらない。同じ道具は `main/` の目的ファイルにも使える（§10）。
+**残りの一番大きな塊は native boundary**（Kasane・Shiki・`kobako.*`: STRESS 14 KiB、DERBY 22 KiB）で、予算の 12 KiB を超えている。合計は STRESS 34 KiB、DERBY 48 KiB で、まだ 32 KiB に収まらない。同じ道具は `main/` の目的ファイルにも使える（§10）。
 
 ### 5.2 学習していないアプリ（模型）
 
@@ -276,7 +276,7 @@ r5sim のカウント（`fast.sh`、全区間）: STRESS 142,565 → 142,578、D
 
 実行時には切り替えられない（配置そのものの変更）。**ビルド 2 つの比較になる。**
 
-1. **計数を入れる（A・B 共通の `measure:` コミット）**: `main/app_session.c` の 1 行目に `#define CONFIG_POCKET_VM_TURNPERF 1` を足す（[turn-cpi.md](turn-cpi.md) §1 の計装。Kconfig を通さずに有効にする。30 ターンごとに `TURNPERF <事象> cy= ev= n= us=` を出す）。DERBY は種を固定する 1 行（[p1-iram-placement.md](p1-iram-placement.md) §9 の手順）も同じコミットに入れる。
+1. **計数を入れる（A・B 共通の `measure:` コミット）**: `main/app_session.c` の 1 行目に `#define CONFIG_KOBAKO_TURNPERF 1` を足す（[turn-cpi.md](turn-cpi.md) §1 の計装。Kconfig を通さずに有効にする。30 ターンごとに `TURNPERF <事象> cy= ev= n= us=` を出す）。DERBY は種を固定する 1 行（[p1-iram-placement.md](p1-iram-placement.md) §9 の手順）も同じコミットに入れる。
 2. **A**: 1 だけの像。
 3. **B**: `components/quickjs-ng/CMakeLists.txt` の `set(_qjs_hc "")` を `set(_qjs_hc "use")` に変える（1 行）。ビルドのログに `hc_cc: quickjs.c: 188 functions laid out hot/cold (0 of the profile's did not match ...)` が出ることを確かめる。**0 でなければ、その木の `quickjs.c` の目的コードが学習時と違う**（Windows のコンパイラの出力が違う場合を含む）ので、測る前に知らせてほしい。
 4. **B'・B''**: 同じファイルの `set(_qjs_hc_pad 0)` を `12`、`20` にした像。熱い領域を 32 B の行に対してずらす（配置の当たり外れを分けるため）。
@@ -360,10 +360,10 @@ STRESS（定常の窓。A 42 窓、B 15 窓）:
 ```bash
 # 学習（profile.json を書く）
 tools/qjs_hotcold/train.sh
-# ファーム（既定で ON。OFF は menuconfig で POCKET_VM_QJS_HOTCOLD を外すか -DPOCKET_QJS_HOTCOLD=off）
+# ファーム（既定で ON。OFF は menuconfig で KOBAKO_QJS_HOTCOLD を外すか -DKOBAKO_QJS_HOTCOLD=off）
 idf.py -B build_api build
-# r5sim（模型）。OFF は -DPOCKET_QJS_HOTCOLD を外す
-tools/r5sim/fast.sh <dir> -DR5SIM_DEVICE=1 -DR5SIM_APP=shiki -DPOCKET_QJS_HOTCOLD=use
+# r5sim（模型）。OFF は -DKOBAKO_QJS_HOTCOLD を外す
+tools/r5sim/fast.sh <dir> -DR5SIM_DEVICE=1 -DR5SIM_APP=shiki -DKOBAKO_QJS_HOTCOLD=use
 #   記録 → turns.pkl.gz（turn-icache.md §2.5。-icount shift=2,sleep=off、flash だけ）
 python tools/r5sim/turnset.py <dir>/turns.pkl.gz <dir>/r5sim.elf <dir>/r5sim.map --nm ... --addr2line ...
 python tools/r5sim/lineuse.py <dir>/turns.pkl.gz <dir>/r5sim.elf <dir>/r5sim.map --nm ... --objdump ...
@@ -374,7 +374,7 @@ python tools/qjs_hotcold/selftest.py <build dir>
 tools/qjs_hotcold/torture.sh
 ```
 
-別のプロファイルで組む: `-DPOCKET_QJS_HOTCOLD_PROFILE=<絶対パス>`。学習から負荷を抜く: `WORKLOADS="shiki hud" tools/qjs_hotcold/train.sh`。
+別のプロファイルで組む: `-DKOBAKO_QJS_HOTCOLD_PROFILE=<絶対パス>`。学習から負荷を抜く: `WORKLOADS="shiki hud" tools/qjs_hotcold/train.sh`。
 
 ## 12. 次の候補（未着手）
 
@@ -386,7 +386,7 @@ tools/qjs_hotcold/torture.sh
 
 ## 13. native boundary への拡張（2026-11-14、既定 ON）
 
-`CONFIG_POCKET_NATIVE_HOTCOLD`（既定 y）。§3 の道具を `main/` の 9 ファイルに当てる。プロファイルは `tools/qjs_hotcold/profile_native.json`（`TARGET=native tools/qjs_hotcold/train.sh`）、対象の一覧は `tools/qjs_hotcold/hotcold.cmake` の `POCKET_NATIVE_HOTCOLD_FILES`（ファームと r5sim が同じ一覧を読む）。
+`CONFIG_KOBAKO_NATIVE_HOTCOLD`（既定 y）。§3 の道具を `main/` の 9 ファイルに当てる。プロファイルは `tools/qjs_hotcold/profile_native.json`（`TARGET=native tools/qjs_hotcold/train.sh`）、対象の一覧は `tools/qjs_hotcold/hotcold.cmake` の `KOBAKO_NATIVE_HOTCOLD_FILES`（ファームと r5sim が同じ一覧を読む）。
 
 ### 13.1 対象の選び方（模型）
 
@@ -395,14 +395,14 @@ quickjs を ON にした r5sim の STRESS（ターン 61〜120）と DERBY（WID
 | ファイル | STRESS | DERBY |
 | --- | ---: | ---: |
 | `ksn_shiki.c` | 1.24 KiB | 0.73 KiB |
-| `pocket_kasane.c` | 1.19 | 0.48 |
+| `kobako_kasane.c` | 1.19 | 0.48 |
 | `ksn_core.c` | 0.68 | 0.44 |
-| `pocket_shiki_frame.c` | 0.53 | 0.83 |
-| `pocket_shiki_api.c` | 0.19 | 0.15 |
+| `kobako_shiki_frame.c` | 0.53 | 0.83 |
+| `kobako_shiki_api.c` | 0.19 | 0.15 |
 | `derby_ser_int.c` | — | 1.06 |
-| `pocket_derby.c` | — | 0.98 |
+| `kobako_derby.c` | — | 0.98 |
 | `ksn_view.c` | 0.07 | 0.06 |
-| `pocket_input.c` | — | 0.07 |
+| `kobako_input.c` | — | 0.07 |
 
 この 9 ファイルで native boundary の無駄（STRESS 4.06 KiB、DERBY 5.40 KiB）の約 95%。
 
@@ -411,7 +411,7 @@ quickjs を ON にした r5sim の STRESS（ターン 61〜120）と DERBY（WID
 - **ブロックのシンボルにファイル名を入れた**（`__hc_<file>__<関数>__<k>`、入口のブロックにも付ける）。`main/` には同じ名前の static 関数が複数のファイルにあり、そのままでは記録のターン数が別の関数に数えられる。
 - **節をファイルごとに分けた**（`.text.hc_<file>_<n>`。`quickjs.c` は今までどおり `.text.qjshc<n>`）。1 ファイルの熱いブロックは 1 つの節の先頭にまとまるが、ファイルをまたいでは連続しない。
 - `hc_profile.py merge` が複数のファイル・複数の負荷の像を受ける。2 つの像で同じ関数のコードが違うときは、その関数をプロファイルから外す。
-- **ccache の順番**: ESP-IDF の ccache（`RULE_LAUNCH_COMPILE`）は、`C_COMPILER_LAUNCHER` の前に付く。Python を「コンパイラ」と見なし、Windows で長いコマンド（`main` の include の列）を `python @応答ファイル` で呼んで、Python がそれをスクリプト名と読んで全ファイルが失敗した（ブローカーのビルドで実際に起きた）。`pocket_hotcold()` はその target の規則を外し、`hc_cc.py --wrap ccache` として、素通しのファイルのコンパイラの前に付け直す。
+- **ccache の順番**: ESP-IDF の ccache（`RULE_LAUNCH_COMPILE`）は、`C_COMPILER_LAUNCHER` の前に付く。Python を「コンパイラ」と見なし、Windows で長いコマンド（`main` の include の列）を `python @応答ファイル` で呼んで、Python がそれをスクリプト名と読んで全ファイルが失敗した（ブローカーのビルドで実際に起きた）。`kobako_hotcold()` はその target の規則を外し、`hc_cc.py --wrap ccache` として、素通しのファイルのコンパイラの前に付け直す。
 
 ### 13.3 模型
 
@@ -447,7 +447,7 @@ A は quickjs ON・native OFF、B は両方 ON、B'' は B の熱い領域を 20
 
 ### 13.5 限界
 
-- **`pocket_derby.c` は 22 関数中 1 つしか並べ替わらない**（ファームのビルドで 21 がハッシュ不一致）。実機は `CONFIG_POCKET_DERBY_SER_PIE` で PIE の経路を組み、r5sim（QEMU に PIE が無い）は整数の経路を組むので、インライン展開まで含めて別のコードになる。`ksn_shiki.c` も 3 関数（`ksn_shiki_draw_in_place` ほか）が同じ理由で合わない。DERBY の無駄のうち `pocket_derby.c` の約 1 KiB が手つかず。
+- **`kobako_derby.c` は 22 関数中 1 つしか並べ替わらない**（ファームのビルドで 21 がハッシュ不一致）。実機は `CONFIG_KOBAKO_DERBY_SER_PIE` で PIE の経路を組み、r5sim（QEMU に PIE が無い）は整数の経路を組むので、インライン展開まで含めて別のコードになる。`ksn_shiki.c` も 3 関数（`ksn_shiki_draw_in_place` ほか）が同じ理由で合わない。DERBY の無駄のうち `kobako_derby.c` の約 1 KiB が手つかず。
 - 行で写す案は §13.6 で試し、実機で差が出なかったのでコードを消した。
 - ファイルをまたいだ連続はしていない（ファイルごとの節）。必要なら、hot の部分だけを別の節にしてリンカ断片で集める案があるが、節をまたぐ条件分岐をリンカが広げない問題（§3.4）を先に解く必要がある。
 
@@ -455,16 +455,16 @@ A は quickjs ON・native OFF、B は両方 ON、B'' は B の熱い領域を 20
 
 ハッシュが合わない関数を、ソースの行（`.loc`）で並べる。`hc_profile.py merge` が、学習の像で各行が載ったブロックの一番熱い階級を `lines`（ファイルごとの `"file.c:行": 階級`）に、学習が組んだ関数の名前を `known` に書く。`hc_asm.tiers_from_lines` は、ブロックの階級をその中の行の一番熱いものにし、学習が組まなかった行（PIE の経路など）を hot とみなす。
 
-- **適用は、プロファイルにあってハッシュが合わない関数と、学習が組まなかった関数だけ。** 最初の版（`b542894`）は「プロファイルに無い関数」全部に当て、学習で走ったが hot でなかった `pocket_kasane.c` の 58 関数を動かした（別の場所にインライン展開された helper の行が hot なので、行で見ると hot になる）。さらに `helper_iram8.lf` が名前で IRAM に置く 3 関数（`mutate`、`parse_i16`、`parse_rect_mode`）を節から出し、断片が外れて flash に落ちた（ビルドの DIRAM −712 B で気付いた）。`1da67cf` で、学習が hot を見なかった関数と `--keep-out` の関数は行で写さないようにした。
-- 直した版で、ファームの `pocket_derby.c` は 1 → 9 関数（8 が行で）、`ksn_shiki.c` は 5 → 6 関数。他のファイルは 0。
+- **適用は、プロファイルにあってハッシュが合わない関数と、学習が組まなかった関数だけ。** 最初の版（`b542894`）は「プロファイルに無い関数」全部に当て、学習で走ったが hot でなかった `kobako_kasane.c` の 58 関数を動かした（別の場所にインライン展開された helper の行が hot なので、行で見ると hot になる）。さらに `helper_iram8.lf` が名前で IRAM に置く 3 関数（`mutate`、`parse_i16`、`parse_rect_mode`）を節から出し、断片が外れて flash に落ちた（ビルドの DIRAM −712 B で気付いた）。`1da67cf` で、学習が hot を見なかった関数と `--keep-out` の関数は行で写さないようにした。
+- 直した版で、ファームの `kobako_derby.c` は 1 → 9 関数（8 が行で）、`ksn_shiki.c` は 5 → 6 関数。他のファイルは 0。
 - **実機（DERBY のレース、19 窓、TURNPERF）: 行で写した像 1.3208 M サイクル／ターン、行なしの B 1.3177 M（+0.23%）。** `insn` +0.24%、`istall` −0.8%、`istall_busy` +0.4%。揺れの内側で、効果は見えない。
-- **この方式の適用先は `pocket_derby.c` しかなく、そこで効果が出なかったので、コードは削除した**（道具とプロファイルは `9e9a6fa` の状態に戻した。実装は `b542894`・`1da67cf` に残る）。残った `pocket_derby.c` の無駄を詰めるには、実機で取ったプロファイルが要る（QEMU は PIE を走らせられない）が、見込みは 1% 程度（推定）で、取得の手間に見合わないと判断した。
+- **この方式の適用先は `kobako_derby.c` しかなく、そこで効果が出なかったので、コードは削除した**（道具とプロファイルは `9e9a6fa` の状態に戻した。実装は `b542894`・`1da67cf` に残る）。残った `kobako_derby.c` の無駄を詰めるには、実機で取ったプロファイルが要る（QEMU は PIE を走らせられない）が、見込みは 1% 程度（推定）で、取得の手間に見合わないと判断した。
 
-### 13.7 pocket_derby.c の学習条件（2026-11-14）
+### 13.7 kobako_derby.c の学習条件（2026-11-14）
 
-r5sim は `pocket_derby.c` を `-Os` のまま組んでいた（それ以前の r5sim の数字と比べられるように）が、ファームは `-O2 -ffp-contract=off`。プロファイルは命令が一致する関数にしか当たらないので、**このファイルの 22 関数のうち 21 はファームで一度も並べ替えられていなかった**（ビルドのログ `hc_cc: pocket_derby.c: 1 functions laid out ... (21 ... did not match)`）。学習のビルド（`POCKET_NATIVE_HOTCOLD=gen`）だけファームと同じ指定にした（`tools/r5sim/main/CMakeLists.txt`）。一致は 17 / 22（残りは r5sim 自身の `#if` で命令が違う）。同時に、merge と commit の箱の変更で古くなった `pocket_shiki_frame.c`（15 中 7 が不一致）も学習し直した。
+r5sim は `kobako_derby.c` を `-Os` のまま組んでいた（それ以前の r5sim の数字と比べられるように）が、ファームは `-O2 -ffp-contract=off`。プロファイルは命令が一致する関数にしか当たらないので、**このファイルの 22 関数のうち 21 はファームで一度も並べ替えられていなかった**（ビルドのログ `hc_cc: kobako_derby.c: 1 functions laid out ... (21 ... did not match)`）。学習のビルド（`KOBAKO_NATIVE_HOTCOLD=gen`）だけファームと同じ指定にした（`tools/r5sim/main/CMakeLists.txt`）。一致は 17 / 22（残りは r5sim 自身の `#if` で命令が違う）。同時に、merge と commit の箱の変更で古くなった `kobako_shiki_frame.c`（15 中 7 が不一致）も学習し直した。
 
-実機（DERBY のレース、`sdkconfig.variant.turnperf` = TURNPERF ＋ `POCKET_FIXED_RANDOM_SEED`、2 ビルド、同じ 24 窓 × 30 ターン、実測）: 旧プロファイル（af0033a）1.2537 M → 新（aa9713d）1.2516 M サイクル/ターン（**−0.17%**、窓ごとの中央値 −0.16%、幅 −1.1〜+0.8%）。退役命令は同じ（`insn` 15.54 M / 30 ターン）、I-cache の待ち（`istall`）−0.4%、`istall_busy` −2.3%。**効果は誤差の範囲**（命令キャッシュの配置だけで同じカーネルが 15% 動く機体なので、これは「害はない」の確認）。新しいプロファイルは今のコードに一致するので、そのまま使う。
+実機（DERBY のレース、`sdkconfig.variant.turnperf` = TURNPERF ＋ `KOBAKO_FIXED_RANDOM_SEED`、2 ビルド、同じ 24 窓 × 30 ターン、実測）: 旧プロファイル（af0033a）1.2537 M → 新（aa9713d）1.2516 M サイクル/ターン（**−0.17%**、窓ごとの中央値 −0.16%、幅 −1.1〜+0.8%）。退役命令は同じ（`insn` 15.54 M / 30 ターン）、I-cache の待ち（`istall`）−0.4%、`istall_busy` −2.3%。**効果は誤差の範囲**（命令キャッシュの配置だけで同じカーネルが 15% 動く機体なので、これは「害はない」の確認）。新しいプロファイルは今のコードに一致するので、そのまま使う。
 
 ## 14. 行番号の定数でプロファイルが外れる問題（2026-11-21）
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# LCD CATCH on the host: the real QuickJS, pocket.kasane and pocket.input.keys
+# LCD CATCH on the host: the real QuickJS, kobako.kasane and kobako.input.keys
 # (tools/games/test_lcd_catch_host.c). WSL/Linux, from anywhere in the repo:
 #   bash tools/games/run_lcd_catch.sh             # scripted play, PASS/FAIL
 #   bash tools/games/run_lcd_catch.sh --sheet     # also docs/apps/lcd-catch-preview.png
@@ -7,16 +7,16 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 CACHE=${CACHE:-/tmp/qjs-lcdcatch-host}
 mkdir -p "$CACHE"
-python3 - "$CACHE/pocket_sub_impl.inc" <<'PY'
+python3 - "$CACHE/kobako_sub_impl.inc" <<'PY'
 from pathlib import Path
 import sys
-s=Path('main/pocket/pocket_api.c').read_text()
+s=Path('main/kobako/kobako_api.c').read_text()
 a=s.index('// ----------------------------------------------------------- subscriptions')
 b=s.index('// ------------------------------------------------------- async completions',a)
 Path(sys.argv[1]).write_text(s[a:b])
 PY
 OUT=${OUT:-/tmp/test-lcd-catch} TEST_SOURCE=tools/games/test_lcd_catch_host.c CACHE="$CACHE" \
-  EXTRA_SOURCES="main/pocket/pocket_input.c main/hal/keymap.c main/hal/keystate.c" \
+  EXTRA_SOURCES="main/kobako/kobako_input.c main/hal/keymap.c main/hal/keystate.c" \
   bash tools/build_kasane_test.sh >/dev/null
 export ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=0:abort_on_error=1}
 export UBSAN_OPTIONS=${UBSAN_OPTIONS:-halt_on_error=1:print_stacktrace=1}

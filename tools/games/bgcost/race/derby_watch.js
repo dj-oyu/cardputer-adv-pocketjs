@@ -70,7 +70,7 @@
     return p;
   }
   globalThis.derby = {field: field, race: race, step: step, order: order, odds: odds, D: D, DT: DT, TAU: TAU};
-  if (typeof pocket === 'undefined') return;
+  if (typeof kobako === 'undefined') return;
 
   // ---- Programs as text, one letter per ksn_proc_op (MEGADEMO's form).
   const OPS = 'SIAMNREVPLQBplC', FLD = ['14', '12', '123', '123', '12', '2', '', '23', '235', '235', '2', '23', '123', '123', '25'];
@@ -143,7 +143,7 @@
   const PAD = ['turf', 'rail', 'stands', 'silk', 'g0', 'g1', 'g2', 'g3', 'g4', 'g5', 'crowd', 'pole'],
     RUN = ['gate', 'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'map', 'vis', 'fr', 'hd'];
 
-  const V = pocket.kasane, H = V.procedural, K = pocket.input.keys, log = m => console.log('DERBY ' + m);
+  const V = kobako.kasane, H = V.procedural, K = kobako.input.keys, log = m => console.log('DERBY ' + m);
   // Frames now, while the heap still has holes that size (MEGADEMO's lesson).
   H.beginFrame(0);
   const res = H.resource(), live = {}, queue = [];
@@ -156,7 +156,7 @@
     const n = queue[0];
     if (!n) return;
     try {
-      if (pocket.memory && pocket.memory.info().internalFreeBytes < 18432) return;
+      if (kobako.memory && kobako.memory.info().internalFreeBytes < 18432) return;
       const p = spec(n);
       live[n] = p[1] ? H.register(p[0], p[1]) : H.register(p[0]);
       queue.shift(); ++reg; log('REG ' + n + ' ' + live[n]);
@@ -190,7 +190,7 @@
   let cx = 0, disp = 0, slow = 0, ld = -1, cm = 0, hold = 0, dl = 0, man = 0, cl = 0, vr = null, von = 0, ro = [0, 1, 2, 3, 4, 5, 6, 7];
   const hex = s => ('0000000' + s.toString(16).toUpperCase()).slice(-8), num = i => 'NO.' + (i + 1),
     th = p => (p + 1) + (['ST', 'ND', 'RD'][p] || 'TH');
-  const ST = pocket.storage;
+  const ST = kobako.storage;
   const save = nop;
 
   // ---- Cameras [f, height, horizon y]: WIDE, CLOSE (set per lane), FIELD,

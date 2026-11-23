@@ -13,13 +13,13 @@ QJS=components/quickjs-ng/quickjs-ng
 OUT=.cache/vmtest-floor/genri
 mkdir -p "$OUT/include"
 [ -f "$OUT/include/sdkconfig.h" ] || echo "/* host stub */" > "$OUT/include/sdkconfig.h"
-DEFS="-DQUICKJS_NG_BUILD -D_GNU_SOURCE -DQJS_DISABLE_DUMPS -DPOCKET_VM_IMMORTAL_TEST -DPOCKET_VM_GEN_ROM_INTRINSICS"
-INC="-I $OUT/include -I components/pocketjs_guest/include -I $QJS"
+DEFS="-DQUICKJS_NG_BUILD -DQJS_LEAN_LAZY_BUILTINS=1 -D_GNU_SOURCE -DQJS_DISABLE_DUMPS -DQJS_LEAN_IMMORTAL_TEST -DQJS_LEAN_GEN_ROM_INTRINSICS"
+INC="-I $OUT/include -I components/kobako_guest/include -I $QJS"
 for f in dtoa libregexp libunicode quickjs-vm; do
   gcc -std=gnu11 -c -O1 -g -w $DEFS $INC $QJS/$f.c -o "$OUT/$f.o"
 done
 gcc -std=gnu11 -O1 -g -w -no-pie -fno-pie $DEFS $INC \
-  tools/vmtest/floor/gen_rom_intrinsics.c components/pocketjs_guest/src/vm_sched.c components/pocketjs_guest/src/vm_clock.c \
+  tools/vmtest/floor/gen_rom_intrinsics.c components/kobako_guest/src/vm_sched.c components/kobako_guest/src/vm_clock.c \
   "$OUT/dtoa.o" "$OUT/libregexp.o" "$OUT/libunicode.o" "$OUT/quickjs-vm.o" -lm -lpthread -ldl -o "$OUT/gen_rom_intrinsics"
 nm --defined-only "$OUT/gen_rom_intrinsics" > "$OUT/syms.txt"
 if [ "${1:-}" = "--check" ]; then

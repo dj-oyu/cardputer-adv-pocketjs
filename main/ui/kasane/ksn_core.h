@@ -163,7 +163,7 @@ void ksn_core_invalidate(ksn_core *core);
 /* The same request, limited to the 8-row bands named in `bands` (bit b is rows
  * 8b..8b+7, bit 16 the last seven). Bits outside the panel are ignored and an
  * empty set is a no-op. For an owner that composites over the strip and knows
- * which rows it touched -- the text field of pocket_text.c is the one this
+ * which rows it touched -- the text field of kobako_text.c is the one this
  * exists for -- so that its damage costs what it covers. Unqualified
  * invalidation stays available for owners that do not know. */
 #define KSN_BANDS_ALL ((1u<<17)-1u)

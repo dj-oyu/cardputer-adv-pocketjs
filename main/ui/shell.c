@@ -12,10 +12,10 @@
 #include "overlay.h"
 #include "net_autosync.h"
 #include "pet_hub.h"
-#include "pocket_kasane.h"
+#include "kobako_kasane.h"
 #include "app_session.h"
 #ifdef KASANE_D2_OVERLAY_PROC_PROBE
-#include "pocket_shiki_frame.h"
+#include "kobako_shiki_frame.h"
 static bool d2_overlay_fault_injected;
 static bool d2_overlay_retry;
 static int d2_overlay_sends_before_failure=-1;
@@ -235,13 +235,13 @@ static unsigned category,setting,app;
 // APPEND to this table; do not insert. tools/capture_home.py and
 // tools/test_settings.py both leave this list for the settings category before
 // they count anything, so a row on the end changes no navigation either of them
-// does -- capture_home.py line 80 says as much about POCKET PET. A row in the
+// does -- capture_home.py line 80 says as much about KOBAKO PET. A row in the
 // MIDDLE would renumber shell_app(), and with it main.c's switch, silently.
 static const char *apps[]={"HELLO WORLD","SKK PRACTICE","PLAYGROUND","TUTORIAL",
-                          "IMU CALIBRATION","POCKET PET","PET COMPANION","STRESS TEST",
+                          "IMU CALIBRATION","KOBAKO PET","PET COMPANION","STRESS TEST",
                           "MEGADEMO","GRID LAB","VIDEO LAB",
                           "LCD CATCH","DERBY WATCH","BIG WAVE"};
-static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL",
+static const char *app_details[]={"JAVASCRIPT / KOBAKO","JAPANESE INPUT DRILL",
                                   "WRITE AND RUN JAVASCRIPT","LEARN TO WRITE IT",
                                   "FIND THE SENSOR AXES","CHOOSE AND CARE FOR YOUR PET",
                                   "AI USAGE / ALARM / TIMER","HEAP CHURN + DRAWING LOAD",
@@ -832,7 +832,7 @@ static ksn_result shell_overlay_backdrop(void *opaque,uint16_t y,uint16_t rows,
 static ksn_result shell_overlay_send(void *opaque,uint16_t y,uint16_t rows,
                                      const uint16_t *pixels) {
 #ifdef KASANE_D2_OVERLAY_PROC_PROBE
-    if(!d2_overlay_fault_injected&&pocket_proc_pending()) {
+    if(!d2_overlay_fault_injected&&kobako_proc_pending()) {
         if(d2_overlay_sends_before_failure<0) {
             d2_overlay_sends_before_failure=3;
             ESP_LOGI("D2_OVERLAY","ARMED pending=1 after=3");
@@ -866,7 +866,7 @@ static ksn_result shell_overlay_send(void *opaque,uint16_t y,uint16_t rows,
     began=esp_timer_get_time();
     /* The SYSTEM bank already owns the notice. Match the foreground Kasane
      * display port: board_present's legacy pet hook must not paint it again. */
-    bool notice_composited=pocket_kasane_notice_composited();
+    bool notice_composited=kobako_kasane_notice_composited();
     pet_hub_overlay_suppress(notice_composited);
     esp_err_t result=board_present(y,rows,(uint16_t *)pixels);
     pet_hub_overlay_suppress(false);
@@ -882,8 +882,8 @@ void shell_draw(const char *error, unsigned phase) {
     if((int)notice_active!=last_notice_active){
         ESP_LOGI("KSN_P5_NOTICE","STATE active=%u overlay_ksn=%u ksn=%u composited=%u pending=%u",
                  (unsigned)notice_active,(unsigned)overlay_kasane_active(),
-                 (unsigned)pocket_kasane_active(),(unsigned)pocket_kasane_notice_composited(),
-                 (unsigned)pocket_kasane_system_pending());
+                 (unsigned)kobako_kasane_active(),(unsigned)kobako_kasane_notice_composited(),
+                 (unsigned)kobako_kasane_system_pending());
         last_notice_active=(int)notice_active;
     }
 #endif
@@ -1002,7 +1002,7 @@ void shell_draw(const char *error, unsigned phase) {
         if(d2_overlay_fault_injected) {
             ESP_LOGI("D2_OVERLAY","PRESENT result=%u bytes=%u pending=%u flower_mode=%u",
                      (unsigned)result,(unsigned)stats.transferred_bytes,
-                     (unsigned)pocket_proc_pending(),(unsigned)(mode==3));
+                     (unsigned)kobako_proc_pending(),(unsigned)(mode==3));
             if(d2_overlay_retry&&result==KSN_OK&&stats.bands) {
                 ESP_LOGI("D2_OVERLAY","RETRY_OK bytes=%u",
                          (unsigned)stats.transferred_bytes);
@@ -1138,7 +1138,7 @@ void shell_draw(const char *error, unsigned phase) {
     /* Log only after the measured frame has been sampled. This may perturb the
      * next interval, but not the draw sample being diagnosed. */
     static int last_notice_composited=-1;
-    bool notice_composited=pocket_kasane_notice_composited();
+    bool notice_composited=kobako_kasane_notice_composited();
     if((int)notice_composited!=last_notice_composited){
         ESP_LOGI("KSN_P5_NOTICE","COMPOSITED %u",(unsigned)notice_composited);
         last_notice_composited=(int)notice_composited;

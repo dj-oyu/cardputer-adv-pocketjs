@@ -1,13 +1,13 @@
-/* What the guest pays when an app first reads pocket.kasane
+/* What the guest pays when an app first reads kobako.kasane
  * (docs/kasane/api-reorg.md sec.6 P0 item 4, the first row of sec.3.6).
  *
- * On the device pocket.kasane is a lazy namespace: the first read runs
- * build_kasane (main/pocket/pocket_kasane.c), which registers the classes,
+ * On the device kobako.kasane is a lazy namespace: the first read runs
+ * build_kasane (main/kobako/kobako_kasane.c), which registers the classes,
  * the functions, cache, and the grid, video and pixel members,
  * and kasane.shiki when the session has a
- * Shiki heap. The host's pocket_api_lazy (tools/hostshim/pocket_api_stub.c)
+ * Shiki heap. The host's kobako_api_lazy (tools/hostshim/kobako_api_stub.c)
  * runs that same build at install, so the guest heap just before and just
- * after pocket_kasane_install is the cost of the first read, without the
+ * after kobako_kasane_install is the cost of the first read, without the
  * lazy getter itself. Function-list entries that QuickJS materialises on
  * first use are not built yet in either case.
  *
@@ -22,14 +22,14 @@
  *   bash tools/build_kasane_ns_cost_test.sh && /tmp/test-kasane-ns-cost
  *   M32=1 bash tools/build_kasane_ns_cost_test.sh && /tmp/test-kasane-ns-cost-m32
  */
-#include "pocket_kasane.h"
-#include "pocket_av.h"
-#include "pocket_video_sd_stream.h"
+#include "kobako_kasane.h"
+#include "kobako_av.h"
+#include "kobako_video_sd_stream.h"
 #include "shiki_heap.h"
 #include "ksn_shiki.h"
-#include "pocket_grid.h"
-#include "pocket_video.h"
-#include "pocket_pixel.h"
+#include "kobako_grid.h"
+#include "kobako_video.h"
+#include "kobako_pixel.h"
 #include "system/sys_device.h"
 #include "sound.h"
 #include <stdio.h>
@@ -37,8 +37,8 @@
 #include <string.h>
 
 void host_capabilities_clear(void);
-int32_t pocket_av_ui_current_player(void){return 0;}
-bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out){(void)id;(void)out;return false;}
+int32_t kobako_av_ui_current_player(void){return 0;}
+bool kobako_av_ui_read(int32_t id,kobako_av_ui_snapshot *out){(void)id;(void)out;return false;}
 bool sys_device_clock_read(sys_clock_state *out){(void)out;return false;}
 void sound_stream_set_observer(sound_stream_observer_fn o){(void)o;}
 void sound_stream_set_observer_interval(sound_stream_observer_fn o,uint32_t n){(void)o;(void)n;}
@@ -46,19 +46,19 @@ void *__real_calloc(size_t count,size_t size);
 void __real_free(void *ptr);
 void __wrap_free(void *ptr){__real_free(ptr);}
 void *__wrap_calloc(size_t count,size_t size){return __real_calloc(count,size);}
-/* pocket.kasane.video's SD stream: never started here. */
-pocket_video_sd_stream *pocket_video_sd_stream_start(const char *p,uint16_t w,uint16_t h,const char **code){
+/* kobako.kasane.video's SD stream: never started here. */
+kobako_video_sd_stream *kobako_video_sd_stream_start(const char *p,uint16_t w,uint16_t h,const char **code){
     (void)p;(void)w;(void)h;if(code)*code="UNSUPPORTED";return NULL;}
-void pocket_video_sd_stream_clock(pocket_video_sd_stream *s,uint64_t c){(void)s;(void)c;}
-void pocket_video_sd_stream_pause(pocket_video_sd_stream *s,bool p){(void)s;(void)p;}
-bool pocket_video_sd_stream_borrow(pocket_video_sd_stream *s,const uint8_t **p,uint32_t *b,uint64_t *t){
+void kobako_video_sd_stream_clock(kobako_video_sd_stream *s,uint64_t c){(void)s;(void)c;}
+void kobako_video_sd_stream_pause(kobako_video_sd_stream *s,bool p){(void)s;(void)p;}
+bool kobako_video_sd_stream_borrow(kobako_video_sd_stream *s,const uint8_t **p,uint32_t *b,uint64_t *t){
     (void)s;(void)p;(void)b;(void)t;return false;}
-void pocket_video_sd_stream_release(pocket_video_sd_stream *s){(void)s;}
-int pocket_video_sd_stream_state(const pocket_video_sd_stream *s){(void)s;return -1;}
-bool pocket_video_sd_stream_stop(pocket_video_sd_stream *s){(void)s;return true;}
-void pocket_video_sd_stream_reap(void){}
+void kobako_video_sd_stream_release(kobako_video_sd_stream *s){(void)s;}
+int kobako_video_sd_stream_state(const kobako_video_sd_stream *s){(void)s;return -1;}
+bool kobako_video_sd_stream_stop(kobako_video_sd_stream *s){(void)s;return true;}
+void kobako_video_sd_stream_reap(void){}
 /* The grid frontend (fold/index/view) is evaluated from apps/kasane/grid_fold.js
- * on its first call, so its source is not part of the first read of pocket.kasane
+ * on its first call, so its source is not part of the first read of kobako.kasane
  * (as tools/kasane_contract/test_megademo_app_host.c stands it in). */
 const char grid_fold_js_start[] asm("_binary_grid_fold_js_start") = "({});";
 const char grid_fold_js_end[] asm("_binary_grid_fold_js_end") = "";
@@ -98,14 +98,14 @@ static void session(bool shiki){
     if(shiki&&!shiki_heap_begin(0)){printf("FAIL: shiki_heap_begin\n");fails++;return;}
     JSRuntime *rt=JS_NewRuntime2(&PEAK_MF,NULL);
     JSContext *ctx=JS_NewContext(rt);
-    if(!ctx||JS_PocketHarden(ctx)<0){printf("FAIL: context\n");fails++;return;}
+    if(!ctx||JS_LeanHarden(ctx)<0){printf("FAIL: context\n");fails++;return;}
     host_capabilities_clear();
     const sample s0=take(rt);
-    if(pocket_kasane_install(ctx,NULL)!=ESP_OK){printf("FAIL: install\n");fails++;}
+    if(kobako_kasane_install(ctx,NULL)!=ESP_OK){printf("FAIL: install\n");fails++;}
     const sample s1=take(rt);
     printf("%s\n",shiki?"session with a Shiki heap (the manifest names kasane.shiki):":"session without a Shiki heap:");
-    print("  pocket.kasane, first read",s0,s1);
-    pocket_kasane_reset();
+    print("  kobako.kasane, first read",s0,s1);
+    kobako_kasane_reset();
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
     if(shiki)shiki_heap_end();
 }
@@ -115,7 +115,7 @@ static void session(bool shiki){
 static void member(const char *name,esp_err_t (*install)(JSContext *,JSValueConst)){
     JSRuntime *rt=JS_NewRuntime2(&PEAK_MF,NULL);
     JSContext *ctx=JS_NewContext(rt);
-    if(!ctx||JS_PocketHarden(ctx)<0){printf("FAIL: context\n");fails++;return;}
+    if(!ctx||JS_LeanHarden(ctx)<0){printf("FAIL: context\n");fails++;return;}
     host_capabilities_clear();
     JSValue ns=JS_NewObject(ctx);
     const sample s0=take(rt);
@@ -124,7 +124,7 @@ static void member(const char *name,esp_err_t (*install)(JSContext *,JSValueCons
     char what[64];snprintf(what,sizeof what,"  of which %s",name);
     print(what,s0,s1);
     JS_FreeValue(ctx,ns);
-    pocket_grid_reset();pocket_video_reset();pocket_pixel_reset();
+    kobako_grid_reset();kobako_video_reset();kobako_pixel_reset();
     JS_FreeContext(ctx);JS_FreeRuntime(rt);
 }
 
@@ -133,9 +133,9 @@ int main(void){
     session(false);
     session(true);
     printf("the members, each alone:\n");
-    member("grid",pocket_grid_install);
-    member("video",pocket_video_install);
-    member("pixel",pocket_pixel_install);
+    member("grid",kobako_grid_install);
+    member("video",kobako_video_install);
+    member("pixel",kobako_pixel_install);
     printf("%s\n",fails?"KASANE_NS_COST FAIL":"KASANE_NS_COST PASS");
     return fails?1:0;
 }

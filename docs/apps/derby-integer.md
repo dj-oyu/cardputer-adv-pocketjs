@@ -11,7 +11,7 @@
 
 1. **frame() の float の演算は、列挙した境目だけ。** host の bytecode 計装（`tools/vmtest/opprof`、`float_count.py`）で、DERBY の全チャンクの `frame()` の窓の float の (op, 型) の組が、§4.2 の表の境目の分だけ。前（§2）と後の表を残す。
 2. **静的検査が 0。** `tools/games/derby_int_lint.mjs --strict`（`@plan`/`@shiki` の本体とコメントの外の `/`・小数の定数・`Math` の小数を返す関数・`Float64Array`）が 0 件。opprof は call を呼ばれる側の種類で分類し、引数の型を持たないので、`Math` の関数はこの検査が受け持つ。
-3. **ネイティブの境目に double を渡さない。** `H.draw`・`SK.drawMany`・`pocket.derby.*`・`setRect` などに渡る数値がすべて `JS_TAG_INT`（host の harness で数える）。`drawMany` の入力は `Int32Array` だけ。
+3. **ネイティブの境目に double を渡さない。** `H.draw`・`SK.drawMany`・`kobako.derby.*`・`setRect` などに渡る数値がすべて `JS_TAG_INT`（host の harness で数える）。`drawMany` の入力は `Int32Array` だけ。
 4. **起動・レースの準備（`field`・`odds`・`race`・`step`）も整数**（1〜3 を評価中・`enter()` を含む全区間で）。
 5. **レースのモデルの性質を保つ。** 整数モデルで tune（`tools/games/tune_derby.mjs`）を回し、勝率・オッズの較正・払い戻し率・入れ替わりの指標が旧モデルの記録（[derby-watch.md](derby-watch.md)、同「楕円コースのカーブ補正とオッズ」）と同じ範囲に入る。範囲は段階 4 の前に数値で決める。大穴のオッズは Q16 の量子化で約 3% 動き得る（§5.4）。
 6. **画素。** 表示の段階（1〜3）はレースを変えないので、旧版と同じレースで画素を比べ、差の分布を記録する（丸めの 1 px 程度のはず）。モデルの段階（4）から新しい基準。
@@ -34,7 +34,7 @@ opprof を `0050cb4`（表示の sin を Shiki へ移した版）で回した（
 | --- | --- | --- | --- |
 | `H.draw`（旧 API の plan） | 91,020 | 80,876 | 495,273 |
 | `SK.drawMany`（`Float64Array`） | 13,370 | 13,370 | 13,370（配列） |
-| `pocket.derby.*` | 17,993 | 17,978 | 39,157 |
+| `kobako.derby.*` | 17,993 | 17,978 | 39,157 |
 | `setRect` | 3,817 | 8 | 15 |
 
 静的検査（`derby_int_lint.mjs`）: 256 件（watch 57、view 84、prog 43、scene 38、pan 20、play 13、demo 1）。
@@ -57,7 +57,7 @@ opprof を `0050cb4`（表示の sin を Shiki へ移した版）で回した（
 | `play.js` | `disp += .25`、幕の `fa`、PHOTO の拡大、`extra` の地図の位置 `* .224` | 時間の割合 |
 | `hud()` | 残り距離、パドックの棒（`(h.top - TOP) / SPR`）、オッズの表示 `toFixed(1)` | 表示 |
 | `at()` の `M.pow(Q, i·(.3+.35s))`、`DO()` の `.923077`、`bob()`、`ZO`、ダストの `k·2.39996 % 2π` | 定数の小数 | 表・Q16 の回転数にできる |
-| `pocket.derby`（C） | `course`・`view`・`ser` の引数（`pc` など）、内部は倍精度 | 首振りの列（[derby-ser-native.md](derby-ser-native.md)） |
+| `kobako.derby`（C） | `course`・`view`・`ser` の引数（`pc` など）、内部は倍精度 | 首振りの列（[derby-ser-native.md](derby-ser-native.md)） |
 
 ## 4. QuickJS で整数のままでいる規則
 
@@ -86,8 +86,8 @@ opprof を `0050cb4`（表示の sin を Shiki へ移した版）で回した（
 
 | 値 | 所 | 扱い |
 | --- | --- | --- |
-| `pocket.time.now()`（ms、double） | `attract()`（幕・デモの時計） | 1 フレーム 1 回 `\| 0`（起動からの差だけを使う） |
-| `pocket.random.seed()` | 起動時 1 回 | `\| 0` |
+| `kobako.time.now()`（ms、double） | `attract()`（幕・デモの時計） | 1 フレーム 1 回 `\| 0`（起動からの差だけを使う） |
+| `kobako.random.seed()` | 起動時 1 回 | `\| 0` |
 | モデルの出力（段階 1〜3 の間だけ） | `at()` の入口、1 ステップ 8 回 | 位置を Q16 m の int に。段階 4 で消える |
 
 opprof の float の組は、この表の分だけ残る。
@@ -96,7 +96,7 @@ opprof の float の組は、この表の分だけ残る。
 
 ### 5.1 単位（2 進の固定小数点）
 
-**長さは 2 進の固定小数の m** にする（mm だと m への変換が 1000 の割り算になる。下流の `pose`・`CAMS`・`pocket.derby`・`run` の `sin(d * 1.93328)` は m）。
+**長さは 2 進の固定小数の m** にする（mm だと m への変換が 1000 の割り算になる。下流の `pose`・`CAMS`・`kobako.derby`・`run` の `sin(d * 1.93328)` は m）。
 
 | 量 | 単位 | 範囲 | 備考 |
 | --- | --- | --- | --- |
@@ -117,15 +117,15 @@ opprof の float の組は、この表の分だけ残る。
 | 割り算 | 頻度 | 行き先 |
 | --- | --- | --- |
 | 定数の奥行き（40 m、`DFR`、`DNR`、`VS[1]`）での投影 `f / d0` | 毎フレーム数回 | 定数の逆数（整数）との積 |
-| 走者の投影 `f / lz[l]`（横）、`pj()` の `Z`・`1/Z`（首振り）、HEAD ON の `400 / (D + 12 − x)` | 毎フレーム 8 | **`pocket.derby` の C**（整数で入れ、`Int32Array` に Q4 px・Q16 の縮尺で返す。C の中は int64 と整数除算が使える） |
+| 走者の投影 `f / lz[l]`（横）、`pj()` の `Z`・`1/Z`（首振り）、HEAD ON の `400 / (D + 12 − x)` | 毎フレーム 8 | **`kobako.derby` の C**（整数で入れ、`Int32Array` に Q4 px・Q16 の縮尺で返す。C の中は int64 と整数除算が使える） |
 | 首振りの距離標・大型画面の 4 隅 | 毎フレーム 5 + 2 | 同上 |
 | カメラ `f` の逆数・首振りの単位ベクトル（`sqrt` と割り算） | 毎フレーム 1 | 同上（`view` の中） |
 | モデル: `v / h.top`、`(D − x) / (y − x)`、オッズの `z / p[i]` | 準備・着ごと | JS の整数の長除法（§5.4）。準備で馬ごとに 1 回、着で 8 回、オッズで 8 回 |
 | 時間の割合（幕の `fa`、PHOTO の拡大、パドックの棒） | 毎フレーム 1〜3 | 分母が定数なので逆数の積 |
 
-**Shiki に除算は足さない。** 当初の案（`DIV` を v1.5 に足し、投影だけの式 `proj` がデータ領域に書いて `run`・`legs` が読む）は、(1) `FETCH`/`PUT` は `EACH` のカーソルのレコードしか触れず、レーンごとの draw がレーン `l` のレコードを読み書きできない（[shiki-spec.md](../kasane/shiki-spec.md) §5.2〜§5.4、`ksn_shiki.c` の登録時の検査）、(2) 64 bit の中間を持つ割り算は「実行時の割り算は 32 bit ÷ 32 bit」の決定（同 §2.2）と衝突し、`b = 0` の `INVALID` はフレーム全体を捨てる、ので取り下げた。投影は `pocket.derby`（DERBY だけの面）の C で行い、Shiki の v1.5 は変えない。
+**Shiki に除算は足さない。** 当初の案（`DIV` を v1.5 に足し、投影だけの式 `proj` がデータ領域に書いて `run`・`legs` が読む）は、(1) `FETCH`/`PUT` は `EACH` のカーソルのレコードしか触れず、レーンごとの draw がレーン `l` のレコードを読み書きできない（[shiki-spec.md](../kasane/shiki-spec.md) §5.2〜§5.4、`ksn_shiki.c` の登録時の検査）、(2) 64 bit の中間を持つ割り算は「実行時の割り算は 32 bit ÷ 32 bit」の決定（同 §2.2）と衝突し、`b = 0` の `INVALID` はフレーム全体を捨てる、ので取り下げた。投影は `kobako.derby`（DERBY だけの面）の C で行い、Shiki の v1.5 は変えない。
 
-`pocket.derby` の今の C は、JS の倍精度の演算の順をビット単位で再現する契約（`pocket_derby.c` の冒頭、oracle は `derby_ser_oracle.js`・`derby_project_oracle.js`・`run_derby_projection.py`）。整数の入出力にした所は、この oracle を整数の参照に作り直す（段階 2）。`ser` の内部の倍精度（soft-float）を整数にするかは、段階 3 の後に費用を測って決める（目標は「JS から double を無くす」。C の中の double は別の課題）。
+`kobako.derby` の今の C は、JS の倍精度の演算の順をビット単位で再現する契約（`kobako_derby.c` の冒頭、oracle は `derby_ser_oracle.js`・`derby_project_oracle.js`・`run_derby_projection.py`）。整数の入出力にした所は、この oracle を整数の参照に作り直す（段階 2）。`ser` の内部の倍精度（soft-float）を整数にするかは、段階 3 の後に費用を測って決める（目標は「JS から double を無くす」。C の中の double は別の課題）。
 
 ### 5.3 旧 API の `@plan`（背景）
 
@@ -145,7 +145,7 @@ opprof の float の組は、この表の分だけ残る。
 | --- | --- | --- |
 | 0 | opprof の前の表（§2、済）、静的検査 `derby_int_lint.mjs`（済、256 件）、境目の double の計数を harness に足す | 前の数 |
 | 1 | 表示の状態: `at()`・`photo()`・`lz`（`M.pow` は表）・`shot()`・`wide()`・`pose()`（`shiki.sin/cos` に整数の回転数）・HUD・幕・PHOTO・地図、`drawMany` を `Int32Array` に | 画素の差、opprof |
-| 2 | `pocket.derby` の整数の投影（走者の横・首振り・HEAD ON、距離標、大型画面）と oracle の作り直し | 境目の計数、oracle |
+| 2 | `kobako.derby` の整数の投影（走者の横・首振り・HEAD ON、距離標、大型画面）と oracle の作り直し | 境目の計数、oracle |
 | 3 | 背景の旧 API の入力を Q4 に（plan ごと）。`course()`・`paint()`・`pan()` | 受け入れ条件 1〜3（モデル以外） |
 | 4 | レースのモデルの整数化、`idiv`・`isqrt`・`exp2` のチャンク、tune でオッズを較正、host の記録の作り直し | 受け入れ条件 4・5 |
 | 5 | 実機: 評価の余裕・ゲストの最大・各カメラの JS ターン・fps | 受け入れ条件 7 |
@@ -162,13 +162,13 @@ opprof の float の組は、この表の分だけ残る。
 
 | | 指摘 | 対応 |
 | --- | --- | --- |
-| R1（重大） | `proj` → データ領域 → `run`/`legs` は `EACH` のカーソルの制約で書けない | 投影を `pocket.derby` の C へ（§5.2） |
+| R1（重大） | `proj` → データ領域 → `run`/`legs` は `EACH` のカーソルの制約で書けない | 投影を `kobako.derby` の C へ（§5.2） |
 | R2（重大） | `Math.imul(a,b) >> 16` はあふれる積では誤り | 規則を「範囲を表で示す、示せなければ差分か分割」に（§4.1） |
 | R3（重大） | mm の単位は m への変換が 1000 の割り算 | 2 進の固定小数の m（§5.1） |
 | R4 | `DIV` の 64 bit 中間・`INVALID` は Shiki の決定と衝突 | Shiki に除算を足さない（§5.2） |
 | R5 | 条件 1 は今の道具で測れない所がある（`Math` の引数、`time.now()`） | 境目の表（§4.2）、静的検査が `Math` を受け持つ（§1） |
 | R6 | `M.exp(≈298)`、大穴の誤差、`>>> 0` | §5.4、§4.1 |
-| R7 | `pocket.derby` の oracle が壊れる | 段階 2 で作り直す（§5.2） |
+| R7 | `kobako.derby` の oracle が壊れる | 段階 2 で作り直す（§5.2） |
 | R8〜R9 | 表の抜け | §4.1・§3 に足した |
 | R10 | 段階の順 | 表示を先に、モデルを最後に（§6） |
 | R11 | ヒープ | `idiv` 系を別チャンクに（§5.4・§7） |
@@ -177,7 +177,7 @@ opprof の float の組は、この表の分だけ残る。
 
 実装は設計と次の点で違う。
 
-- **横のカメラの背景も `pocket.derby` の C へ移した**（利用者の決定。§5.2 では JS が定数の逆数で計算する予定だった）。`side()`・`part()` が柵・芝・スタンド・観客・距離標・ゲート・大型画面の面を int64 で描き、`lanes()`・`head()`・`screen()`・`aim()`・`wide()` が走者・HEAD ON・大型画面・首振りを投影する。旧 API の plan の入力の単位は変えずに済んだ（C が同じ数を渡す）。変えたのはダストとボケの 2 本（角を Q16 の回転数、t をフレーム数）だけ。
+- **横のカメラの背景も `kobako.derby` の C へ移した**（利用者の決定。§5.2 では JS が定数の逆数で計算する予定だった）。`side()`・`part()` が柵・芝・スタンド・観客・距離標・ゲート・大型画面の面を int64 で描き、`lanes()`・`head()`・`screen()`・`aim()`・`wide()` が走者・HEAD ON・大型画面・首振りを投影する。旧 API の plan の入力の単位は変えずに済んだ（C が同じ数を渡す）。変えたのはダストとボケの 2 本（角を Q16 の回転数、t をフレーム数）だけ。
 - 首振りの列（`ser`）の内部は倍精度のまま（入力は Q16）。oracle は整数の呼び出しを写して同じ倍精度を作り、ビット単位で照合する。
 - JS の整数の規則で実際に効いたのは、あふれだけでなく **−0**（`0 × 負` と `-0`）と、乱数の 32 bit の加算のあふれ。`Math.imul`・`0 - x`・半分ずつの加算で避けた。
 
@@ -186,7 +186,7 @@ opprof の float の組は、この表の分だけ残る。
 | 項目 | 前（`0050cb4`） | 後（`6841f73`〜） |
 | --- | --- | --- |
 | 静的検査 | 256 件 | 0 件 |
-| 境目の double（全ゲーム） | `H.draw` 495,273、`drawMany` 全部、`pocket.derby` 39,157 | すべて 0 |
+| 境目の double（全ゲーム） | `H.draw` 495,273、`drawMany` 全部、`kobako.derby` 39,157 | すべて 0 |
 | float の組/ターン（直線・横） | 776.4 | 0.7（`now() \| 0` の境目だけ） |
 | float の組/ターン（楕円・WIDE 2） | 1,249.6 | 0.7 |
 | 全命令/ターン（直線・横 / 楕円 WIDE 2） | 8,017 / 11,253 | 7,775 / 8,501 |
@@ -196,4 +196,4 @@ opprof の float の組は、この表の分だけ残る。
 
 **実機の結果（実測、1 回ずつ、レースは別。`docs/kasane/logs/derby-integer-20261102-6841f73.txt`）:** JS のターンは楕円の首振り WIDE 2 が 17.4〜20.9 → 9.6〜11.3 ms、FIELD 11.1 → 8.9〜9.3 ms、VISION 13.2 → 10.9〜11.0 ms、パドック 5.4 → 4.9 ms。読み込み後のゲストは 90,064（double）→ 94,424（Shiki の走者）→ 97,684 B、play チャンクの評価のピークは 88,936 → 97,752 B（+8.8 KB、うち Shiki の走者で +5.6 KB）、ネイティブの空きは 70,808 → 51,004 → 47,556 B。受け入れ条件 7 の「ゲスト −2 KB 以内」は満たさない（+3.3 KB、Shiki の走者の版から）。レースの最後（FINISH）まで実機で走った。評価の余裕（heapprobe）とゲストの最大は未測定。
 
-**廃止した CI（2026-11-02、利用者の決定）:** 整数化と Shiki への移行で対象のコード（double の JS、`@plan` の runner、`derby_runner_affine`、JS の投影）が無くなった、旧 DERBY の実験・採用時の検証の workflow 9 本を削除した: `adopt-photo-order`、`adopt-plain-y-step`、`derby-lanes-pan`、`derby-projection`、`derby-result-hud-experiment`、`derby-runner-affine`、`derby-screen-projection`、`validate-pad-bars`、`procedural-workspace`（`pocket_shiki_frame.c` の `.bss` を過去の基準と比べ、`run_pocket_proc_rom_qjs.py` で runner の組み込み plan を調べていた）。DERBY の検査は `tools/games/run_derby.py`（全画素・大型画面・首振りの oracle・種・デモ・オッズの較正）が受け持つ。
+**廃止した CI（2026-11-02、利用者の決定）:** 整数化と Shiki への移行で対象のコード（double の JS、`@plan` の runner、`derby_runner_affine`、JS の投影）が無くなった、旧 DERBY の実験・採用時の検証の workflow 9 本を削除した: `adopt-photo-order`、`adopt-plain-y-step`、`derby-lanes-pan`、`derby-projection`、`derby-result-hud-experiment`、`derby-runner-affine`、`derby-screen-projection`、`validate-pad-bars`、`procedural-workspace`（`kobako_shiki_frame.c` の `.bss` を過去の基準と比べ、`run_kobako_proc_rom_qjs.py` で runner の組み込み plan を調べていた）。DERBY の検査は `tools/games/run_derby.py`（全画素・大型画面・首振りの oracle・種・デモ・オッズの較正）が受け持つ。

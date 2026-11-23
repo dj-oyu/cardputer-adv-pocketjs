@@ -1,11 +1,11 @@
 <!doctype html>
 <html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Pocket Pet — 操作プレビュー</title>
+<title>Kobako Pet — 操作プレビュー</title>
 <style>
 body{margin:0;background:#09131f;color:#e6eee8;font:16px system-ui;display:grid;place-content:center;min-height:100vh;text-align:center}h1{font-size:26px;margin:0 0 8px}p{color:#9aafc0;line-height:1.7}canvas{width:min(90vw,960px);image-rendering:pixelated;border:10px solid #223649;border-radius:12px;margin:20px 0}button{background:#203648;border:1px solid #456078;color:#edf8ff;padding:12px 22px;border-radius:8px;font:inherit;cursor:pointer;margin:4px}button:hover{background:#345368}.small{font-size:13px}#error{color:#ffa58e}
 </style>
 <style>body{box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px 10px}p{max-width:960px;width:100%;box-sizing:border-box;padding:0 10px}canvas{box-sizing:border-box;flex-shrink:0}</style>
-<h1>Pocket Pet</h1><p>12種類の小さな同居人。選んで、ごはんをあげて、一緒にひと休み。</p>
+<h1>Kobako Pet</h1><p>12種類の小さな同居人。選んで、ごはんをあげて、一緒にひと休み。</p>
 <canvas id="screen" width="240" height="135" aria-label="ペットアプリ画面"></canvas>
 <div><button data-key="16" aria-label="上">↑</button></div>
 <div><button data-key="128" aria-label="左">←</button><button data-key="16384">決定</button><button data-key="32" aria-label="右">→</button></div>
@@ -18,10 +18,10 @@ function color(n){return '#'+((n>>>8).toString(16).padStart(6,'0'));}
 window.ui={createNode(kind){nodes.push({kind,props:{}});return nodes.length-1;},setProp(n,k,v){nodes[n].props[k]=v;},setText(n,t){nodes[n].text=t;},insertBefore(){}};
 ui.replaceText=ui.setText;
 window.__petNow=()=>performance.now();window.__petImage=(n,i)=>{nodes[n].image=i;};
-window.pocket={storage:{get:async()=>{const s=localStorage.getItem('pocket-pet-preview-v1');return s?{value:JSON.parse(s)}:null;},set:async(k,v)=>localStorage.setItem('pocket-pet-preview-v1',JSON.stringify(v))}};
-window.pocket.pet={show:window.__petImage,rewards:()=>0,select:n=>{if(n!==undefined)localStorage.setItem('pocket-pet-selected',n);return Number(localStorage.getItem('pocket-pet-selected'))||0;}};
-window.pocket.pet.place=(i,x,y,mood=0)=>{petPosition=i<0?null:{i,x,y,mood};};
-window.pocket.pet.say=t=>{speech=t;speechAt=performance.now();};
+window.kobako={storage:{get:async()=>{const s=localStorage.getItem('kobako-pet-preview-v1');return s?{value:JSON.parse(s)}:null;},set:async(k,v)=>localStorage.setItem('kobako-pet-preview-v1',JSON.stringify(v))}};
+window.kobako.pet={show:window.__petImage,rewards:()=>0,select:n=>{if(n!==undefined)localStorage.setItem('kobako-pet-selected',n);return Number(localStorage.getItem('kobako-pet-selected'))||0;}};
+window.kobako.pet.place=(i,x,y,mood=0)=>{petPosition=i<0?null:{i,x,y,mood};};
+window.kobako.pet.say=t=>{speech=t;speechAt=performance.now();};
 function face(i,x,y,mood){
   const e=[[16,32,24],[17,36,32],[16,29,27]][Math.floor(i/4)];
   for(let side=0;side<2;side++)for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){

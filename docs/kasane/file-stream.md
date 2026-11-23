@@ -3,7 +3,7 @@
 `kasane.video.open(width,height)` still creates the three-slot, 4096-pixel
 RGB565 image. After a person grants an SD folder through the picker, an app may
 call `kasane.video.streamStart("sd:/.../clip.ksv")`. The chosen path is checked
-by PocketFS on the JS owner task. Start opens one persistent SD read lease; it
+by KobakoFS on the JS owner task. Start opens one persistent SD read lease; it
 does not grant a folder. The picker must be closed before start. With the MP3
 reader's transient reopen handle, the two readers use at most the two existing
 SD file handles. A grant or card removal revokes the lease.
@@ -27,7 +27,7 @@ pauses input reads; `streamStop()` cancels the worker and returns true if its
 lease was closed within 200 ms. A false stop result means the session was
 quarantined until its worker acknowledges cancellation. The ordinary frame
 path does not perform the stop wait. Owner turns reap acknowledged quarantines
-after `pocket_fs_pump()`. An app should call `streamStop()` after `end` or
+after `kobako_fs_pump()`. An app should call `streamStop()` after `end` or
 `error` to release the persistent file handle.
 
 The worker runs on core 0 at priority 4. It owns one frame-sized staging

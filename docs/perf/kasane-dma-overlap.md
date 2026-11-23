@@ -40,13 +40,13 @@ ON時はband nを既存TXへcopyしてqueueし、shared stripでband n+1をraste
 
 ## 公開APIと所有権
 
-既定OFFでは従来のrenderer/pocket入口をそのままコンパイルし、追加completion API本体はON時だけ含める。J1既存の診断OFF `.text` 比較を維持する。
+既定OFFでは従来のrenderer/kobako入口をそのままコンパイルし、追加completion API本体はON時だけ含める。J1既存の診断OFF `.text` 比較を維持する。
 
 既存 `ksn_display_port` のlayoutは不変。別の `ksn_display_completion { ctx, finish }` を渡す追加APIを用意する。
 
 - `board_present_submit(x,y,cols,rows,pixels)` / `board_present_finish()` は実験ON時のみ。
 - `ksn_render_rects_complete` は通常背景と任意backdropを扱う。
-- `ksn_view_host_present_complete` → `ksn_runtime_present_complete` → `pocket_kasane_present_complete` がcompletionを明示的に伝播する。
+- `ksn_view_host_present_complete` → `ksn_runtime_present_complete` → `kobako_kasane_present_complete` がcompletionを明示的に伝播する。
 - 既存APIは残り、既存port initializerやctxを差し替えるprocedural port wrapperへのfield追加は不要。
 
 present callbackは入力pixelsを戻り後に保持しない。shared stripは直後から再利用可能。DMAが参照するのはboard所有のTXとstatic descriptorのみ。追加pixel buffer/heap/workerなし。既存容量はshared 3840 B、TX2本7680 B、inflight descriptor1本。
@@ -82,7 +82,7 @@ board試験は実ソースのreap/command/submit/finish/full/rect関数をfault-
 
 renderer試験は同期と遅延copyの100 frame全画素oracle、60件の狭/full damage、通常/zero-damage ACK、provider/send/finish failure、retry/cancel/resetをO2/strict-aliasingとASan/UBSanで検証する。
 
-owner試験は既存のruntime/pocket end-to-end契約の期待値を保持し、新completion API経由で実行する。runtime finish中の未ACKとshutdown BUSY、cache/lease/allocation上限、実QuickJSとnative procedural promotion、repair/teardownを検証する。panelの最終copyはfinishへ遅延する。
+owner試験は既存のruntime/kobako end-to-end契約の期待値を保持し、新completion API経由で実行する。runtime finish中の未ACKとshutdown BUSY、cache/lease/allocation上限、実QuickJSとnative procedural promotion、repair/teardownを検証する。panelの最終copyはfinishへ遅延する。
 
 CI `kasane-dma-overlap.yml` はexact headのhost契約とESP-IDF v6.0.1 target DMA OFF/ON × detail OFF/ON compile/linkを実行し、ELF/map/sdkconfig/size/SHA、linked mode proof、compiler stack evidenceを保存する。既定OFFでbuildしたCMakeCacheにOFF、ONにはONが記録される。compileは実画面の正しさや性能を保証しない。
 

@@ -1,6 +1,6 @@
 """Evaluation heap probe on the device (docs/vm/spread-eval-oom.md).
 
-Needs an image built with -DPOCKET_HEAPPROBE=ON. Each variant of
+Needs an image built with -DKOBAKO_HEAPPROBE=ON. Each variant of
 apps/heapprobe/heapprobe.js is started alone from the home screen with
 'Q<index>[,<limit>]\\n' (main.c), through the path a menu app takes, and
 its outcome is read from the log:

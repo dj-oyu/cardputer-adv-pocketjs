@@ -1,5 +1,5 @@
 /* The arithmetic layer for main/apps/derby/derby_ser_pie.c (tools/pie/README.md):
- * is the int16 cull a safe stand-in for pocket_derby.c's double ou()?
+ * is the int16 cull a safe stand-in for kobako_derby.c's double ou()?
  *
  * Claim checked: for every chord whose bit is in `valid`, the integer answer
  * "out" implies the double ou() answer "out" (never culls a chord the double

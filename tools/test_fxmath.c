@@ -142,7 +142,7 @@ static void wave_level_slope(void) {
     printf("      outside the clamp (unreachable): %ld/8193 differ\n", wide);
 }
 
-// pocket/mp3_decode.c builds its 32-tap windowed sinc once per file. The three
+// kobako/mp3_decode.c builds its 32-tap windowed sinc once per file. The three
 // rates the header accepts are the only ones that reach it (a lower rate skips
 // the FIR), and here they are compared coefficient by coefficient: a change of
 // one LSB of 16384 is -84 dBFS on that tap, but it would change the decoded

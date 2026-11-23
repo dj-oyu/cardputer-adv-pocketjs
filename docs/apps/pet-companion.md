@@ -49,30 +49,30 @@ USB形式は`RS`（0x1e）で始まり、`P`、48バイトの16進データ、�
 
 ## API
 
-ほかの同梱JSアプリは`pocket.pet`を使えます。
+ほかの同梱JSアプリは`kobako.pet`を使えます。
 
 ```js
-pocket.pet.select(0);                 // 0..11、戻り値は現在の選択
-pocket.pet.rewards(0);                // PCから与えられた累計スナック
-pocket.pet.usage(0);                  // 0=Codex, 1=Claude
-pocket.pet.notify('BUILD COMPLETE');  // 24 ASCII文字まで、8件まで
-pocket.pet.alarm('build', 300, 'BUILD'); // 秒後、0で解除
-pocket.pet.timer('build');            // 残り秒、なければnull
-pocket.pet.wake(7, 30);               // 毎日07:30、wake(-1)で解除
-pocket.pet.clock();                   // UTC、ローカル分、目覚まし設定
+kobako.pet.select(0);                 // 0..11、戻り値は現在の選択
+kobako.pet.rewards(0);                // PCから与えられた累計スナック
+kobako.pet.usage(0);                  // 0=Codex, 1=Claude
+kobako.pet.notify('BUILD COMPLETE');  // 24 ASCII文字まで、8件まで
+kobako.pet.alarm('build', 300, 'BUILD'); // 秒後、0で解除
+kobako.pet.timer('build');            // 残り秒、なければnull
+kobako.pet.wake(7, 30);               // 毎日07:30、wake(-1)で解除
+kobako.pet.clock();                   // UTC、ローカル分、目覚まし設定
 ```
 
 認証・アカウント接続・リセットクレジットの消費はこの機能から行いません。Codexのリセットクレジット消費は別の明示的な操作であり、通知はリセット時刻を知らせるだけです。Claude Codeの使用量を取得できない環境でも、目覚ましとローカルタイマーは動作します。
 
 ## 実装メモ
 
-`pocket.pet`は`docs/api/common-api.md` §2の作法に沿う。`limits`は`main/pet/pet_hub.c`の`pet_limits[]`で公開し（`maxPets`, `maxNotifications`, `maxTimers`, `maxLabelChars`, `maxTimerIdChars`, `maxAlarmSeconds`, `maxSpeechChars`）、`capability.available`はNVSオープンの成否を返す`probe`の観測値です（決め打ちのtrueではありません）。範囲外の引数・上限超過はすべて`PocketError`（`INVALID_ARGUMENT` / `LIMIT_EXCEEDED` / `NOT_AVAILABLE`）として届き、生のQuickJS例外は`main/pet/pet_hub.c`と`pet_assets.c`からは出ません。
+`kobako.pet`は`docs/api/common-api.md` §2の作法に沿う。`limits`は`main/pet/pet_hub.c`の`pet_limits[]`で公開し（`maxPets`, `maxNotifications`, `maxTimers`, `maxLabelChars`, `maxTimerIdChars`, `maxAlarmSeconds`, `maxSpeechChars`）、`capability.available`はNVSオープンの成否を返す`probe`の観測値です（決め打ちのtrueではありません）。範囲外の引数・上限超過はすべて`KobakoError`（`INVALID_ARGUMENT` / `LIMIT_EXCEEDED` / `NOT_AVAILABLE`）として届き、生のQuickJS例外は`main/pet/pet_hub.c`と`pet_assets.c`からは出ません。
 
-`pet.js`は`pocket.ui`ではなくレガシーの`ui.createNode`を直接使うため、`main/pocket/pocket_ui.c`のノード数ガード（`UI_SAFE_NODES 15`）を通ります。2026-09-07にノード数がこの上限を1つ超え（18 taffyノード）、レイアウトが要求する単一連続ブロックの段差を跨いで確保に失敗し、Rust側がエラーを返さず再起動する形で表面化しました（`CLAUDE.md`のtaffyノード段差を参照）。装飾用のバー3本を落として15ノードに戻し、実機で299フレームの描画とキー操作を確認しています。ノード数を増やす変更をするときは`tools/uibudget/`で先に確認すること。
+`pet.js`は`kobako.ui`ではなくレガシーの`ui.createNode`を直接使うため、`main/kobako/kobako_ui.c`のノード数ガード（`UI_SAFE_NODES 15`）を通ります。2026-09-07にノード数がこの上限を1つ超え（18 taffyノード）、レイアウトが要求する単一連続ブロックの段差を跨いで確保に失敗し、Rust側がエラーを返さず再起動する形で表面化しました（`CLAUDE.md`のtaffyノード段差を参照）。装飾用のバー3本を落として15ノードに戻し、実機で299フレームの描画とキー操作を確認しています。ノード数を増やす変更をするときは`tools/uibudget/`で先に確認すること。
 
-`pet_hub_pump()`は`app_tick()`の外（`main.c`）で走るため、通知・アラーム発火からJSへ届く処理は`app_tick()`の中に置く必要があります（QuickJSの割り込み期限は`app_tick()`先頭で更新されるため）。データ変化のpush通知（`pocket_api_capability_changed()`相当）は建てていません。`rewards()`はfloatを返し確保ゼロで、`frame()`はアニメーションのため毎フレーム走る必要があるので、購読にしてもポーリングと大差が無いためです。
+`pet_hub_pump()`は`app_tick()`の外（`main.c`）で走るため、通知・アラーム発火からJSへ届く処理は`app_tick()`の中に置く必要があります（QuickJSの割り込み期限は`app_tick()`先頭で更新されるため）。データ変化のpush通知（`kobako_api_capability_changed()`相当）は建てていません。`rewards()`はfloatを返し確保ゼロで、`frame()`はアニメーションのため毎フレーム走る必要があるので、購読にしてもポーリングと大差が無いためです。
 
-PC↔デバイスの双方向通信は`pocket.pet`ではなく`pocket.bridge`（`main/pocket/pocket_bridge.c`、[docs/api/common-api.md](../api/common-api.md) §13、`apps/bridge`）が担います。`pet_hub_usb()`の48バイト固定フレームは今も一方向（PC→デバイス）で、デバイス側からのレスポンス経路は`pocket.bridge`の役割です。
+PC↔デバイスの双方向通信は`kobako.pet`ではなく`kobako.bridge`（`main/kobako/kobako_bridge.c`、[docs/api/common-api.md](../api/common-api.md) §13、`apps/bridge`）が担います。`pet_hub_usb()`の48バイト固定フレームは今も一方向（PC→デバイス）で、デバイス側からのレスポンス経路は`kobako.bridge`の役割です。
 
 ## 検証
 
@@ -150,7 +150,7 @@ cc -O1 -I main -I main/hone tools/ayatsuri/model/test_track_character.c main/hon
 
 展開後の `.hca` は 1 MiB に近いので、RAM にも app 領域にも置かない。ファームは `.hcz` を埋め込み、初回の起動で `ay_chars` パーティション（0x650000 から 0x1B0000。`storage` の使われていない末尾）へ展開し、以後は1体ずつ mmap で読む（`main/hone/track_store.c`）。
 
-- `storage` は 0x270000 から 0xC0000 に縮めた。使っているのは先頭の 0xA6000 まで（ソース保存・`pocket.fs`・下書き）で、位置は変わらない。
+- `storage` は 0x270000 から 0xC0000 に縮めた。使っているのは先頭の 0xA6000 まで（ソース保存・`kobako.fs`・下書き）で、位置は変わらない。
 - 展開は新しいデータを焼いた後の最初の起動で1回（数秒から十数秒。「LOADING」を出す）。ディレクトリを最後に書くので、途中で電源が切れても次の起動でやり直す。
 - 先頭の 64 KiB がディレクトリで、各キャラクターは 64 KiB の境界から始まる。3体と背景で 1.69 MiB（27ページ）を使い、0x1B0000 にちょうど収まる。キャラクターを足すなら、`storage` をさらに縮めるか、パーティションを見直す。
 - パーティション表の変更はbrokerの書き込みに含まれる（ブートローダ・表・アプリだけを書く経路）。データ領域そのものはbrokerでは書けないので、この方式にした。

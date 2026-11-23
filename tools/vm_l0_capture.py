@@ -6,7 +6,7 @@ and writes one JSONL record per ~1s measurement window to .cache/vm/l0.jsonl.
     python tools/vm_l0_capture.py --port COM3 --conditions base,wifi --reps 1
     python tools/vm_l0_capture.py --summarize .cache/vm/l0.jsonl  # no device
 
-Requires a device flashed from a CONFIG_POCKET_VM_PROBE=y build, and the
+Requires a device flashed from a CONFIG_QJS_LEAN_PROBE=y build, and the
 ESP-IDF Python environment (pyserial):
 
     idf.py -B build_vm_l0 \
@@ -19,8 +19,8 @@ project-root sdkconfig that every other build_* directory reads.)
 WHAT IS EXACT AND WHAT IS NOT
 -----------------------------
 The device does not summarize. Every frame contributes one sample of frame
-time (whole pocketjs_ui_turn), frame() time, drain time and job count, and
-every completion contributes one latency sample; main/pocket/vmprobe.c writes
+time (whole kobako_ui_turn), frame() time, drain time and job count, and
+every completion contributes one latency sample; main/kobako/vmprobe.c writes
 them out raw, closing a window at 1 s OR at 64 samples, whichever comes first,
 so nothing is averaged away and nothing is overwritten. This script therefore
 computes median / p95 / max EXACTLY over every sample of a capture -- p95 by
@@ -41,14 +41,14 @@ Each condition is one USB byte the firmware turns into a bit mask, and the JS
 side of it is apps/vmprobe/condition.js, evaluated on top of the workload:
 
   base  'P'  nothing but the workload.
-  ui    'Q'  a pocket.kasane scene (background + rect + text) whose text is
+  ui    'Q'  a kobako.kasane scene (background + rect + text) whose text is
              set and submitted every frame, so composition and the transfer
-             are inside every turn. Was a pocket.ui screen until 2026-09-23;
+             are inside every turn. Was a kobako.ui screen until 2026-09-23;
              that API left the firmware in CP24-25.
-  audio 'R'  pocket.audio.tone, 440 Hz 1 s, re-armed from its own completion:
+  audio 'R'  kobako.audio.tone, 440 Hz 1 s, re-armed from its own completion:
              the real synthesiser, the real I2S path, the audio task at
              priority 7 preempting the ui task at 5.
-  wifi   'T' pocket.net.wifi.acquire({profileId:'default'}) and then a plain
+  wifi   'T' kobako.net.wifi.acquire({profileId:'default'}) and then a plain
              GET of the LAN gateway (derived from the board's own address)
              every 3 s, body read to EOF -- radio linked for the whole run,
              with a periodic request on top. Plain HTTP and not HTTPS for a
@@ -83,12 +83,12 @@ WORKLOADS = {
     "F": "async_generator",
 }
 # name -> mask, and the USB byte is chr(ord('P') + mask). Keep in step with
-# main/pocket/vmprobe.h's VMPROBE_COND_* and main.c's usb_stroke().
+# main/kobako/vmprobe.h's VMPROBE_COND_* and main.c's usb_stroke().
 CONDITIONS = {"base": 0, "ui": 1, "audio": 2, "wifi": 4, "all": 7}
 SEGMENT_SIZES = [(256, 1024), (256, 2048), (512, 2048), (512, 4096),
                  (1024, 4096), (4096, 4096)]
 
-# Matched against main/pocket/vmprobe.c's format strings byte for byte. If one
+# Matched against main/kobako/vmprobe.c's format strings byte for byte. If one
 # of those changes, this is the other half of the change (the same rule
 # CLAUDE.md gives the HOME_READY family of markers).
 WINDOW_RE = re.compile(
@@ -117,7 +117,7 @@ STATIC_RE = re.compile(
 CRASH_RE = re.compile(r"Guru Meditation|abort\(\) was called|rst:0x|assert failed|"
                       r"StoreProhibited|LoadProhibited|Stack canary")
 # "drainrun" is per drain CALL, not per frame -- see the note above
-# VMPROBE_DRAINRUN_CAP in main/pocket/vmprobe.c for why the two differ.
+# VMPROBE_DRAINRUN_CAP in main/kobako/vmprobe.c for why the two differ.
 METRICS = ("frame", "call", "drain", "jobs", "lat", "drainrun")
 
 
@@ -547,7 +547,7 @@ def main():
                                   flush=True)
                         if not c.records:
                             print("  WARNING: no VMPROBE WINDOW block seen -- is "
-                                  "this a CONFIG_POCKET_VM_PROBE build?", flush=True)
+                                  "this a CONFIG_QJS_LEAN_PROBE build?", flush=True)
                         for r in c.records:
                             r['sample_errors'] = c.bad
                             r['segment'] = c.segment

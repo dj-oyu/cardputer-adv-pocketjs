@@ -1,13 +1,13 @@
 # KEY TEST（`apps/keytest/keytest.js`）
 
-`pocket.input.keys` の診断アプリ。押されている物理キーの名前、同時押しの数と最大値、押下・解放の総数を画面とログに出す。**実機の同時押しの上限（ゴースト・取りこぼし・FIFO あふれ）を測るための道具**で、測定手順は [docs/platform/keystate.md](../../docs/platform/keystate.md) の「実機で測る項目」。
+`kobako.input.keys` の診断アプリ。押されている物理キーの名前、同時押しの数と最大値、押下・解放の総数を画面とログに出す。**実機の同時押しの上限（ゴースト・取りこぼし・FIFO あふれ）を測るための道具**で、測定手順は [docs/platform/keystate.md](../../docs/platform/keystate.md) の「実機で測る項目」。
 
 ## 入れ方と起動
 
 メニューの行ではない（`tools/test_settings.py` と `capture_home.py` はメニューを押下回数で数えるので、行を足すと壊れる）。診断ビルドだけに入る。
 
 ```powershell
-idf.py -B build_keytest -DPOCKET_KEYTEST=ON build
+idf.py -B build_keytest -DKOBAKO_KEYTEST=ON build
 idf.py -B build_keytest -p COM3 flash monitor
 ```
 

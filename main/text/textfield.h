@@ -6,17 +6,17 @@
 // The editing rules of a small host-owned text field, with no board, no IME and
 // no allocation of its own.
 //
-// docs/api/common-api.md section 6 gives pocket.input.text a field the HOST owns:
+// docs/api/common-api.md section 6 gives kobako.input.text a field the HOST owns:
 // the guest never sees a keystroke and never holds the buffer. Almost every
 // requirement in that paragraph is a decision about one keystroke -- does Enter
 // submit or insert a newline, does Escape cancel the conversion or the session,
 // does this commit still belong to this field -- and none of those decisions
 // needs a screen. They live here so tools/test_textfield.c can settle them on a
-// host, in the same spirit as vimcmd.c: the surface around them (pocket_text.c)
+// host, in the same spirit as vimcmd.c: the surface around them (kobako_text.c)
 // cannot be run anywhere but the device, and this can.
 //
 // The buffer is BORROWED. A session's text exists while the session does --
-// static DRAM is the binding constraint of this firmware -- so pocket_text.c
+// static DRAM is the binding constraint of this firmware -- so kobako_text.c
 // mallocs exactly maxBytes+1 with the session and hands it in here.
 
 typedef enum {

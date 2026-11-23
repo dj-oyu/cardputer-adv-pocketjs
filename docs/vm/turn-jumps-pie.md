@@ -4,7 +4,7 @@
 
 > 60 fps への道のり全体の要約は perf/60fps-roadmap.md にある。
 
-「QuickJS の本体はジャンプしまくりだろうから、分岐を減らせないか。SIMD 化（PIE）や複数命令を PIE にまとめることも検討して」への答え。実測（XTPERF、`CONFIG_POCKET_VM_TURNPERF`）、コード（逆アセンブル）、推定を分けて書く。記録は [logs/turn-jumps-20261105.txt](logs/turn-jumps-20261105.txt)。
+「QuickJS の本体はジャンプしまくりだろうから、分岐を減らせないか。SIMD 化（PIE）や複数命令を PIE にまとめることも検討して」への答え。実測（XTPERF、`CONFIG_KOBAKO_TURNPERF`）、コード（逆アセンブル）、推定を分けて書く。記録は [logs/turn-jumps-20261105.txt](logs/turn-jumps-20261105.txt)。
 
 ## 1. 結論
 
@@ -15,7 +15,7 @@
 
 ## 2. 1 ターンの内訳（実測）
 
-30 ターンあたり。ターンは `dispatch_guest` と `pocket_kasane_end_turn`（QuickJS、そこから呼ぶ Shiki の draw（JIT）、commit を含む）。
+30 ターンあたり。ターンは `dispatch_guest` と `kobako_kasane_end_turn`（QuickJS、そこから呼ぶ Shiki の draw（JIT）、commit を含む）。
 
 | | STRESS LV1 | DERBY レース |
 | --- | ---: | ---: |

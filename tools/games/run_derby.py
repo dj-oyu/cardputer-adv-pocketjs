@@ -1,7 +1,7 @@
 """DERBY WATCH on the host: build and run tools/games/test_derby_host.c.
 
-Builds the harness against the real QuickJS, the real pocket.kasane (view and
-shiki), pocket.input.keys (keymap + keystate) and the Kasane renderer,
+Builds the harness against the real QuickJS, the real kobako.kasane (view and
+shiki), kobako.input.keys (keymap + keystate) and the Kasane renderer,
 then runs:
   1. the full scripted game at the default load tier (MID): paddock, gate,
      race with camera changes, photo, result, a replay that must finish
@@ -24,7 +24,7 @@ then runs:
      150 m deep and f held at 200, so that a panning unit sees it (its face,
      feed and occlusion checked; the side units' faces are not, the screen
      being out of place for them).
-The series run in C, in integers (pocket.derby, main/apps/derby/pocket_derby.c and
+The series run in C, in integers (kobako.derby, main/apps/derby/kobako_derby.c and
 derby_ser_int.c; the rotation and cull on the PIE path, here the kernels'
 scalar reference derby_ser_pie.c with DERBY_SERPIE_HOST): three runs of the
 64-bit build (MID, and LIGHT and HEAVY panning for every WIDE, the director
@@ -48,7 +48,7 @@ Courses: each race's seed picks the straight or the oval (derby_watch.js OV);
 --course straight|oval runs every race on one (the lowered copy's OV[0] set
 to 0 or 1, host only). The oval's odds are checked like the straight's
 (tune_derby.mjs --course=oval).
-Seeds (pocket.random.seed() is DERBY_HW in the harness, fixed): every paddock
+Seeds (kobako.random.seed() is DERBY_HW in the harness, fixed): every paddock
 seed the MID run logs must be tools/games/derby_seeds.py's formula; the same
 stored race under another hardware seed must be another race; the seed
 analysis (stream overlaps, chi-square) must pass. Odds: node runs
@@ -82,21 +82,21 @@ import derby_seeds
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / ".cache/derby_host"
 QJS = "components/quickjs-ng/quickjs-ng"
-EXTRA = ["main/pocket/pocket_input.c", "main/hal/keymap.c", "main/hal/keystate.c",
-         # pocket.app.load and its table, read from apps/derby/chunks.txt
-         "main/pocket/pocket_app_load.c", "main/pocket/app_registry.c", "tools/hostshim/app_chunks_host.c",
-         # pocket.derby, the series in C (docs/apps/derby-ser-native.md), and
+EXTRA = ["main/kobako/kobako_input.c", "main/hal/keymap.c", "main/hal/keystate.c",
+         # kobako.app.load and its table, read from apps/derby/chunks.txt
+         "main/kobako/kobako_app_load.c", "main/kobako/app_registry.c", "tools/hostshim/app_chunks_host.c",
+         # kobako.derby, the series in C (docs/apps/derby-ser-native.md), and
          # its integer path (docs/apps/derby-ser-division.md)
-         "main/apps/derby/pocket_derby.c", "main/apps/derby/derby_ser_int.c", "main/apps/derby/derby_ser_pie.c",
-         # pocket.kasane.shiki: the runners and HEAD ON's horses (derby_prog.js @shiki)
-         "main/pocket/pocket_shiki_api.c"]
+         "main/apps/derby/kobako_derby.c", "main/apps/derby/derby_ser_int.c", "main/apps/derby/derby_ser_pie.c",
+         # kobako.kasane.shiki: the runners and HEAD ON's horses (derby_prog.js @shiki)
+         "main/kobako/kobako_shiki_api.c"]
 
 
 def kasane_sources() -> list[str]:
     """The .c list of tools/build_kasane_test.sh (minus its test source)."""
     text = (ROOT / "tools/build_kasane_test.sh").read_text()
     return [s for s in re.findall(r"(?:main|tools)/[\w/]+\.c", text)
-            if not s.startswith("tools/test_pocket_kasane")]
+            if not s.startswith("tools/test_kobako_kasane")]
 
 
 def shiki_table(cache: Path, src: Path = ROOT / "apps/derby") -> Path:
@@ -119,32 +119,32 @@ def build(flags: list[str], cache: Path, rom_src: Path = ROOT / "apps/derby",
     (cache / "kasane_pet_test_data.h").write_text(
         "static const uint8_t pet_test_data[] = {" + ",".join(map(str, data)) + "};\n")
     # Production subscription semantics, verbatim (as build_keytest_app_test.sh).
-    api = (ROOT / "main/pocket/pocket_api.c").read_text()
+    api = (ROOT / "main/kobako/kobako_api.c").read_text()
     a = api.index("// ----------------------------------------------------------- subscriptions")
     b = api.index("// ------------------------------------------------------- async completions", a)
-    (cache / "pocket_sub_impl.inc").write_text(api[a:b])
-    defs = ["-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE"]
+    (cache / "kobako_sub_impl.inc").write_text(api[a:b])
+    defs = ["-DQUICKJS_NG_BUILD", "-DQJS_LEAN_LAZY_BUILTINS=1", "-D_GNU_SOURCE"]
     objects = []
     for name in ("dtoa", "libregexp", "libunicode", "quickjs", "quickjs-vm"):
         obj = cache / f"{name}.o"
         src = ROOT / QJS / f"{name}.c"
         if not obj.exists() or src.stat().st_mtime > obj.stat().st_mtime:
             subprocess.run(["gcc", "-std=gnu11", "-c", "-O1", "-g", "-w", *flags, *defs, "-I", QJS,
-                            "-I", "components/pocketjs_guest/include", str(src), "-o", str(obj)],
+                            "-I", "components/kobako_guest/include", str(src), "-o", str(obj)],
                            cwd=ROOT, check=True)
         objects.append(str(obj))
     binary = cache / "test-derby"
-    includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/apps/derby", "main/ui",
+    includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/kobako", "main/apps/derby", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
     experiment_flags = []
     if camera_cache:
-        experiment_flags += ["-DPOCKET_DERBY_COURSE_CACHE"]
+        experiment_flags += ["-DKOBAKO_DERBY_COURSE_CACHE"]
     if project_batch:
-        experiment_flags += ["-DPOCKET_DERBY_PROJECT_BATCH"]
+        experiment_flags += ["-DKOBAKO_DERBY_PROJECT_BATCH"]
     # KSN_HOST_CFLAGS: extra flags for a profiling build (-DKSN_SHIKI_OPSTATS,
     # docs/kasane/shiki-jit.md sec.10).
     extra = os.environ.get("KSN_HOST_CFLAGS", "").split()
-    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *experiment_flags, *extra, "-DPOCKET_PROC_DRAW_HOOK",
+    subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *experiment_flags, *extra, "-DKOBAKO_PROC_DRAW_HOOK",
                     "-DDERBY_SER_CHECK", "-DDERBY_SERPIE_HOST", "-ffp-contract=off",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
                     (str(harness) if harness else "tools/games/test_derby_host.c"), *kasane_sources(), *EXTRA, str(stable), *objects,
@@ -240,7 +240,7 @@ def run(binary: Path, env: dict) -> str:
     return p.stdout
 
 
-HW = 0x2545F491          # the harness's pocket.random.seed() (test_derby_host.c)
+HW = 0x2545F491          # the harness's kobako.random.seed() (test_derby_host.c)
 
 
 def check_demo_matches_play(binary: Path, env: dict, out: str) -> None:

@@ -70,11 +70,11 @@ def build(flags: list[str]) -> Path:
     data = (ROOT / "apps/pet/assets/pets-compact.bin").read_bytes()
     (obj_dir / "kasane_pet_test_data.h").write_text(
         "static const uint8_t pet_test_data[] = {" + ",".join(map(str, data)) + "};\n")
-    api = (ROOT / "main/pocket/pocket_api.c").read_text()
+    api = (ROOT / "main/kobako/kobako_api.c").read_text()
     a = api.index("// ----------------------------------------------------------- subscriptions")
     b = api.index("// ------------------------------------------------------- async completions", a)
-    (obj_dir / "pocket_sub_impl.inc").write_text(api[a:b])
-    defs = ["-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE"]
+    (obj_dir / "kobako_sub_impl.inc").write_text(api[a:b])
+    defs = ["-DQUICKJS_NG_BUILD", "-DQJS_LEAN_LAZY_BUILTINS=1", "-D_GNU_SOURCE"]
     qjs = run_derby.QJS
     objects = []
     for name, src in (("dtoa", ROOT / qjs / "dtoa.c"), ("libregexp", ROOT / qjs / "libregexp.c"),
@@ -82,15 +82,15 @@ def build(flags: list[str]) -> Path:
                       ("quickjs-vm", ROOT / qjs / "quickjs-vm.c")):
         obj = obj_dir / f"{name}.o"
         subprocess.run(["gcc", "-std=gnu11", "-c", "-O1", "-g", "-w", *flags, *defs, "-I", qjs,
-                        "-I", "components/pocketjs_guest/include", str(src), "-o", str(obj)], cwd=ROOT, check=True)
+                        "-I", "components/kobako_guest/include", str(src), "-o", str(obj)], cwd=ROOT, check=True)
         objects.append(str(obj))
     binary = obj_dir / "test-derby-opprof"
-    includes = [f"-I{d}" for d in (qjs, "tools/hostshim", "main", "main/pocket", "main/ui",
+    includes = [f"-I{d}" for d in (qjs, "tools/hostshim", "main", "main/kobako", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(obj_dir))]
     # Same defines as run_derby.build(): the harness references
-    # pocket_proc_hook_dry, which exists only under POCKET_PROC_DRAW_HOOK.
+    # kobako_proc_hook_dry, which exists only under KOBAKO_PROC_DRAW_HOOK.
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, "-DKSN_PROC_POINTS_PIE_MODEL",
-                    "-DPOCKET_PROC_DRAW_HOOK", "-ffp-contract=off", "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
+                    "-DKOBAKO_PROC_DRAW_HOOK", "-ffp-contract=off", "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,
                     "tools/games/test_derby_host.c", *run_derby.kasane_sources(), *run_derby.EXTRA, str(table), str(stable), *objects,
                     "-Wl,--wrap=calloc", "-Wl,--wrap=free", "-Wl,--wrap=JS_NewContext", "-lm", "-o", str(binary)],
                    cwd=ROOT, check=True)

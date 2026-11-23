@@ -1,0 +1,368 @@
+Fork main 4492bd1 (+ the QJS_LEAN rename, c7d48fd) with hot/cold retrained, against the firmware main: device A/B, 2026-11-23
+Device: M5Stack Cardputer ADV (ESP32-S3FN8, 240 MHz), broker builds (Windows, esp-15.2.0), variant turnperf
+  (TURNPERF + fixed random seed). One app_session per run: DERBY 80 s (windows between DERBY GO and
+  DERBY FINISH), STRESS 45 s (every window).
+A  cardputer e0ecbd9 (main) = fork b716bd1, hot/cold profile of the time (JS_CallInternal unmatched since fork PR #4)
+B  cardputer e245a78 (claude/sweet-knuth-tw5sdm) = fork c7d48fd (main 4492bd1 + rename), QJS_LEAN_LAZY_BUILTINS=1,
+   quickjs.c profile 192/0 and the native profile retrained after the rename; .bin 2,579,088 B (broker = local)
+Flash order B1 -> A1 -> B2. Broker jobs kbB1-derby, kbB1-stress, kbA1-derby, kbA1-stress, kbB2-derby, kbB2-stress.
+The broker keeps the last 256 lines of a session. Lines were copied from the broker's tool output by hand
+  (subagents); every TURNPERF line has cy/us in 225..237, and B1/B2 agree within 0.03% per run.
+Only TURNPERF, DERBY GO/FINISH and MEM lines are kept below.
+
+== kbB1-derby
+I (117822) app: TURNPERF dstall_bank cy=33126892 ev=98700 n=30 us=143782 cont_n=0 cont_us=0
+I (118295) js: DERBY GO
+I (118841) app: TURNPERF regdep cy=35335282 ev=894479 n=30 us=151303 cont_n=0 cont_us=0
+I (119853) app: TURNPERF cti cy=40062965 ev=5652888 n=30 us=169967 cont_n=0 cont_us=0
+I (120859) app: TURNPERF memw cy=40176795 ev=1210 n=30 us=170391 cont_n=0 cont_us=0
+I (121866) app: TURNPERF exr_window cy=36720674 ev=15413 n=30 us=155782 cont_n=0 cont_us=0
+I (122878) app: TURNPERF exr_replay cy=35712557 ev=6118 n=30 us=151475 cont_n=0 cont_us=0
+I (123892) app: TURNPERF load cy=35447523 ev=3784189 n=30 us=150360 cont_n=0 cont_us=0
+I (124901) app: TURNPERF imem_hit cy=35504238 ev=0 n=30 us=150601 cont_n=0 cont_us=0
+I (125907) app: TURNPERF insn_jx cy=36832026 ev=195824 n=30 us=156232 cont_n=0 cont_us=0
+I (126908) app: TURNPERF insn_brj cy=36935362 ev=1595821 n=30 us=156611 cont_n=0 cont_us=0
+I (127913) app: TURNPERF insn_callret cy=36618201 ev=913758 n=30 us=155265 cont_n=0 cont_us=0
+I (128919) app: TURNPERF insn_ntaken cy=36710961 ev=765059 n=30 us=155658 cont_n=0 cont_us=0
+I (129916) app: TURNPERF insn cy=36656236 ev=15386062 n=30 us=155427 cont_n=0 cont_us=0
+I (130919) app: TURNPERF istall cy=36219695 ev=13850687 n=30 us=153586 cont_n=0 cont_us=0
+I (131926) app: TURNPERF dstall cy=36010667 ev=920572 n=30 us=152710 cont_n=0 cont_us=0
+I (132935) app: TURNPERF bubbles cy=36173289 ev=6280274 n=30 us=153304 cont_n=0 cont_us=0
+I (133946) app: TURNPERF exr cy=36593906 ev=22662 n=30 us=155010 cont_n=0 cont_us=0
+I (134950) app: TURNPERF icachemiss cy=36629215 ev=0 n=30 us=155168 cont_n=0 cont_us=0
+I (135959) app: TURNPERF istall_miss cy=39993270 ev=0 n=30 us=169505 cont_n=0 cont_us=0
+I (136963) app: TURNPERF istall_busy cy=38552284 ev=14349999 n=30 us=163406 cont_n=0 cont_us=0
+I (137961) app: TURNPERF istall_pif cy=35474814 ev=0 n=30 us=150326 cont_n=0 cont_us=0
+I (138968) app: TURNPERF istall_run cy=34839647 ev=0 n=30 us=147769 cont_n=0 cont_us=0
+I (139980) app: TURNPERF istall_unc cy=34508366 ev=0 n=30 us=146384 cont_n=0 cont_us=0
+I (140988) app: TURNPERF istall_l32r cy=38262094 ev=1356757 n=30 us=162246 cont_n=0 cont_us=0
+I (141991) app: TURNPERF istall_idiv cy=40673590 ev=96602 n=30 us=172408 cont_n=0 cont_us=0
+I (143005) app: TURNPERF istall_imul cy=35397686 ev=0 n=30 us=150059 cont_n=0 cont_us=0
+I (144016) app: TURNPERF dstall_busy cy=38591191 ev=1036518 n=30 us=163575 cont_n=0 cont_us=0
+I (145020) app: TURNPERF dstall_pif cy=40523071 ev=0 n=30 us=171789 cont_n=0 cont_us=0
+I (146032) app: TURNPERF dstall_sbuf cy=34717797 ev=6 n=30 us=147245 cont_n=0 cont_us=0
+I (147040) app: TURNPERF dstall_bank cy=35986454 ev=820 n=30 us=152629 cont_n=0 cont_us=0
+I (148045) app: TURNPERF regdep cy=40742979 ev=1073127 n=30 us=172637 cont_n=0 cont_us=0
+I (149048) app: TURNPERF cti cy=36551345 ev=5260583 n=30 us=155015 cont_n=0 cont_us=0
+I (150053) app: TURNPERF memw cy=34294721 ev=1210 n=30 us=145499 cont_n=0 cont_us=0
+I (151065) app: TURNPERF exr_window cy=36892415 ev=15977 n=30 us=156450 cont_n=0 cont_us=0
+I (152068) app: TURNPERF exr_replay cy=39496983 ev=7101 n=30 us=167306 cont_n=0 cont_us=0
+I (153076) app: TURNPERF load cy=39667033 ev=4337061 n=30 us=168065 cont_n=0 cont_us=0
+I (154082) app: TURNPERF imem_hit cy=39220507 ev=0 n=30 us=166131 cont_n=0 cont_us=0
+I (155094) app: TURNPERF insn_jx cy=38930520 ev=214141 n=30 us=164909 cont_n=0 cont_us=0
+I (156102) app: TURNPERF insn_brj cy=40019669 ev=1653489 n=30 us=169638 cont_n=0 cont_us=0
+I (157103) app: TURNPERF insn_callret cy=37756506 ev=929244 n=30 us=160187 cont_n=0 cont_us=0
+I (158108) app: TURNPERF insn_ntaken cy=29584666 ev=539237 n=30 us=125742 cont_n=0 cont_us=0
+I (159113) app: TURNPERF insn cy=31611177 ev=12748946 n=30 us=134307 cont_n=0 cont_us=0
+I (160119) app: TURNPERF istall cy=33627387 ev=14200930 n=30 us=142765 cont_n=0 cont_us=0
+I (161126) app: TURNPERF dstall cy=32707910 ev=928420 n=30 us=138836 cont_n=0 cont_us=0
+I (161878) js: DERBY FINISH race=1000001 seed=5601B421 order=1,6,2,3,5,7,8,4 ms=61097,61104,61117,61157,61192,61532,61571,62007 margin=NOSE
+I (162132) app: TURNPERF bubbles cy=34491356 ev=5806041 n=30 us=147199 cont_n=0 cont_us=0
+I (163137) app: TURNPERF exr cy=22587602 ev=17620 n=30 us=96194 cont_n=0 cont_us=0
+I (164145) app: TURNPERF icachemiss cy=22041881 ev=0 n=30 us=93842 cont_n=0 cont_us=0
+I (165153) app: TURNPERF istall_miss cy=21996772 ev=0 n=30 us=93642 cont_n=0 cont_us=0
+I (166158) app: TURNPERF istall_busy cy=21328583 ev=11401609 n=30 us=91169 cont_n=0 cont_us=0
+I (167160) app: TURNPERF istall_pif cy=20123018 ev=0 n=30 us=85480 cont_n=0 cont_us=0
+I (168160) app: TURNPERF istall_run cy=20528913 ev=0 n=30 us=87111 cont_n=0 cont_us=0
+I (169164) app: TURNPERF istall_unc cy=21231297 ev=0 n=30 us=90049 cont_n=0 cont_us=0
+I (170171) app: TURNPERF istall_l32r cy=21447094 ev=846005 n=30 us=90958 cont_n=0 cont_us=0
+I (171175) app: TURNPERF istall_idiv cy=24683756 ev=79002 n=30 us=106358 cont_n=0 cont_us=0
+I (172175) app: TURNPERF istall_imul cy=21207441 ev=0 n=30 us=90273 cont_n=0 cont_us=0
+I (173168) app: TURNPERF dstall_busy cy=21367758 ev=863806 n=30 us=90962 cont_n=0 cont_us=0
+I (174163) app: TURNPERF dstall_pif cy=21490374 ev=0 n=30 us=91451 cont_n=0 cont_us=0
+I (175163) app: TURNPERF dstall_sbuf cy=21212021 ev=2 n=30 us=90297 cont_n=0 cont_us=0
+I (176155) app: TURNPERF dstall_bank cy=21198670 ev=53 n=30 us=90243 cont_n=0 cont_us=0
+I (177152) app: TURNPERF regdep cy=21184161 ev=394525 n=30 us=90180 cont_n=0 cont_us=0
+I (178151) app: TURNPERF cti cy=21239603 ev=2194821 n=30 us=90408 cont_n=0 cont_us=0
+I (179142) app: TURNPERF memw cy=21194906 ev=1205 n=30 us=90224 cont_n=0 cont_us=0
+I (180012) app: MEM free=220776 largest=73728 js=0 frames=2395
+I (180041) app: MEM free=177260 largest=73728 js=31144 frames=0
+
+== kbA1-derby
+I (111423) app: TURNPERF dstall_bank cy=34894795 ev=94816 n=30 us=149999 cont_n=0 cont_us=0
+I (111890) js: DERBY GO
+I (112428) app: TURNPERF regdep cy=37079669 ev=869704 n=30 us=158157 cont_n=0 cont_us=0
+I (113433) app: TURNPERF cti cy=42587385 ev=5915645 n=30 us=180999 cont_n=0 cont_us=0
+I (114439) app: TURNPERF memw cy=42608502 ev=1210 n=30 us=180986 cont_n=0 cont_us=0
+I (115443) app: TURNPERF exr_window cy=39339845 ev=16375 n=30 us=167158 cont_n=0 cont_us=0
+I (116448) app: TURNPERF exr_replay cy=38178023 ev=6118 n=30 us=162218 cont_n=0 cont_us=0
+I (117452) app: TURNPERF load cy=38112134 ev=3797548 n=30 us=161922 cont_n=0 cont_us=0
+I (118458) app: TURNPERF imem_hit cy=38231938 ev=0 n=30 us=162432 cont_n=0 cont_us=0
+I (119462) app: TURNPERF insn_jx cy=39452281 ev=200048 n=30 us=167665 cont_n=0 cont_us=0
+I (120468) app: TURNPERF insn_brj cy=39560967 ev=1701514 n=30 us=168073 cont_n=0 cont_us=0
+I (121476) app: TURNPERF insn_callret cy=39383338 ev=939258 n=30 us=167330 cont_n=0 cont_us=0
+I (122482) app: TURNPERF insn_ntaken cy=39355730 ev=851568 n=30 us=167195 cont_n=0 cont_us=0
+I (123490) app: TURNPERF insn cy=39607825 ev=16018346 n=30 us=168280 cont_n=0 cont_us=0
+I (124494) app: TURNPERF istall cy=38966009 ev=15525958 n=30 us=165537 cont_n=0 cont_us=0
+I (125499) app: TURNPERF dstall cy=38692404 ev=1103155 n=30 us=164377 cont_n=0 cont_us=0
+I (126503) app: TURNPERF bubbles cy=38669466 ev=6541072 n=30 us=164284 cont_n=0 cont_us=0
+I (127510) app: TURNPERF exr cy=39192041 ev=23973 n=30 us=166520 cont_n=0 cont_us=0
+I (128515) app: TURNPERF icachemiss cy=39398964 ev=0 n=30 us=167392 cont_n=0 cont_us=0
+I (129516) app: TURNPERF istall_miss cy=42734982 ev=0 n=30 us=181529 cont_n=0 cont_us=0
+I (130523) app: TURNPERF istall_busy cy=41566412 ev=16203361 n=30 us=176601 cont_n=0 cont_us=0
+I (131527) app: TURNPERF istall_pif cy=38091540 ev=0 n=30 us=161279 cont_n=0 cont_us=0
+I (132535) app: TURNPERF istall_run cy=37429296 ev=0 n=30 us=158560 cont_n=0 cont_us=0
+I (133540) app: TURNPERF istall_unc cy=37247010 ev=0 n=30 us=157765 cont_n=0 cont_us=0
+I (134548) app: TURNPERF istall_l32r cy=40957643 ev=1490282 n=30 us=173472 cont_n=0 cont_us=0
+I (135559) app: TURNPERF istall_idiv cy=43591117 ev=96929 n=30 us=184555 cont_n=0 cont_us=0
+I (136559) app: TURNPERF istall_imul cy=38064440 ev=0 n=30 us=161183 cont_n=0 cont_us=0
+I (137564) app: TURNPERF dstall_busy cy=41311444 ev=1252054 n=30 us=174931 cont_n=0 cont_us=0
+I (138573) app: TURNPERF dstall_pif cy=43117469 ev=0 n=30 us=182601 cont_n=0 cont_us=0
+I (139584) app: TURNPERF dstall_sbuf cy=37515869 ev=6 n=30 us=158854 cont_n=0 cont_us=0
+I (140591) app: TURNPERF dstall_bank cy=38705773 ev=694 n=30 us=163929 cont_n=0 cont_us=0
+I (141597) app: TURNPERF regdep cy=43430929 ev=1050426 n=30 us=183850 cont_n=0 cont_us=0
+I (142605) app: TURNPERF cti cy=39343230 ev=5520219 n=30 us=166638 cont_n=0 cont_us=0
+I (143613) app: TURNPERF memw cy=37064684 ev=1210 n=30 us=156992 cont_n=0 cont_us=0
+I (144622) app: TURNPERF exr_window cy=39911875 ev=15267 n=30 us=169035 cont_n=0 cont_us=0
+I (145624) app: TURNPERF exr_replay cy=42422032 ev=7101 n=30 us=179551 cont_n=0 cont_us=0
+I (146627) app: TURNPERF load cy=42278276 ev=4352033 n=30 us=178994 cont_n=0 cont_us=0
+I (147630) app: TURNPERF imem_hit cy=42037503 ev=0 n=30 us=177950 cont_n=0 cont_us=0
+I (148637) app: TURNPERF insn_jx cy=41707550 ev=219210 n=30 us=176565 cont_n=0 cont_us=0
+I (149644) app: TURNPERF insn_brj cy=42470780 ev=1756286 n=30 us=179877 cont_n=0 cont_us=0
+I (150656) app: TURNPERF insn_callret cy=40061327 ev=950044 n=30 us=169806 cont_n=0 cont_us=0
+I (151659) app: TURNPERF insn_ntaken cy=32155511 ev=621842 n=30 us=136469 cont_n=0 cont_us=0
+I (152667) app: TURNPERF insn cy=33943420 ev=13217079 n=30 us=144052 cont_n=0 cont_us=0
+I (153673) app: TURNPERF istall cy=35721981 ev=15619112 n=30 us=151529 cont_n=0 cont_us=0
+I (154682) app: TURNPERF dstall cy=34796205 ev=1180312 n=30 us=147573 cont_n=0 cont_us=0
+I (155438) js: DERBY FINISH race=1000001 seed=5601B421 order=1,6,2,3,5,7,8,4 ms=61097,61104,61117,61157,61192,61532,61571,62007 margin=NOSE
+I (155693) app: TURNPERF bubbles cy=36795454 ev=5979058 n=30 us=156665 cont_n=0 cont_us=0
+I (156693) app: TURNPERF exr cy=23482704 ev=14877 n=30 us=99407 cont_n=0 cont_us=0
+I (157693) app: TURNPERF icachemiss cy=23029836 ev=0 n=30 us=97433 cont_n=0 cont_us=0
+I (158692) app: TURNPERF istall_miss cy=23006014 ev=0 n=30 us=97327 cont_n=0 cont_us=0
+I (159700) app: TURNPERF istall_busy cy=22527060 ev=12575661 n=30 us=95949 cont_n=0 cont_us=0
+I (160707) app: TURNPERF istall_pif cy=21359284 ev=0 n=30 us=90598 cont_n=0 cont_us=0
+I (161712) app: TURNPERF istall_run cy=21710900 ev=0 n=30 us=92003 cont_n=0 cont_us=0
+I (162731) app: TURNPERF istall_unc cy=22408280 ev=0 n=30 us=94907 cont_n=0 cont_us=0
+I (163750) app: TURNPERF istall_l32r cy=22558101 ev=965057 n=30 us=95538 cont_n=0 cont_us=0
+I (164758) app: TURNPERF istall_idiv cy=26135391 ev=78596 n=30 us=112489 cont_n=0 cont_us=0
+I (165755) app: TURNPERF istall_imul cy=22421588 ev=0 n=30 us=95320 cont_n=0 cont_us=0
+I (166753) app: TURNPERF dstall_busy cy=22543506 ev=975164 n=30 us=95837 cont_n=0 cont_us=0
+I (167755) app: TURNPERF dstall_pif cy=22785023 ev=0 n=30 us=96844 cont_n=0 cont_us=0
+I (168752) app: TURNPERF dstall_sbuf cy=22648161 ev=3 n=30 us=96272 cont_n=0 cont_us=0
+I (169754) app: TURNPERF dstall_bank cy=22712202 ev=53 n=30 us=96535 cont_n=0 cont_us=0
+I (170753) app: TURNPERF regdep cy=22901621 ev=385311 n=30 us=97333 cont_n=0 cont_us=0
+I (171753) app: TURNPERF cti cy=22734959 ev=2196543 n=30 us=96640 cont_n=0 cont_us=0
+I (172756) app: TURNPERF memw cy=22692456 ev=1205 n=30 us=96467 cont_n=0 cont_us=0
+I (173657) app: MEM free=220756 largest=69632 js=0 frames=2396
+I (173687) app: MEM free=177124 largest=69632 js=31144 frames=0
+
+== kbB2-derby
+I (124657) app: TURNPERF dstall_bank cy=32990098 ev=98693 n=30 us=142098 cont_n=0 cont_us=0
+I (125130) js: DERBY GO
+I (125676) app: TURNPERF regdep cy=35178942 ev=888181 n=30 us=149993 cont_n=0 cont_us=0
+I (126686) app: TURNPERF cti cy=40091584 ev=5656814 n=30 us=170106 cont_n=0 cont_us=0
+I (127691) app: TURNPERF memw cy=40205416 ev=1210 n=30 us=170535 cont_n=0 cont_us=0
+I (128699) app: TURNPERF exr_window cy=36880043 ev=15371 n=30 us=156446 cont_n=0 cont_us=0
+I (129713) app: TURNPERF exr_replay cy=35496886 ev=6118 n=30 us=150568 cont_n=0 cont_us=0
+I (130728) app: TURNPERF load cy=35388755 ev=3784159 n=30 us=150114 cont_n=0 cont_us=0
+I (131737) app: TURNPERF imem_hit cy=35513471 ev=0 n=30 us=150644 cont_n=0 cont_us=0
+I (132743) app: TURNPERF insn_jx cy=36747609 ev=195824 n=30 us=155832 cont_n=0 cont_us=0
+I (133744) app: TURNPERF insn_brj cy=36818814 ev=1594472 n=30 us=155959 cont_n=0 cont_us=0
+I (134749) app: TURNPERF insn_callret cy=36645509 ev=912138 n=30 us=155240 cont_n=0 cont_us=0
+I (135758) app: TURNPERF insn_ntaken cy=36609271 ev=764083 n=30 us=155081 cont_n=0 cont_us=0
+I (136758) app: TURNPERF insn cy=36613889 ev=15375636 n=30 us=155101 cont_n=0 cont_us=0
+I (137765) app: TURNPERF istall cy=36402709 ev=14053934 n=30 us=154203 cont_n=0 cont_us=0
+I (138773) app: TURNPERF dstall cy=36012793 ev=916717 n=30 us=152577 cont_n=0 cont_us=0
+I (139783) app: TURNPERF bubbles cy=36019253 ev=6276292 n=30 us=152592 cont_n=0 cont_us=0
+I (140794) app: TURNPERF exr cy=36406240 ev=22699 n=30 us=154234 cont_n=0 cont_us=0
+I (141801) app: TURNPERF icachemiss cy=36768003 ev=0 n=30 us=155743 cont_n=0 cont_us=0
+I (142812) app: TURNPERF istall_miss cy=40028428 ev=0 n=30 us=169656 cont_n=0 cont_us=0
+I (143818) app: TURNPERF istall_busy cy=38542668 ev=14341576 n=30 us=163362 cont_n=0 cont_us=0
+I (144817) app: TURNPERF istall_pif cy=35432888 ev=0 n=30 us=150149 cont_n=0 cont_us=0
+I (145825) app: TURNPERF istall_run cy=34691066 ev=0 n=30 us=147155 cont_n=0 cont_us=0
+I (146839) app: TURNPERF istall_unc cy=34591997 ev=0 n=30 us=146721 cont_n=0 cont_us=0
+I (147846) app: TURNPERF istall_l32r cy=38235831 ev=1354414 n=30 us=162142 cont_n=0 cont_us=0
+I (148848) app: TURNPERF istall_idiv cy=40652572 ev=96602 n=30 us=172311 cont_n=0 cont_us=0
+I (149866) app: TURNPERF istall_imul cy=35409103 ev=0 n=30 us=150111 cont_n=0 cont_us=0
+I (150871) app: TURNPERF dstall_busy cy=38805919 ev=1042392 n=30 us=164476 cont_n=0 cont_us=0
+I (151876) app: TURNPERF dstall_pif cy=40487898 ev=0 n=30 us=171637 cont_n=0 cont_us=0
+I (152885) app: TURNPERF dstall_sbuf cy=34749164 ev=7 n=30 us=147394 cont_n=0 cont_us=0
+I (153897) app: TURNPERF dstall_bank cy=35739913 ev=796 n=30 us=151588 cont_n=0 cont_us=0
+I (154904) app: TURNPERF regdep cy=40934446 ev=1073095 n=30 us=173440 cont_n=0 cont_us=0
+I (155909) app: TURNPERF cti cy=36585265 ev=5260596 n=30 us=155157 cont_n=0 cont_us=0
+I (156914) app: TURNPERF memw cy=34294792 ev=1210 n=30 us=145493 cont_n=0 cont_us=0
+I (157928) app: TURNPERF exr_window cy=36945398 ev=15988 n=30 us=156675 cont_n=0 cont_us=0
+I (158935) app: TURNPERF exr_replay cy=39585249 ev=7101 n=30 us=167709 cont_n=0 cont_us=0
+I (159944) app: TURNPERF load cy=39563113 ev=4337023 n=30 us=167631 cont_n=0 cont_us=0
+I (160953) app: TURNPERF imem_hit cy=39240798 ev=0 n=30 us=166224 cont_n=0 cont_us=0
+I (161957) app: TURNPERF insn_jx cy=38889834 ev=214141 n=30 us=164747 cont_n=0 cont_us=0
+I (162965) app: TURNPERF insn_brj cy=40109166 ev=1653486 n=30 us=170009 cont_n=0 cont_us=0
+I (163967) app: TURNPERF insn_callret cy=37586738 ev=929244 n=30 us=159488 cont_n=0 cont_us=0
+I (164975) app: TURNPERF insn_ntaken cy=29525440 ev=539123 n=30 us=125487 cont_n=0 cont_us=0
+I (165979) app: TURNPERF insn cy=31628198 ev=12748604 n=30 us=134371 cont_n=0 cont_us=0
+I (166982) app: TURNPERF istall cy=33654221 ev=14233647 n=30 us=142842 cont_n=0 cont_us=0
+I (167992) app: TURNPERF dstall cy=32754975 ev=930141 n=30 us=139004 cont_n=0 cont_us=0
+I (168748) js: DERBY FINISH race=1000001 seed=5601B421 order=1,6,2,3,5,7,8,4 ms=61097,61104,61117,61157,61192,61532,61571,62007 margin=NOSE
+I (169002) app: TURNPERF bubbles cy=34719023 ev=5792850 n=30 us=147961 cont_n=0 cont_us=0
+I (170006) app: TURNPERF exr cy=22308770 ev=15691 n=30 us=94553 cont_n=0 cont_us=0
+I (171014) app: TURNPERF icachemiss cy=21869475 ev=0 n=30 us=92648 cont_n=0 cont_us=0
+I (172023) app: TURNPERF istall_miss cy=21814581 ev=0 n=30 us=92435 cont_n=0 cont_us=0
+I (173026) app: TURNPERF istall_busy cy=21202486 ev=11345222 n=30 us=90123 cont_n=0 cont_us=0
+I (174028) app: TURNPERF istall_pif cy=20365737 ev=0 n=30 us=86023 cont_n=0 cont_us=0
+I (175030) app: TURNPERF istall_run cy=21002959 ev=0 n=30 us=88609 cont_n=0 cont_us=0
+I (176031) app: TURNPERF istall_unc cy=21170898 ev=0 n=30 us=89318 cont_n=0 cont_us=0
+I (177032) app: TURNPERF istall_l32r cy=21225506 ev=838395 n=30 us=89545 cont_n=0 cont_us=0
+I (178035) app: TURNPERF istall_idiv cy=24596610 ev=78990 n=30 us=105806 cont_n=0 cont_us=0
+I (179034) app: TURNPERF istall_imul cy=21220109 ev=0 n=30 us=90369 cont_n=0 cont_us=0
+I (180029) app: TURNPERF dstall_busy cy=21456250 ev=865728 n=30 us=91357 cont_n=0 cont_us=0
+I (181028) app: TURNPERF dstall_pif cy=21639235 ev=0 n=30 us=92122 cont_n=0 cont_us=0
+I (182028) app: TURNPERF dstall_sbuf cy=21443271 ev=0 n=30 us=91304 cont_n=0 cont_us=0
+I (183021) app: TURNPERF dstall_bank cy=21200809 ev=61 n=30 us=90296 cont_n=0 cont_us=0
+I (184018) app: TURNPERF regdep cy=21175160 ev=394524 n=30 us=90189 cont_n=0 cont_us=0
+I (185018) app: TURNPERF cti cy=21210773 ev=2194904 n=30 us=90337 cont_n=0 cont_us=0
+I (186008) app: TURNPERF memw cy=21226269 ev=1205 n=30 us=90404 cont_n=0 cont_us=0
+I (186846) app: MEM free=220776 largest=73728 js=0 frames=2394
+I (186875) app: MEM free=177260 largest=73728 js=31132 frames=0
+
+== kbB1-stress
+I (221463) app: MEM free=188296 largest=73728 js=0 frames=1229
+I (221560) app: MEM free=91124 largest=31744 js=42800 frames=0
+I (221709) app: TURNPERF exr_window cy=26363323 ev=15557 n=30 us=111934 cont_n=1 cont_us=839
+I (222716) app: TURNPERF exr_replay cy=39338617 ev=266 n=30 us=168424 cont_n=0 cont_us=0
+I (223725) app: TURNPERF load cy=37305087 ev=3909056 n=30 us=160219 cont_n=0 cont_us=0
+I (224734) app: TURNPERF imem_hit cy=37341709 ev=0 n=30 us=159907 cont_n=0 cont_us=0
+I (225739) app: TURNPERF insn_jx cy=37759987 ev=64632 n=30 us=161922 cont_n=0 cont_us=0
+I (226748) app: TURNPERF insn_brj cy=37400206 ev=2136150 n=30 us=160432 cont_n=0 cont_us=0
+I (227754) app: TURNPERF insn_callret cy=37467650 ev=623380 n=30 us=161449 cont_n=0 cont_us=0
+I (228764) app: TURNPERF insn_ntaken cy=37138254 ev=1105657 n=30 us=159660 cont_n=0 cont_us=0
+I (229769) app: TURNPERF insn cy=37760395 ev=18251665 n=30 us=163096 cont_n=0 cont_us=0
+I (230771) app: TURNPERF istall cy=37373791 ev=11683035 n=30 us=161284 cont_n=0 cont_us=0
+I (231778) app: TURNPERF dstall cy=37432465 ev=965984 n=30 us=162206 cont_n=0 cont_us=0
+I (232784) app: TURNPERF bubbles cy=37099304 ev=6612072 n=30 us=160447 cont_n=0 cont_us=0
+I (233791) app: TURNPERF exr cy=37582489 ev=36972 n=30 us=163223 cont_n=0 cont_us=0
+I (234799) app: TURNPERF icachemiss cy=37088446 ev=0 n=30 us=161077 cont_n=0 cont_us=0
+I (235805) app: TURNPERF istall_miss cy=37611523 ev=0 n=30 us=163573 cont_n=0 cont_us=0
+I (236810) app: TURNPERF istall_busy cy=37300520 ev=10894005 n=30 us=162302 cont_n=0 cont_us=0
+I (237819) app: TURNPERF istall_pif cy=37622091 ev=0 n=30 us=164379 cont_n=0 cont_us=0
+I (238826) app: TURNPERF istall_run cy=37144060 ev=0 n=30 us=162087 cont_n=0 cont_us=0
+I (239838) app: TURNPERF istall_unc cy=37496972 ev=0 n=30 us=164020 cont_n=0 cont_us=0
+I (240845) app: TURNPERF istall_l32r cy=37456242 ev=1183948 n=30 us=163878 cont_n=0 cont_us=0
+I (241853) app: TURNPERF istall_idiv cy=37739592 ev=23845 n=30 us=165880 cont_n=0 cont_us=0
+I (242857) app: TURNPERF istall_imul cy=37124506 ev=0 n=30 us=162647 cont_n=0 cont_us=0
+I (243864) app: TURNPERF dstall_busy cy=38114309 ev=959714 n=30 us=168237 cont_n=0 cont_us=0
+I (244871) app: TURNPERF dstall_pif cy=37139557 ev=0 n=30 us=158988 cont_n=0 cont_us=0
+I (245883) app: TURNPERF dstall_sbuf cy=37589210 ev=2 n=30 us=161402 cont_n=0 cont_us=0
+I (246889) app: TURNPERF dstall_bank cy=37131161 ev=22751 n=30 us=159442 cont_n=0 cont_us=0
+I (247895) app: TURNPERF regdep cy=37232111 ev=910961 n=30 us=160449 cont_n=0 cont_us=0
+I (248901) app: TURNPERF cti cy=37118905 ev=5681263 n=30 us=159802 cont_n=0 cont_us=0
+I (249907) app: TURNPERF memw cy=38045932 ev=1078 n=30 us=164449 cont_n=0 cont_us=0
+I (250913) app: TURNPERF exr_window cy=37329223 ev=33085 n=30 us=161038 cont_n=0 cont_us=0
+I (251922) app: TURNPERF exr_replay cy=37489922 ev=214 n=30 us=162177 cont_n=0 cont_us=0
+I (252930) app: TURNPERF load cy=37098927 ev=3914115 n=30 us=160585 cont_n=0 cont_us=0
+I (253934) app: TURNPERF imem_hit cy=37598067 ev=0 n=30 us=163483 cont_n=0 cont_us=0
+I (254940) app: TURNPERF insn_jx cy=37218868 ev=63057 n=30 us=161504 cont_n=0 cont_us=0
+I (255949) app: TURNPERF insn_brj cy=37309157 ev=2144885 n=30 us=162578 cont_n=0 cont_us=0
+I (256959) app: TURNPERF insn_callret cy=37203223 ev=638702 n=30 us=162101 cont_n=0 cont_us=0
+I (257966) app: TURNPERF insn_ntaken cy=37599123 ev=1120013 n=30 us=164643 cont_n=0 cont_us=0
+I (258975) app: TURNPERF insn cy=37074701 ev=17918978 n=30 us=161922 cont_n=0 cont_us=0
+I (259982) app: TURNPERF istall cy=37422107 ev=11626854 n=30 us=163902 cont_n=0 cont_us=0
+I (260990) app: TURNPERF dstall cy=37229685 ev=929230 n=30 us=162845 cont_n=0 cont_us=0
+I (261997) app: TURNPERF bubbles cy=37807486 ev=6809905 n=30 us=166014 cont_n=0 cont_us=0
+I (263000) app: TURNPERF exr cy=37242527 ev=38694 n=30 us=163242 cont_n=0 cont_us=0
+I (264012) app: TURNPERF icachemiss cy=38365318 ev=0 n=30 us=169446 cont_n=0 cont_us=0
+I (265019) app: TURNPERF istall_miss cy=37036066 ev=0 n=30 us=158331 cont_n=0 cont_us=0
+I (266027) app: TURNPERF istall_busy cy=37626839 ev=11020657 n=30 us=161469 cont_n=0 cont_us=0
+I (266665) app: MEM free=220776 largest=73728 js=0 frames=1344
+I (266694) app: MEM free=177260 largest=73728 js=31144 frames=0
+
+== kbA1-stress
+I (208094) app: MEM free=188164 largest=69632 js=0 frames=1022
+I (208197) app: MEM free=91124 largest=31744 js=42800 frames=0
+I (208315) app: TURNPERF exr_window cy=27131162 ev=13728 n=30 us=115076 cont_n=1 cont_us=842
+I (209317) app: TURNPERF exr_replay cy=40175172 ev=265 n=30 us=171895 cont_n=0 cont_us=0
+I (210322) app: TURNPERF load cy=37860022 ev=3856221 n=30 us=162479 cont_n=0 cont_us=0
+I (211331) app: TURNPERF imem_hit cy=38332846 ev=0 n=30 us=164040 cont_n=0 cont_us=0
+I (212334) app: TURNPERF insn_jx cy=38267924 ev=66456 n=30 us=163965 cont_n=0 cont_us=0
+I (213340) app: TURNPERF insn_brj cy=38092991 ev=2082884 n=30 us=163078 cont_n=0 cont_us=0
+I (214348) app: TURNPERF insn_callret cy=38265717 ev=617963 n=30 us=164682 cont_n=0 cont_us=0
+I (215356) app: TURNPERF insn_ntaken cy=38011589 ev=1131906 n=30 us=163378 cont_n=0 cont_us=0
+I (216360) app: TURNPERF insn cy=38544969 ev=18112998 n=30 us=166183 cont_n=0 cont_us=0
+I (217367) app: TURNPERF istall cy=38163768 ev=12670390 n=30 us=164498 cont_n=0 cont_us=0
+I (218368) app: TURNPERF dstall cy=38013306 ev=1084281 n=30 us=164422 cont_n=0 cont_us=0
+I (219374) app: TURNPERF bubbles cy=37953186 ev=6508077 n=30 us=164146 cont_n=0 cont_us=0
+I (220378) app: TURNPERF exr cy=38054531 ev=36605 n=30 us=165193 cont_n=0 cont_us=0
+I (221382) app: TURNPERF icachemiss cy=38026449 ev=0 n=30 us=164940 cont_n=0 cont_us=0
+I (222391) app: TURNPERF istall_miss cy=38088920 ev=0 n=30 us=165498 cont_n=0 cont_us=0
+I (223399) app: TURNPERF istall_busy cy=38188174 ev=11917824 n=30 us=166198 cont_n=0 cont_us=0
+I (224403) app: TURNPERF istall_pif cy=38257357 ev=0 n=30 us=167334 cont_n=0 cont_us=0
+I (225411) app: TURNPERF istall_run cy=37938898 ev=0 n=30 us=165798 cont_n=0 cont_us=0
+I (226419) app: TURNPERF istall_unc cy=38077884 ev=0 n=30 us=166859 cont_n=0 cont_us=0
+I (227424) app: TURNPERF istall_l32r cy=38365666 ev=1363970 n=30 us=168194 cont_n=0 cont_us=0
+I (228432) app: TURNPERF istall_idiv cy=38346113 ev=22802 n=30 us=168464 cont_n=0 cont_us=0
+I (229440) app: TURNPERF istall_imul cy=37998995 ev=0 n=30 us=166941 cont_n=0 cont_us=0
+I (230444) app: TURNPERF dstall_busy cy=38743190 ev=1084933 n=30 us=171021 cont_n=0 cont_us=0
+I (231450) app: TURNPERF dstall_pif cy=37860850 ev=0 n=30 us=162031 cont_n=0 cont_us=0
+I (232455) app: TURNPERF dstall_sbuf cy=38169365 ev=4 n=30 us=163732 cont_n=0 cont_us=0
+I (233468) app: TURNPERF dstall_bank cy=38080016 ev=23102 n=30 us=163285 cont_n=0 cont_us=0
+I (234470) app: TURNPERF regdep cy=37790226 ev=895702 n=30 us=162733 cont_n=0 cont_us=0
+I (235473) app: TURNPERF cti cy=37981481 ev=5588948 n=30 us=163631 cont_n=0 cont_us=0
+I (236480) app: TURNPERF memw cy=38265473 ev=1083 n=30 us=165347 cont_n=0 cont_us=0
+I (237489) app: TURNPERF exr_window cy=38022140 ev=33126 n=30 us=164035 cont_n=0 cont_us=0
+I (238494) app: TURNPERF exr_replay cy=38433320 ev=210 n=30 us=166602 cont_n=0 cont_us=0
+I (239503) app: TURNPERF load cy=38164531 ev=3878584 n=30 us=165244 cont_n=0 cont_us=0
+I (240510) app: TURNPERF imem_hit cy=38122801 ev=0 n=30 us=165662 cont_n=0 cont_us=0
+I (241519) app: TURNPERF insn_jx cy=37976782 ev=64923 n=30 us=164901 cont_n=0 cont_us=0
+I (242519) app: TURNPERF insn_brj cy=37998766 ev=2092865 n=30 us=165762 cont_n=0 cont_us=0
+I (243528) app: TURNPERF insn_callret cy=38260332 ev=638268 n=30 us=166832 cont_n=0 cont_us=0
+I (244536) app: TURNPERF insn_ntaken cy=38163745 ev=1141857 n=30 us=166888 cont_n=0 cont_us=0
+I (245541) app: TURNPERF insn cy=37901884 ev=17850790 n=30 us=165603 cont_n=0 cont_us=0
+I (246541) app: TURNPERF istall cy=37978531 ev=12458509 n=30 us=166356 cont_n=0 cont_us=0
+I (247549) app: TURNPERF dstall cy=38194601 ev=1079905 n=30 us=167155 cont_n=0 cont_us=0
+I (248553) app: TURNPERF bubbles cy=38401931 ev=6683522 n=30 us=168471 cont_n=0 cont_us=0
+I (249555) app: TURNPERF exr cy=38169072 ev=39672 n=30 us=167443 cont_n=0 cont_us=0
+I (250563) app: TURNPERF icachemiss cy=38961755 ev=0 n=30 us=172085 cont_n=0 cont_us=0
+I (251574) app: TURNPERF istall_miss cy=37959340 ev=0 n=30 us=162487 cont_n=0 cont_us=0
+I (252577) app: TURNPERF istall_busy cy=38137960 ev=11765686 n=30 us=163566 cont_n=0 cont_us=0
+I (253283) app: MEM free=220776 largest=69632 js=0 frames=1345
+I (253313) app: MEM free=177232 largest=69632 js=31116 frames=0
+
+== kbB2-stress
+I (234263) app: MEM free=188296 largest=73728 js=0 frames=1409
+I (234360) app: MEM free=91124 largest=31744 js=42800 frames=0
+I (234541) app: TURNPERF exr_window cy=26698254 ev=15311 n=30 us=113343 cont_n=1 cont_us=843
+I (235547) app: TURNPERF exr_replay cy=39540534 ev=265 n=30 us=169295 cont_n=0 cont_us=0
+I (236556) app: TURNPERF load cy=37575306 ev=3924023 n=30 us=161558 cont_n=0 cont_us=0
+I (237563) app: TURNPERF imem_hit cy=37132583 ev=0 n=30 us=158721 cont_n=0 cont_us=0
+I (238570) app: TURNPERF insn_jx cy=37786410 ev=63994 n=30 us=162261 cont_n=0 cont_us=0
+I (239573) app: TURNPERF insn_brj cy=37347661 ev=2134929 n=30 us=160042 cont_n=0 cont_us=0
+I (240579) app: TURNPERF insn_callret cy=37549761 ev=630466 n=30 us=161606 cont_n=0 cont_us=0
+I (241587) app: TURNPERF insn_ntaken cy=37196467 ev=1097235 n=30 us=159815 cont_n=0 cont_us=0
+I (242591) app: TURNPERF insn cy=37830081 ev=18313098 n=30 us=163384 cont_n=0 cont_us=0
+I (243593) app: TURNPERF istall cy=36896578 ev=11349374 n=30 us=159136 cont_n=0 cont_us=0
+I (244601) app: TURNPERF dstall cy=37584553 ev=971208 n=30 us=162751 cont_n=0 cont_us=0
+I (245603) app: TURNPERF bubbles cy=36883042 ev=6576116 n=30 us=159416 cont_n=0 cont_us=0
+I (246610) app: TURNPERF exr cy=37656379 ev=37415 n=30 us=163778 cont_n=0 cont_us=0
+I (247618) app: TURNPERF icachemiss cy=37027854 ev=0 n=30 us=160403 cont_n=0 cont_us=0
+I (248625) app: TURNPERF istall_miss cy=37519952 ev=0 n=30 us=163715 cont_n=0 cont_us=0
+I (249630) app: TURNPERF istall_busy cy=37039267 ev=10760848 n=30 us=161121 cont_n=0 cont_us=0
+I (250636) app: TURNPERF istall_pif cy=37812409 ev=0 n=30 us=165698 cont_n=0 cont_us=0
+I (251643) app: TURNPERF istall_run cy=36923351 ev=0 n=30 us=161009 cont_n=0 cont_us=0
+I (252656) app: TURNPERF istall_unc cy=37778312 ev=0 n=30 us=165939 cont_n=0 cont_us=0
+I (253663) app: TURNPERF istall_l32r cy=37133556 ev=1173017 n=30 us=162377 cont_n=0 cont_us=0
+I (254672) app: TURNPERF istall_idiv cy=37930030 ev=23656 n=30 us=166839 cont_n=0 cont_us=0
+I (255679) app: TURNPERF istall_imul cy=36921447 ev=0 n=30 us=161668 cont_n=0 cont_us=0
+I (256693) app: TURNPERF dstall_busy cy=38284671 ev=959493 n=30 us=169215 cont_n=0 cont_us=0
+I (257697) app: TURNPERF dstall_pif cy=36861119 ev=0 n=30 us=157504 cont_n=0 cont_us=0
+I (258707) app: TURNPERF dstall_sbuf cy=37802584 ev=1 n=30 us=162488 cont_n=0 cont_us=0
+I (259716) app: TURNPERF dstall_bank cy=37086844 ev=22614 n=30 us=158850 cont_n=0 cont_us=0
+I (260722) app: TURNPERF regdep cy=37586048 ev=919578 n=30 us=162231 cont_n=0 cont_us=0
+I (261729) app: TURNPERF cti cy=36907775 ev=5648657 n=30 us=158744 cont_n=0 cont_us=0
+I (262737) app: TURNPERF memw cy=37830140 ev=1078 n=30 us=163825 cont_n=0 cont_us=0
+I (263744) app: TURNPERF exr_window cy=37077395 ev=32561 n=30 us=159963 cont_n=0 cont_us=0
+I (264756) app: TURNPERF exr_replay cy=37831769 ev=225 n=30 us=164229 cont_n=0 cont_us=0
+I (265764) app: TURNPERF load cy=36962377 ev=3896203 n=30 us=160150 cont_n=0 cont_us=0
+I (266768) app: TURNPERF imem_hit cy=37767844 ev=0 n=30 us=165066 cont_n=0 cont_us=0
+I (267776) app: TURNPERF insn_jx cy=36877627 ev=63698 n=30 us=160174 cont_n=0 cont_us=0
+I (268785) app: TURNPERF insn_brj cy=37735156 ev=2150955 n=30 us=165059 cont_n=0 cont_us=0
+I (269796) app: TURNPERF insn_callret cy=37032504 ev=629006 n=30 us=161418 cont_n=0 cont_us=0
+I (270802) app: TURNPERF insn_ntaken cy=37776294 ev=1128401 n=30 us=165895 cont_n=0 cont_us=0
+I (271807) app: TURNPERF insn cy=36830486 ev=17847434 n=30 us=160975 cont_n=0 cont_us=0
+I (272809) app: TURNPERF istall cy=37574922 ev=11618865 n=30 us=165216 cont_n=0 cont_us=0
+I (273817) app: TURNPERF dstall cy=37331311 ev=947792 n=30 us=163493 cont_n=0 cont_us=0
+I (274824) app: TURNPERF bubbles cy=38039068 ev=6868004 n=30 us=167792 cont_n=0 cont_us=0
+I (275828) app: TURNPERF exr cy=37049731 ev=38716 n=30 us=162575 cont_n=0 cont_us=0
+I (276837) app: TURNPERF icachemiss cy=38404094 ev=0 n=30 us=170046 cont_n=0 cont_us=0
+I (277846) app: TURNPERF istall_miss cy=36928387 ev=0 n=30 us=158043 cont_n=0 cont_us=0
+I (278854) app: TURNPERF istall_busy cy=37837257 ev=11108652 n=30 us=162637 cont_n=0 cont_us=0
+I (279459) app: MEM free=220776 largest=73728 js=0 frames=1344
+I (279488) app: MEM free=177260 largest=73728 js=31132 frames=0

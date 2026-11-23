@@ -133,7 +133,7 @@ static esp_err_t lcd_spi_direct_wait(void){
 }
 #endif
 static void pet_hub_overlay(uint16_t *p,int y,int rows){(void)p;(void)y;(void)rows;}
-static void pocket_capture_overlay(uint16_t *p,int y,int rows){(void)p;(void)y;(void)rows;}
+static void kobako_capture_overlay(uint16_t *p,int y,int rows){(void)p;(void)y;(void)rows;}
 static void swap_scalar(uint16_t *out,const uint16_t *in,int n){(void)out;(void)in;(void)n;assert(0);}
 static void swap_pie(const uint16_t *in,uint16_t *out,unsigned n){(void)in;(void)out;(void)n;assert(0);}
 '''

@@ -143,7 +143,7 @@ typedef struct {
     uint16_t count;                         /* segments emitted by this draw */
     /* The most this draw may emit (<= KSN_SHIKI_SEGMENTS): the room left in
      * the caller's frame, so a draw writes straight into the frame's tail
-     * and one that would not fit stops at LIMIT (pocket_shiki_frame.c). */
+     * and one that would not fit stops at LIMIT (kobako_shiki_frame.c). */
     uint16_t cap;
     bool ext;                               /* a LINE_PATTERN chord is among them */
     /* vraw is this draw's (zeroed): set by the first VEACH. A draw clears
@@ -169,7 +169,7 @@ static inline int64_t *ksn_shiki_vm_acc(ksn_shiki_vm *vm){
  * it is ignored). On by default since v2.0 (D6: the vector instructions exist
  * to be mapped to PIE); an instruction PIE cannot take (a tail block, an
  * unaligned region, VIOTA) runs the C model's lane loop, with the same result.
- * The bench (pocket_shiki.c) flips it to compare the two in one binary and
+ * The bench (kobako_shiki.c) flips it to compare the two in one binary and
  * puts it back. */
 extern bool ksn_shiki_vec_pie;
 

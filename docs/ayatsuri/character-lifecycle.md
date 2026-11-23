@@ -3,11 +3,11 @@
 この文書はShikiの現行実装を扱う。統合後のフレームワークの公開契約は
 [共通API仕様 §19](../api/common-api.md#19-honeとayatsuriのフレームワークapi) にある。
 
-現在の公開mesh経路は `pocket.ayatsuri.modelOpen(buffer)`、共有Modelからの
-独立instance、`pocket.kasane.shiki` のframe APIを使う。
+現在の公開mesh経路は `kobako.ayatsuri.modelOpen(buffer)`、共有Modelからの
+独立instance、`kobako.kasane.shiki` のframe APIを使う。
 PR #110のnative sceneと軽量motionは[optional JS層](scene-motion.md)として抽出した。
-旧動的character engineや資産・デモ全体を取り込んだものではない。旧例の `pocket.kasane.procedural` は
-Shiki v2で削除済み。現行frame ownerは `pocket.kasane.shiki` である。
+旧動的character engineや資産・デモ全体を取り込んだものではない。旧例の `kobako.kasane.procedural` は
+Shiki v2で削除済み。現行frame ownerは `kobako.kasane.shiki` である。
 
 アプリまたは環境adapterが時計、入力、tick/seek/pause、begin、commitと提示完了を
 所有する。utilityの `scene.evaluate(time)` は渡された時刻の評価であり、内部時計や

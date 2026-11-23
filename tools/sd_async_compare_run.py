@@ -130,16 +130,16 @@ def main():
 
             # These are the exact picker transitions for the approved SD folder.
             key('e')
-            collect(12, r'pocket\.sd: PICK 2 folders')
+            collect(12, r'kobako\.sd: PICK 2 folders')
             key('de')
-            collect(12, r'pocket\.sd: GRANTED music')
-            collect(12, r'pocket\.pick: PICK 1 rows')
+            collect(12, r'kobako\.sd: GRANTED music')
+            collect(12, r'kobako\.pick: PICK 1 rows')
             key('e')
-            collect(12, r'pocket\.pick: PICK ENTER KAKATO rows=1')
+            collect(12, r'kobako\.pick: PICK ENTER KAKATO rows=1')
             key('e')
-            collect(12, r'pocket\.pick: PICK ENTER KAKATO/KARA OK 2nd Edition rows=20')
+            collect(12, r'kobako\.pick: PICK ENTER KAKATO/KARA OK 2nd Edition rows=20')
             key('e')
-            collect(12, r'pocket\.pick: PICKED .*01 KAKATORO\.mp3')
+            collect(12, r'kobako\.pick: PICKED .*01 KAKATORO\.mp3')
             collect(12, r'PLAYER_OPEN .*01 KAKATORO\.mp3')
             if args.output_source_after_open:
                 key('&')

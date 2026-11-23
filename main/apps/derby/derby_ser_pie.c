@@ -1,9 +1,9 @@
 /* DERBY WATCH ser(): chord cull and chord-end rotation in int16 lanes, PIE
  * kernel and scalar reference. The contract is in derby_ser_pie.h; the design,
  * the error budget and the verification are docs/apps/derby-ser-division.md
- * sec.10 and sec.13. Firmware: compiled with CONFIG_POCKET_DERBY_SER_PIE
- * (default y; pocket_derby.c calls it), the self-test only with
- * CONFIG_POCKET_DERBY_SER_PIE_SELFTEST (default n). Host: tools/pie/ and the
+ * sec.10 and sec.13. Firmware: compiled with CONFIG_KOBAKO_DERBY_SER_PIE
+ * (default y; kobako_derby.c calls it), the self-test only with
+ * CONFIG_KOBAKO_DERBY_SER_PIE_SELFTEST (default n). Host: tools/pie/ and the
  * DERBY harness build the scalar half with DERBY_SERPIE_HOST; tools/pie runs
  * the asm text through piesim.py. */
 #if defined(DERBY_SERPIE_HOST)
@@ -12,7 +12,7 @@
 #include "sdkconfig.h"
 #endif
 
-#if defined(DERBY_SERPIE_HOST) || defined(CONFIG_POCKET_DERBY_SER_PIE)
+#if defined(DERBY_SERPIE_HOST) || defined(CONFIG_KOBAKO_DERBY_SER_PIE)
 #include "derby_ser_pie.h"
 #include <string.h>
 
@@ -153,7 +153,7 @@ uint32_t dsp_cull_ref(const dsp_ends *E, const dsp_cull_k *k) {
 }
 
 /* ---- PIE kernels ---- */
-#if defined(__XTENSA__) && defined(CONFIG_POCKET_DERBY_SER_PIE)
+#if defined(__XTENSA__) && defined(CONFIG_KOBAKO_DERBY_SER_PIE)
 #include <stdint.h>
 #include "esp_cpu.h"
 #include "esp_log.h"
@@ -284,7 +284,7 @@ DSP_HOT uint32_t dsp_cull_pie(const dsp_ends *E, const dsp_cull_k *k) {
 }
 
 /* ---- device self-test and microbenchmark (a measurement build's) ---- */
-#ifdef CONFIG_POCKET_DERBY_SER_PIE_SELFTEST
+#ifdef CONFIG_KOBAKO_DERBY_SER_PIE_SELFTEST
 #include "derby_ser_pie_vec.h"
 
 #ifndef DSP_SELFTEST_CASES
@@ -360,6 +360,6 @@ void dsp_selftest(void) {
              (unsigned)min_rs, (unsigned)min_rp, (unsigned)min_cs, (unsigned)min_cp,
              valid_chords, culled, culled_double);
 }
-#endif /* CONFIG_POCKET_DERBY_SER_PIE_SELFTEST */
-#endif /* __XTENSA__ && CONFIG_POCKET_DERBY_SER_PIE */
-#endif /* DERBY_SERPIE_HOST || CONFIG_POCKET_DERBY_SER_PIE */
+#endif /* CONFIG_KOBAKO_DERBY_SER_PIE_SELFTEST */
+#endif /* __XTENSA__ && CONFIG_KOBAKO_DERBY_SER_PIE */
+#endif /* DERBY_SERPIE_HOST || CONFIG_KOBAKO_DERBY_SER_PIE */

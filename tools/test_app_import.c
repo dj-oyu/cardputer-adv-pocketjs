@@ -1,6 +1,6 @@
-// Static import on the host: the REAL pocket_app_load.c (its module loader and
-// pocket_app_eval_module(), the call app_session.c's eval_reporting() makes for
-// a .mjs entry), pocket_api.c and app_registry.c on the real QuickJS, with the
+// Static import on the host: the REAL kobako_app_load.c (its module loader and
+// kobako_app_eval_module(), the call app_session.c's eval_reporting() makes for
+// a .mjs entry), kobako_api.c and app_registry.c on the real QuickJS, with the
 // chunk table read from apps/heapprobe/import_chunks.txt and appload_chunks.txt
 // (the lists the device probe embeds) and the generated comparison program
 // (tools/heapprobe_import_gen.py, written by build_app_import_test.sh).
@@ -18,8 +18,8 @@
 // three imported modules (host 64-bit: a ratio, not the board's number).
 //
 //   wsl -e bash -lc "cd /mnt/c/.../cardputer-adv-pocketjs && bash tools/build_app_import_test.sh"
-#include "pocket_api.h"
-#include "pocket_app_load.h"
+#include "kobako_api.h"
+#include "kobako_app_load.h"
 #include "app_registry.h"
 #include "app_chunks_host.h"
 #include "esp_app_desc.h"
@@ -66,15 +66,15 @@ static void session_begin(const char *app_id) {
     JS_SetHostPromiseRejectionTracker(rt,tracker,NULL);
     unhandled=0;
     app_registry_select(app_id);
-    REQUIRE(pocket_api_install(ctx,NULL)==ESP_OK);
-    REQUIRE(pocket_app_load_install(ctx)==ESP_OK);
+    REQUIRE(kobako_api_install(ctx,NULL)==ESP_OK);
+    REQUIRE(kobako_app_load_install(ctx)==ESP_OK);
     run("prelude.js","globalThis.check=(c,m)=>{if(!c)throw Error('check failed: '+m)};"
         "globalThis.console={log(){}};");
 }
 
 static void session_end(void) {
     JS_RunGC(rt);
-    pocket_api_reset();
+    kobako_api_reset();
     JS_FreeContext(ctx);
     JS_FreeRuntime(rt);
     ctx=NULL; rt=NULL;
@@ -87,7 +87,7 @@ static void drain(void) {
 
 // The module entry, the way eval_reporting() evaluates it. Must succeed.
 static void entry_ok(const char *source) {
-    JSValue v=pocket_app_eval_module(ctx,source,strlen(source),"user.js");
+    JSValue v=kobako_app_eval_module(ctx,source,strlen(source),"user.js");
     if(JS_IsException(v)) fail_with_exception(source);
     REQUIRE(JS_IsUndefined(v));
     checks++;
@@ -96,7 +96,7 @@ static void entry_ok(const char *source) {
 // Must fail; the pending exception's String() and first stack line -- what
 // eval_reporting() prints on EVAL_ERROR -- must contain both needles.
 static void entry_fails(const char *source, const char *needle, const char *where) {
-    JSValue v=pocket_app_eval_module(ctx,source,strlen(source),"user.js");
+    JSValue v=kobako_app_eval_module(ctx,source,strlen(source),"user.js");
     REQUIRE(JS_IsException(v));
     JSValue e=JS_GetException(ctx);
     char line[512]={0};
@@ -140,7 +140,7 @@ static char *slurp(const char *path) {
 static bool fits(const char *source, bool module, size_t limit) {
     session_begin("local.hello");
     JS_SetMemoryLimit(rt,limit);
-    JSValue v=module?pocket_app_eval_module(ctx,source,strlen(source),"user.js")
+    JSValue v=module?kobako_app_eval_module(ctx,source,strlen(source),"user.js")
                     :JS_Eval(ctx,source,strlen(source),"user.js",JS_EVAL_TYPE_GLOBAL);
     const bool ok=!JS_IsException(v);
     if(!ok) JS_FreeValue(ctx,JS_GetException(ctx));
@@ -216,9 +216,9 @@ int main(int argc, char **argv) {
         run("after.js","check(typeof frame==='function'&&frame()===42,'frame sees the module')");
         // A module chunk is not a script: load() refuses it without evaluating.
         run("load-module.js",
-            "let e=null;try{pocket.app.load('imok')}catch(x){e=x}"
+            "let e=null;try{kobako.app.load('imok')}catch(x){e=x}"
             "check(e&&e.code==='INVALID_ARGUMENT'&&/is a module/.test(e.message),String(e));"
-            "check(pocket.app.load('ok')===true,'a script chunk still loads');");
+            "check(kobako.app.load('ok')===true,'a script chunk still loads');");
         // import() after the evaluation, from a script: refused, as a rejection.
         run("dyn.js","globalThis.dynErr=null;import('imbase').then(()=>{dynErr='resolved'},e=>{dynErr=String(e)});");
         drain();
@@ -274,7 +274,7 @@ int main(int argc, char **argv) {
     {
         session_begin("local.hello");
         JS_SetMemoryLimit(rt,120000);
-        JSValue v=pocket_app_eval_module(ctx,imp,strlen(imp),"user.js");
+        JSValue v=kobako_app_eval_module(ctx,imp,strlen(imp),"user.js");
         REQUIRE(JS_IsException(v));
         JSValue e=JS_GetException(ctx);
         const char *text=JS_ToCString(ctx,e);
@@ -303,7 +303,7 @@ int main(int argc, char **argv) {
     const char *srcs[3]={all,load,imp};
     for(int i=0;i<3;i++) {
         session_begin("local.hello");
-        JSValue v=i==2?pocket_app_eval_module(ctx,srcs[i],strlen(srcs[i]),"user.js")
+        JSValue v=i==2?kobako_app_eval_module(ctx,srcs[i],strlen(srcs[i]),"user.js")
                       :JS_Eval(ctx,srcs[i],strlen(srcs[i]),"user.js",JS_EVAL_TYPE_GLOBAL);
         REQUIRE(!JS_IsException(v));
         JS_FreeValue(ctx,v);

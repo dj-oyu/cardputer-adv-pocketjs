@@ -2,7 +2,7 @@
 
 Flash has had a budget guard since the beginning (check_flash.py); DRAM never
 did, and it is the scarcer of the two on a PSRAM-less S3. Over one day of adding
-pocket.* capabilities the free heap at the home screen fell from 267,696 to
+kobako.* capabilities the free heap at the home screen fell from 267,696 to
 222,620 bytes and apps that had been running stopped evaluating -- every step
 measured by its own author, and nobody adding them up.
 
@@ -16,9 +16,9 @@ Two numbers, because they answer different questions:
            static one minus anything simple: heap fragmentation, the guest's
            own allocations and the drivers' runtime buffers all live here.
 
-    python tools/memlog.py --map build_api/cardputer_pocketjs.map
-    python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3
-    python tools/memlog.py --map build_api/cardputer_pocketjs.map --check
+    python tools/memlog.py --map build_api/cardputer_kobako.map
+    python tools/memlog.py --map build_api/cardputer_kobako.map --port COM3
+    python tools/memlog.py --map build_api/cardputer_kobako.map --check
 
 The log is JSON lines under .cache/, which .gitignore already covers: it is a
 record of this machine's builds, not of the project, and two people's logs would
@@ -157,7 +157,7 @@ def report(now, before):
                      - before['runtime'][where]['free'])
             print(f"MEMLOG   {where} free {delta:+d}")
     # Per-file, because "DRAM went up 6 KiB" is not actionable and
-    # "pocket_io.c.obj +1069" is. Only movers, biggest first.
+    # "kobako_io.c.obj +1069" is. Only movers, biggest first.
     moved = []
     for name, entry in now['files'].items():
         was = before['files'].get(name, {}).get('diram', 0)

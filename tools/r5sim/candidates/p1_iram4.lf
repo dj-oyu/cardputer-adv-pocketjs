@@ -71,7 +71,7 @@ entries:
     ksn_core: check_transaction (noflash_text)
     ksn_runtime: ksn_runtime_app_view (noflash_text)
     ksn_view: ksn_view_host_endpoint (noflash_text)
-    pocket_kasane: parse_i16 (noflash_text)
+    kobako_kasane: parse_i16 (noflash_text)
     ksn_core: private_command (noflash_text)
     ksn_core: referenced_command (noflash_text)
     ksn_core: select_command_owner (noflash_text)

@@ -44,7 +44,7 @@
   };
   const CASES = [];
   for (const k in JS) for (const n of [0, 500, 1000]) CASES.push([k, n]);
-  const HOLD = 40, V = pocket.kasane, H = V.procedural, log = m => console.log('BGS ' + m);
+  const HOLD = 40, V = kobako.kasane, H = V.procedural, log = m => console.log('BGS ' + m);
   H.beginFrame(0);
   const res = H.resource(), dot = H.register([[7, 0, 0, 1, 0, 0], [9, 0, 0, 1, 0, 65535]]);
   let t = 0, built = 0;

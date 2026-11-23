@@ -757,7 +757,7 @@ static inline bool carry_rest(int y,int height,int *rest_y,int *rest_end){
  * the same (docs/platform/lcd-dma-driver.md 9.9). Every other call leaves the
  * carry unused and invalid. */
 /* The entries of [first, end) a band bitmap names (bit j = the entry
- * starting at j touches the band, pocket_shiki_frame.c's band_signature),
+ * starting at j touches the band, kobako_shiki_frame.c's band_signature),
  * in the same ascending order as the plain walk. */
 #define BAND_FOR(j) \
     for(unsigned bw_=first>>5,bwe_=end?((end-1u)>>5):0u;first<end&&bw_<=bwe_;bw_++) \

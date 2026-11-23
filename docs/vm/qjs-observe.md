@@ -26,7 +26,7 @@
 - **`tools/r5sim/observe.py`（新規）**: QEMU の `-d exec,nochain,in_asm` の記録を 1 回読み、`r5_turn_begin`/`r5_turn_end` で区切ったターンの命令を全部数える。ROM の関数名は ESP-IDF の ROM ELF（`esp-rom-elfs` の `esp32s3_rev0_rom.elf`）から取る。画像自身の ELF は ROM を `PROVIDE` の入口（`__call___adddf3` などの飛び先の表）でしか知らないので、それだけで引くと ROM の本体が手前の名前（最初の試行では `rom_rx_gain_force`）に付く。`__call___X` は X と同じ関数として数える。
   - 関数ごとの命令数（排他的）、成立した制御移行、ロード直後の使用、`l32r`、乗除算と FPU の命令、libgcc の補助関数の呼び出しと呼び出し元、窓例外の回数、関数内で後ろへ飛ぶ分岐（ループ）の回数と本体の大きさ、呼び出しの辺（caller → callee）。
   - パイプラインの模型: サイクル ≈ 命令 ＋ 2 × 成立した制御移行 ＋ ロード直後の使用 ＋ 16 × ハードウェア除算。係数は実機の値: 成立した移行のバブル 2（実測、XTPERF、[perf/pie-simd.md](../perf/pie-simd.md) §3.9）、ロード直後の使用 1 サイクル（実測、esp32s3-hw の `native_load_use`）、整数除算 約 16 サイクル（実機の節約からの逆算、[perf/pie-simd.md](../perf/pie-simd.md) §3.7）。flash の取得待ち・データキャッシュ・窓例外の出入りの値段は入っていない。
-- **`-DR5SIM_GUEST_ALLOC=1`（r5sim の新しい選択肢、既定 OFF）**: ゲストの確保を `components/pocketjs_guest/src/guest.c` と同じにする — R3 のブロックキャッシュ（同じ 8 クラス 12/16/32/36/48/72/80/88 B）を heap_caps の上に置き、ブロック長を tlsf のヘッダから読む。既定の r5sim は `JS_NewRuntime` の `malloc`（tlsf ＋ heap の排他区間）を毎回通り、実機より確保が重い。既定を変えないのは、R5・PGO の記録と比べられるようにするため。
+- **`-DR5SIM_GUEST_ALLOC=1`（r5sim の新しい選択肢、既定 OFF）**: ゲストの確保を `components/kobako_guest/src/guest.c` と同じにする — R3 のブロックキャッシュ（同じ 8 クラス 12/16/32/36/48/72/80/88 B）を heap_caps の上に置き、ブロック長を tlsf のヘッダから読む。既定の r5sim は `JS_NewRuntime` の `malloc`（tlsf ＋ heap の排他区間）を毎回通り、実機より確保が重い。既定を変えないのは、R5・PGO の記録と比べられるようにするため。
 - 作業: STRESS LV1（`tools/r5sim/main/stress_r5.js`、Kasane の保持型シーンの頃の STRESS。今の Shiki 版ではない）、ターン 61〜120 の 60 ターン。どちらの像も `frames=120 oom=0 fail=0 bad_present=0`。
 - QEMU: Espressif 版 `esp_develop_9.2.2_20250817`、`-icount shift=2`。記録は 1 回 10.4〜10.8 GB、解析は 1 回約 25 分。
 
@@ -36,7 +36,7 @@
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | アロケータ（ブロックキャッシュ・heap_caps・multi_heap・tlsf・排他区間） | 178,214 | 34.3% | 34,748 | 17,257 | 7,701 | 264,967 | 35.7% |
 | quickjs.c | 165,629 | 31.8% | 34,238 | 8,382 | 2,857 | 242,487 | 32.7% |
-| Kasane・pocket ほか | 62,276 | 12.0% | 9,378 | 3,292 | 1,441 | 84,324 | 11.4% |
+| Kasane・kobako ほか | 62,276 | 12.0% | 9,378 | 3,292 | 1,441 | 84,324 | 11.4% |
 | 窓例外（`_WindowOverflow8`/`Underflow8`） | 42,816 | 8.2% | 4,282 | 0 | 0 | 51,380 | 6.9% |
 | libgcc（ソフトウェア double・64 bit） | 34,478 | 6.6% | 5,302 | 1,328 | 1,898 | 46,411 | 6.3% |
 | `memcpy`/`memcmp` など | 29,464 | 5.7% | 5,155 | 1,590 | 1,110 | 41,363 | 5.6% |
@@ -57,7 +57,7 @@
 | 模型のサイクル/ターン | 757,430 | 960,183 |
 | 窓例外（overflow の回数） | 2,010 | 2,742 |
 
-quickjs.c の命令数は 2% しか違わない（168,684 と 165,629）。動いたのはアロケータ（B は A の 1.6 倍）、窓例外（B は 1.4 倍。確保の呼び出しが深いので）、`memcpy` など（A のほうが 26% 多い。ブロックキャッシュの `memcpy`、§3.3.1）、Kasane・pocket ほか（B が 12% 多い、理由は見ていない）。**r5sim の既定で測った過去の記録は、確保を約 1.6 倍に見ている**（R5・PGO の記録は flash の命令だけを数えていて、tlsf は IRAM にあるので、その結論には効かない）。
+quickjs.c の命令数は 2% しか違わない（168,684 と 165,629）。動いたのはアロケータ（B は A の 1.6 倍）、窓例外（B は 1.4 倍。確保の呼び出しが深いので）、`memcpy` など（A のほうが 26% 多い。ブロックキャッシュの `memcpy`、§3.3.1）、Kasane・kobako ほか（B が 12% 多い、理由は見ていない）。**r5sim の既定で測った過去の記録は、確保を約 1.6 倍に見ている**（R5・PGO の記録は flash の命令だけを数えていて、tlsf は IRAM にあるので、その結論には効かない）。
 
 ### 2.2 実機との照合
 
@@ -89,7 +89,7 @@ libgcc の補助関数（1 ターンあたり。「命令/回」は補助関数�
 - **64 bit 整数の除算・剰余は QuickJS からは 1 回も呼ばれていない**（`__divdi3`・`__moddi3`・`__umoddi3` は 0、`__udivdi3` は tick 割り込みだけ）。ただし QuickJS の値（`JSValue`）は 32 bit 機では NaN boxing の 64 bit（`quickjs.h` の `JS_NAN_BOXING`）で、値の受け渡しは常に 2 レジスタになる。そのインラインの 64 bit の扱いは補助関数を呼ばないので、この表には出ない（未計測）。
 - **`Math.sin`/`cos`**: libm の double の実装（`__kernel_sin`・`__kernel_cos`・`__rem_pio2`、計 3,709 命令）が double の乗算・減算・加算を 1 ターン約 310 回呼ぶ。補助関数の側を足すと 1 ターン約 2 万命令（推定、表の呼び出し元の比で配分）。ECMAScript は `Math.sin` などの精度を「実装による近似」としているので、double の全精度は仕様の要求ではない（ただし、アプリが結果の桁に依存していないかは別に確かめる必要がある）。S3 の FPU は単精度だけを持つ。
 - **`__divdf3` の 392 命令/回** は他の補助関数の 6〜20 倍。21 回で 8,236 命令。
-- **`parse_i16`**（`main/pocket/pocket_kasane.c:680`、Kasane のコマンドの座標の読み取り）は、値が整数（`JS_TAG_INT`）でも `JS_ToFloat64` → `round` → `<`・`>` の比較 → `(int16_t)` と、1 回に double の補助関数を 4〜5 本通る。1 ターン約 63 回、本体と補助関数で約 8 千命令（推定）。
+- **`parse_i16`**（`main/kobako/kobako_kasane.c:680`、Kasane のコマンドの座標の読み取り）は、値が整数（`JS_TAG_INT`）でも `JS_ToFloat64` → `round` → `<`・`>` の比較 → `(int16_t)` と、1 回に double の補助関数を 4〜5 本通る。1 ターン約 63 回、本体と補助関数で約 8 千命令（推定）。
 
 ### 3.2 命令キャッシュと flash
 
@@ -111,7 +111,7 @@ libgcc の補助関数（1 ターンあたり。「命令/回」は補助関数�
 | `memcmp`（ROM） | 93 | `ksn_core_damage` 78、`__JS_FindAtom` 15 |
 
 - **`get_u32`/`get_u16`**（`components/quickjs-ng/quickjs-ng/cutils.h:291`・`:310`、`static inline` で `memcpy(&v, tab, 4)`）は `-Os` でインライン展開されず、本体は `entry` → `l32r`（`memcpy` の番地）→ `callx8` → `l32i.n` → `retw.n` になっている（r5sim の ELF の逆アセンブル）。1 回の読み出しが `JS_CallInternal` → `get_u32` → ROM の飛び先の表 → `memcpy` の 2 段の呼び出しで、`memcpy` は 1 回平均 23 命令。バイトコードのオペランドは整列していないので `l32i` 1 本にはできないが、`l8ui` 4 本とシフトで 7 命令前後になる（推定）。STRESS は 1 ターン 4,300 オペコード、DERBY のレースは 11,000（実測、[turn-jumps-pie.md](turn-jumps-pie.md)）なので、オペランドの多い DERBY ほど効く。
-- **R3 のブロックキャッシュ**（`components/pocketjs_guest/src/block_cache.c:58`・`:81`・`:99`）は、ブロックの先頭 1 語（次のブロックへのリンク）の読み書きを `memcpy(.., sizeof(void *))` で書いていて、これも `memcpy` の呼び出しになる。ブロックは確保器が返す 4 B 整列の領域なので、整列した 1 語の読み書きで足りる。
+- **R3 のブロックキャッシュ**（`components/kobako_guest/src/block_cache.c:58`・`:81`・`:99`）は、ブロックの先頭 1 語（次のブロックへのリンク）の読み書きを `memcpy(.., sizeof(void *))` で書いていて、これも `memcpy` の呼び出しになる。ブロックは確保器が返す 4 B 整列の領域なので、整列した 1 語の読み書きで足りる。
 - 見積もり（推定、模型）: 2 つ合わせて 1 ターン約 590 回の `memcpy` の呼び出しが消えると、1 回あたり命令約 30 と成立した移行 4〜5 回、合わせて 1 ターン約 2 万サイクル（模型の 2.7%）。窓例外も減るはず（呼び出しの深さが 2 段浅くなる）だが、量は見ていない。
 
 #### 3.3.2 tlsf のハードウェア除算
@@ -188,12 +188,12 @@ python tools/r5sim/observe.py r5.log <dir>/r5sim.elf --nm xtensa-esp32s3-elf-nm 
 
 | 項目 | 実機（`main/app_session.c`） | `-DR5SIM_DEVICE=1` |
 | --- | --- | --- |
-| ゲスト | `pocketjs_guest_create`（160 KiB、スタック 20 KiB、PSRAM なし） | 同じ関数・同じ値 |
+| ゲスト | `kobako_guest_create`（160 KiB、スタック 20 KiB、PSRAM なし） | 同じ関数・同じ値 |
 | 確保 | `guest.c` の確保関数（R3 のブロックキャッシュ、所有タスクの確認） | 同じ（部品をリンク） |
-| harden・GC の閾値・割り込みハンドラ | `pocketjs_guest_create` の中 | 同じ |
-| 評価 | `pocketjs_guest_eval`、期限 2 秒 | 同じ |
-| ターン | `arm_turn()`（期限 250 ms、予算 `VM_TURN_BUDGET_US`）→ `pocketjs_guest_frame` → `pocket_kasane_end_turn` | 同じ順。予算で切られた残り（継続ターン）は同じ区切りの中で続ける（今回 0 回） |
-| helper の IRAM 化 | `CONFIG_POCKET_VM_HELPER_IRAM=y`（既定）で `main/vm/helper_iram8.lf` | 同じ断片をリンク |
+| harden・GC の閾値・割り込みハンドラ | `kobako_guest_create` の中 | 同じ |
+| 評価 | `kobako_guest_eval`、期限 2 秒 | 同じ |
+| ターン | `arm_turn()`（期限 250 ms、予算 `VM_TURN_BUDGET_US`）→ `kobako_guest_frame` → `kobako_kasane_end_turn` | 同じ順。予算で切られた残り（継続ターン）は同じ区切りの中で続ける（今回 0 回） |
+| helper の IRAM 化 | `CONFIG_KOBAKO_QJS_HELPER_IRAM=y`（既定）で `main/vm/helper_iram8.lf` | 同じ断片をリンク |
 
 揃っていないもの: `app_tick` のゲストの外の仕事（presenter、通知、`sample_memory_pressure`）、Shiki・proc などの面、描画（16×8 のスカラー）。ゲストの外は区切りの外か、STRESS が使わない面。
 
@@ -205,7 +205,7 @@ python tools/r5sim/observe.py r5.log <dir>/r5sim.elf --nm xtensa-esp32s3-elf-nm 
 | --- | ---: | ---: | ---: |
 | アロケータ（`guest_*` の確保関数と所有タスクの確認を含む） | 200,685 | 298,300 | 37.9% |
 | quickjs.c | 169,286 | 249,698 | 31.7% |
-| Kasane・pocket ほか | 63,612 | 86,753 | 11.0% |
+| Kasane・kobako ほか | 63,612 | 86,753 | 11.0% |
 | 窓例外 | 42,997 | 51,597 | 6.6% |
 | libgcc（ソフトウェア double・64 bit） | 34,486 | 46,421 | 5.9% |
 | `memcpy` など | 29,409 | 41,293 | 5.2% |
@@ -215,7 +215,7 @@ python tools/r5sim/observe.py r5.log <dir>/r5sim.elf --nm xtensa-esp32s3-elf-nm 
 
 - 置き場所: IRAM 295,168、flash 170,879、ROM 83,058 命令/ターン。A（§2）の flash 27.5 万から約 10 万が IRAM に移った。helper の IRAM 化（[p1-iram-placement.md](p1-iram-placement.md)）がそのまま見えている。
 - A との差は +2.9 万命令。ほぼ全部が実機の確保関数のラッパー: `guest_usable_size` +7,045（QuickJS が確保・解放のたびに大きさを聞く、585 回/ターン）、`guest_uses_block_cache` +6,053 と `xTaskGetCurrentTaskHandle` +5,708 と `_xtos_set_intlevel` +5,574（所有タスクの確認、493 回/ターン）、`guest_malloc`/`guest_free` +6,265。
-- **所有タスクの確認**（`components/pocketjs_guest/src/guest.c` の `guest_uses_block_cache`）は、確保・解放のたびに `xTaskGetCurrentTaskHandle()` を呼ぶ。この関数は割り込みを止めてコアの番号を読むので、1 回あたり約 35 命令と呼び出し 2 段。1 ターン約 2.2 万サイクル（模型の 2.7%）。ゲストのターンは常に所有タスクで走るので、ターンの始めに 1 回確かめて印を持てば消える（未着手、§4 の表）。
+- **所有タスクの確認**（`components/kobako_guest/src/guest.c` の `guest_uses_block_cache`）は、確保・解放のたびに `xTaskGetCurrentTaskHandle()` を呼ぶ。この関数は割り込みを止めてコアの番号を読むので、1 回あたり約 35 命令と呼び出し 2 段。1 ターン約 2.2 万サイクル（模型の 2.7%）。ゲストのターンは常に所有タスクで走るので、ターンの始めに 1 回確かめて印を持てば消える（未着手、§4 の表）。
 - 窓例外（overflow 2,018 回/ターン）、libgcc の表、`get_u32`/`get_u16` → `memcpy`（356 回/ターン）は A と同じ。
 
 ## 8. 特殊命令のランキング（`tools/r5sim/pie_rank.py`）
@@ -324,22 +324,22 @@ r5sim の STRESS（`stress_r5.js`、Kasane の保持型シーン）は今の Shi
 | `a97229f` | quickjs-ng の `get_u32`/`get_u16` などをリトルエンディアンではバイトから組み立てる（`cutils.h`、§3.3.1）。`get_u16` はインライン展開される。`get_u32` まで強制インラインにすると −0.24% のために flash +1,956 B なので採らない | 82,237 | −2.1% | +32 B | −4 B |
 | `ffcbc8d` | ブロックキャッシュのリンクを `may_alias` の 1 語で読み書き（`memcpy` の呼び出しを消す） | 81,342 | −1.1% | −32 B | |
 | `a78dfa0` | 所有タスクの確認を `rur.threadptr`（タスクごとの TLS の基点、切り替えで復元）で。割り込みを止める `xTaskGetCurrentTaskHandle()` をやめる（§7.2） | 79,354 | −2.4% | −8 B | |
-| `27b0134` | `pocket.kasane` の `parse_i16`・`number_in` に整数の早道（§3.1） | 77,621 | −2.2% | +8 B | +12 B |
+| `27b0134` | `kobako.kasane` の `parse_i16`・`number_in` に整数の早道（§3.1） | 77,621 | −2.2% | +8 B | +12 B |
 | `c73e62d` | R3 のクラスを実機の寸法で選び直す（§10） | 69,073 | −11.0% | | |
 | 計 | | | **−17.8%** | | |
 
 全命令のトレースでも、最初の 4 つの後で 549,105 → 509,159 命令/ターン（−7.3%、カウントでは −7.6%）。
 
-検査: vmtest コーパス asan・o2 とも 88/88、Test262 部分集合の退行 0（22,021 pass）、`tools/test_block_cache.c`・`tools/test_pocket_kasane.c`・`tools/test_stress_app.c`（STRESS_HOST PASS）・`tools/test_guest_cache_pressure.py`・`tools/games/run_derby.py --m32`（ODDS_CHECK PASS）。**実機では測っていない**（命令数の減りが、flash の待ちを含む実機のサイクルにどう出るかは未確認。§10.2 のとおり確保の効きはアプリで違う）。
+検査: vmtest コーパス asan・o2 とも 88/88、Test262 部分集合の退行 0（22,021 pass）、`tools/test_block_cache.c`・`tools/test_kobako_kasane.c`・`tools/test_stress_app.c`（STRESS_HOST PASS）・`tools/test_guest_cache_pressure.py`・`tools/games/run_derby.py --m32`（ODDS_CHECK PASS）。**実機では測っていない**（命令数の減りが、flash の待ちを含む実機のサイクルにどう出るかは未確認。§10.2 のとおり確保の効きはアプリで違う）。
 
 ## 12. 今の STRESS を r5sim で回す（`-DR5SIM_APP=shiki`）
 
-§10.2 のとおり、r5sim の STRESS（`stress_r5.js`）は今のアプリではない。`-DR5SIM_APP=shiki` は `apps/stress/stress.js`（Shiki で描く版）を、`tools/build_stress_app_test.sh` がホストで組むのと同じ部品で回す: Shiki の表は `stress_prog.js` から Node で作り（`emit_shiki_rom.mjs`）、Shiki の区画はゲストより先に取る（`app_session.c` と同じ順）。`pocket_kasane.c` は `pocket.kasane.shiki` を弱い参照で探すので、`pocket_shiki_api.c` はリンカの `-u` で引き込む。
+§10.2 のとおり、r5sim の STRESS（`stress_r5.js`）は今のアプリではない。`-DR5SIM_APP=shiki` は `apps/stress/stress.js`（Shiki で描く版）を、`tools/build_stress_app_test.sh` がホストで組むのと同じ部品で回す: Shiki の表は `stress_prog.js` から Node で作り（`emit_shiki_rom.mjs`）、Shiki の区画はゲストより先に取る（`app_session.c` と同じ順）。`kobako_kasane.c` は `kobako.kasane.shiki` を弱い参照で探すので、`kobako_shiki_api.c` はリンカの `-u` で引き込む。
 
 - **Shiki のエンジンは C のモデルで走る**（QEMU に PIE が無く、スカラーの JIT は PIE の経路の中にある）。描画（`ksn_shiki_resume` など）の命令は実機のものではない。JS の側（QuickJS・アロケータ・libgcc・窓例外）は実機と同じコード。
-- **ファイルごとの最適化を実機に合わせた。** ファームは描画と Shiki の 7 ファイル（`ksn_font`・`ksn_render`・`ksn_core`・`pocket_kasane`・`pocket_shiki_frame`・`ksn_shiki`・`ksn_shiki_frame`）を `-O2` で組む（`main/CMakeLists.txt`、[lcd-dma-driver.md](../platform/lcd-dma-driver.md) §9.12）が、r5sim は全部 `-Os` だった。`-Os` では `ksn_shiki.c` の可変量の 64 bit シフトが全部 libgcc の呼び出し（`__ashldi3` 1,714・`__ashrdi3` 1,324 回/ターン）になり、**最初の Shiki 版の記録は 64 bit シフトの関数呼び出しが目立つ、実機には無い姿を見せていた**。`-O2` では呼び出しは 0（逆アセンブルで確認）。命令数は同じ（インラインのシフトが呼び出しと同じだけの命令）。
+- **ファイルごとの最適化を実機に合わせた。** ファームは描画と Shiki の 7 ファイル（`ksn_font`・`ksn_render`・`ksn_core`・`kobako_kasane`・`kobako_shiki_frame`・`ksn_shiki`・`ksn_shiki_frame`）を `-O2` で組む（`main/CMakeLists.txt`、[lcd-dma-driver.md](../platform/lcd-dma-driver.md) §9.12）が、r5sim は全部 `-Os` だった。`-Os` では `ksn_shiki.c` の可変量の 64 bit シフトが全部 libgcc の呼び出し（`__ashldi3` 1,714・`__ashrdi3` 1,324 回/ターン）になり、**最初の Shiki 版の記録は 64 bit シフトの関数呼び出しが目立つ、実機には無い姿を見せていた**。`-O2` では呼び出しは 0（逆アセンブルで確認）。命令数は同じ（インラインのシフトが呼び出しと同じだけの命令）。
 - 1 ターン（Shiki 版、`-O2` に合わせた後、全命令のトレース）: 112.8 万命令のうち描画ほか 71.3 万、quickjs.c 17.3 万、アロケータ 12.7 万、libgcc 6.4 万（シフトを除くと約 4 万）、窓例外 2.7 万。JS の側（描画を除く）は約 38 万命令。実機の XTPERF の 1 ターンは 75.3 万命令（STRESS、Shiki の JIT の描画を含む、[turn-jumps-pie.md](turn-jumps-pie.md) §2）なので、残りの約 37 万が JIT の描画と commit という見積もりになる（推定、内訳は実機で分けていない）。
-- `pocket_kasane_end_turn` は 1 ターン 24 カウント。Shiki の描画は `frame()` の中（JS から呼ぶネイティブ）で走る。
+- `kobako_kasane_end_turn` は 1 ターン 24 カウント。Shiki の描画は `frame()` の中（JS から呼ぶネイティブ）で走る。
 - 2026-11-13 に負荷が 3 つ増えた（`shiki_v1`＝`4840504` の STRESS の固定の写し、`derby`＝DERBY のデモのレースを場面別に、`hud`＝LCD CATCH）。`-DR5SIM_DEVICE=1` では `R5SIM alloc per_turn=`（ゲストの確保の回数）も出る。使い方・決定性（`-icount shift=2,sleep=off`）・ベースラインは [api-reorg-perf.md](../kasane/logs/api-reorg-perf.md)。
 
 ## 13. 続きの改善と、採らなかったもの
@@ -387,7 +387,7 @@ heap_caps は満杯で細切れの 0x3fce9710 を先に試し、失敗してか�
 
 ## 14. IRAM の helper の一覧は今の負荷でも保つ
 
-`main/vm/helper_iram8.lf`（`CONFIG_POCKET_VM_HELPER_IRAM`、8 KiB）は古い STRESS のトレースから選んだ一覧。今の Shiki 版 STRESS で選び直すと良くなるかを、helper を flash に残した像（`-DR5SIM_HELPER_IRAM=0`）の flash の命令列で比べた（`icache.py model`、自己配置、8-way 32 KiB）:
+`main/vm/helper_iram8.lf`（`CONFIG_KOBAKO_QJS_HELPER_IRAM`、8 KiB）は古い STRESS のトレースから選んだ一覧。今の Shiki 版 STRESS で選び直すと良くなるかを、helper を flash に残した像（`-DR5SIM_HELPER_IRAM=0`）の flash の命令列で比べた（`icache.py model`、自己配置、8-way 32 KiB）:
 
 | 一覧 | IRAM | warm | cold | 触る行 |
 | --- | ---: | ---: | ---: | ---: |
@@ -430,12 +430,12 @@ heap_caps は満杯で細切れの 0x3fce9710 を先に試し、失敗してか�
 
 ## 18. `Math.sin`/`cos`/`tan` を Shiki の表から（`dd36a29`）
 
-持ち主が精度を落としてよいとした（§16）。`components/quickjs-ng/quickjs-ng/pocket_trig.h`（quickjs.h の隣。QuickJS を組むすべてのビルドの include の道にある）:
+持ち主が精度を落としてよいとした（§16）。`components/quickjs-ng/quickjs-ng/lean_trig.h`（quickjs.h の隣。QuickJS を組むすべてのビルドの include の道にある）:
 
 - 位相 = x × 2^32 / (2π) mod 2^32。積は double の乗算 1 回、剰余は double のビットから取る（どの大きさでも、その積の剰余は正確）。Shiki の四分の一周の表（`round(sin(kπ/512) × 65536)`、Shiki 仕様 §4.4 と同じ値）を Q30 で線形補間し、Q30 から double へは指数の書き換えで。
-- 誤差: libm と比べて最大 1.1e-5（±40 と ±10^6 の乱数 200 万点、`tools/test_pocket_trig.c`）。NaN・±∞ は NaN、±0 は符号つきのまま、|x| < 2^-10 は x。sin・tan は奇関数、cos は偶関数で、ビット単位で対称（最初の版は位相の切り捨ての後に符号を返していて `sin(-1) ≠ -sin(1)` だった）。
-- **ファームの double の三角関数をすべてこれに**: QuickJS の `js_math_sin/cos/tan`、`pocket_derby.c` の列（JS の神託とビット一致を保つため両方が同じ関数）、`solar_sail.c`。libm の double の `sin`/`cos`/`tan` と `__rem_pio2`・`__kernel_rem_pio2`・`__kernel_sin/cos/tan`・表はリンクされなくなった。
-- 表は weak。`ksn_shiki.c` の表をその強い別名にして、像の中の表は 1 つ（`tools/check_pocket_trig_table.py` が 2 つの字面と式の一致を見る）。
+- 誤差: libm と比べて最大 1.1e-5（±40 と ±10^6 の乱数 200 万点、`tools/test_lean_trig.c`）。NaN・±∞ は NaN、±0 は符号つきのまま、|x| < 2^-10 は x。sin・tan は奇関数、cos は偶関数で、ビット単位で対称（最初の版は位相の切り捨ての後に符号を返していて `sin(-1) ≠ -sin(1)` だった）。
+- **ファームの double の三角関数をすべてこれに**: QuickJS の `js_math_sin/cos/tan`、`kobako_derby.c` の列（JS の神託とビット一致を保つため両方が同じ関数）、`solar_sail.c`。libm の double の `sin`/`cos`/`tan` と `__rem_pio2`・`__kernel_rem_pio2`・`__kernel_sin/cos/tan`・表はリンクされなくなった。
+- 表は weak。`ksn_shiki.c` の表をその強い別名にして、像の中の表は 1 つ（`tools/check_lean_trig_table.py` が 2 つの字面と式の一致を見る）。
 
 | | 前 | 後 |
 | --- | ---: | ---: |
@@ -448,7 +448,7 @@ heap_caps は満杯で細切れの 0x3fce9710 を先に試し、失敗してか�
 
 ## 19. commit の外接矩形を PIE で（`80e0788`）
 
-Shiki 版のトレースに `pie_rank.py` をかけると、1 位は `frame_damage`（`pocket_shiki_frame.c`、commit ごとに候補と確定済みの 2 つのフレームの全線分の外接矩形）だった（1 ターン約 3.2 万サイクル、1 線分約 18 サイクル）。線分は 5 つの半語（x0 y0 x1 y1 色）なので、8 本 = 5 ベクタで、各レーンの欄は常に同じ（半語 h の欄は h mod 5）。16 B 境界まではスカラーで進め、8 本ずつ `EE.VMIN.S16` 5 本の走査と `EE.VMAX.S16` 5 本の走査（Q レジスタ 8 本に 10 個の累算器と読み込みは入らない）、x と y のレーンを C で畳む。結果は同じ（厳密）。
+Shiki 版のトレースに `pie_rank.py` をかけると、1 位は `frame_damage`（`kobako_shiki_frame.c`、commit ごとに候補と確定済みの 2 つのフレームの全線分の外接矩形）だった（1 ターン約 3.2 万サイクル、1 線分約 18 サイクル）。線分は 5 つの半語（x0 y0 x1 y1 色）なので、8 本 = 5 ベクタで、各レーンの欄は常に同じ（半語 h の欄は h mod 5）。16 B 境界まではスカラーで進め、8 本ずつ `EE.VMIN.S16` 5 本の走査と `EE.VMAX.S16` 5 本の走査（Q レジスタ 8 本に 10 個の累算器と読み込みは入らない）、x と y のレーンを C で畳む。結果は同じ（厳密）。
 
 - `tools/pie/stalls.py`: 1 走査 8 本あたり 10 命令、停止 0（両方で 1 本約 2.5 サイクル、今は約 18）。
 - `tools/pie/test_proc_damage_pie.py`（piesim、300 例、全レーン）PASS。カーネルの C モデル（`-DPROC_DAMAGE_PIE_MODEL`）を入れた STRESS の host が、スカラーの版と同じ画面の digest（`84a31336`）。
@@ -457,11 +457,11 @@ Shiki 版のトレースに `pie_rank.py` をかけると、1 位は `frame_dama
 
 ## 20. ゲストのアリーナ（`0b2cf35`）
 
-持ち主の示唆（ヒープの断片化を避け、無駄な malloc を走らせない）。ゲストを作るとき、ヒープがきれいなうちに 1 つの領域（`CONFIG_POCKET_VM_GUEST_ARENA_KB`、既定 64 KiB）を取り、`multi_heap_register` でロック無しの専用 TLSF にする。所有タスクの確保はブロックキャッシュ → アリーナ → heap_caps の順。アリーナに入れば、heap_caps の領域探し（§13.2 の満杯の領域を毎回試す件）、排他区間、3 段の呼び出しを通らない。ゲストの小さなブロックはシステムのヒープに混ざらない。
+持ち主の示唆（ヒープの断片化を避け、無駄な malloc を走らせない）。ゲストを作るとき、ヒープがきれいなうちに 1 つの領域（`CONFIG_KOBAKO_GUEST_ARENA_KB`、既定 64 KiB）を取り、`multi_heap_register` でロック無しの専用 TLSF にする。所有タスクの確保はブロックキャッシュ → アリーナ → heap_caps の順。アリーナに入れば、heap_caps の領域探し（§13.2 の満杯の領域を毎回試す件）、排他区間、3 段の呼び出しを通らない。ゲストの小さなブロックはシステムのヒープに混ざらない。
 
 - 解放はアドレスで振り分ける。別のタスクがアリーナのブロックを解放したら、ロック無しのスタックに積み、所有タスクの次の確保・解放で返す（QuickJS はこれをしない。正しさのため）。realloc はアリーナの中でできればそこで、できなければ移す。
-- 取るのは、最大の空きの塊が「アリーナ ＋ 56 KiB（無線の起動に要る `NET_RADIO_MIN_FREE`）」以上あるときだけ（**この条件は実機では成り立たず、`6ed273f` で変えた。§23.1**）。オーバーレイは取らない（`pocketjs_guest_config_t.arena_bytes`）。ブロック長はキャッシュと同じく tlsf のヘッダから読むので、それが使えない heap では取らない。
-- **アリーナより小さいアプリは、残りを終わるまで持つ**（その分システムの空きが減る）。`pocket.memory.info().internalFreeBytes` はネイティブが使える空きのままで、DERBY・MEGADEMO の 18 KB の門の意味は変わらない（両方ともゲストは 64 KiB を大きく超える）。
+- 取るのは、最大の空きの塊が「アリーナ ＋ 56 KiB（無線の起動に要る `NET_RADIO_MIN_FREE`）」以上あるときだけ（**この条件は実機では成り立たず、`6ed273f` で変えた。§23.1**）。オーバーレイは取らない（`kobako_guest_config_t.arena_bytes`）。ブロック長はキャッシュと同じく tlsf のヘッダから読むので、それが使えない heap では取らない。
+- **アリーナより小さいアプリは、残りを終わるまで持つ**（その分システムの空きが減る）。`kobako.memory.info().internalFreeBytes` はネイティブが使える空きのままで、DERBY・MEGADEMO の 18 KB の門の意味は変わらない（両方ともゲストは 64 KiB を大きく超える）。
 
 | アリーナ | Shiki 版 | 古い STRESS |
 | --- | ---: | ---: |
@@ -475,7 +475,7 @@ STRESS を LV3 のわざとの OOM と回復まで回して（`-DR5SIM_LEVEL_UP=
 
 ## 21. 測って採らなかったもの（2026-11-06 の後半）
 
-- **帯の署名のハッシュを省く**（全部の帯が変わるアプリでは無駄、という見込み）: Shiki 版 STRESS の host（`-DPOCKET_PROC_SIG_CHECK`、900 フレーム）で帯の比較 15,232 回のうち 2,124 回（14%、1 フレーム約 2.4 帯）は変わっていなかった。帯 1 本の描画（約 0.4 ms、描画 6.8 ms ÷ 17）はハッシュ全部（commit の約半分、約 0.45 ms の推定）より高いので、省くと損。採らない。
+- **帯の署名のハッシュを省く**（全部の帯が変わるアプリでは無駄、という見込み）: Shiki 版 STRESS の host（`-DKOBAKO_PROC_SIG_CHECK`、900 フレーム）で帯の比較 15,232 回のうち 2,124 回（14%、1 フレーム約 2.4 帯）は変わっていなかった。帯 1 本の描画（約 0.4 ms、描画 6.8 ms ÷ 17）はハッシュ全部（commit の約半分、約 0.45 ms の推定）より高いので、省くと損。採らない。
 - **描画を r5sim で見る**: `-DR5SIM_FULL_RENDER=1`（59 フレーム目から 240×135）と描画の目印（`r5_render_begin`/`end`、`observe.py --begin/--end`）を足したが、r5sim の `present()` は Shiki の面を描かない（1 フレーム 7 千命令）。Shiki の面の描画の経路をつなぐ作業が要り、実機の描画の主な部分はすでに PIE（QEMU では走らない）なので、今回は見送った。
 - **`observe.py` の窓の区切りの不具合**: 最初の開始の目印からずっと数えていて、終わりの目印の後も止めていなかった。2026-11-06 までのターンの数字には、r5sim のターンの間の 16×8 の `present()` などが少し混ざっている（同じ道具どうしの比較なので差の向きは変わらない）。直した（開始と終わりの間だけを数える）。速い計測（CCOUNT）は初めから区切りの中だけ。
 
@@ -488,7 +488,7 @@ commit の `band_signature` は、線分（または模様線の 2 つ）ごと�
 - ハッシュは線分ごとで、線分は 10 B（5 つの半語）。レーン＝線分にするには 5×8 の転置が要り、レーンを 32 bit に畳む部分はスカラーに残る。PIE の版の見積もりは 1 線分約 23 命令、スカラーの乗算器を使う版は約 20 命令（どちらも推定）。
 - 帯ごとの範囲 `first, end)` のバイト列を直接比べる案（ハッシュを使わず、PIE の比較で速く、衝突が原理的に無い）も測った。Shiki 版 STRESS の host で、ハッシュが「同じ」とした帯 2,124 のうち、範囲のバイト列も同じだったのは 192（範囲の中に、帯に触れない動く線分が挟まる）。1,932 帯の描き直し（1 帯約 0.4 ms）が増え、比べるバイトも 1 フレーム約 186 KB。採らない。
 
-### 22.2 新しいハッシュ（`main/pocket/proc_band_hash.h`）
+### 22.2 新しいハッシュ（`main/kobako/proc_band_hash.h`）
 
 32×32→64 の乗算器（`MULL`＋`MULUH`）で、1 線分に積 2 回: x0|y0 と x1|y1 の積を 64 bit のまま、その上下を色の語と混ぜて畳む（wyhash の mum）、最後に xorshift と乗算を 1 回。帯の混ぜ方（`band_mix`）は同じ。
 
@@ -502,7 +502,7 @@ commit の `band_signature` は、線分（または模様線の 2 つ）ごと�
 | 同じ ＋ 仕上げの 1 回 | 0.0112 / 0.0199 | 267 | 120 |
 | **採った版（積を 64 bit のまま ＋ 仕上げ）** | 0.0134 / 0.0231 | **123** | **143** |
 
-アプリでの照合（`POCKET_PROC_SIG_CHECK`: 64 bit の強いハッシュを横に持ち、省いた帯は実際に描いて比べる）:
+アプリでの照合（`KOBAKO_PROC_SIG_CHECK`: 64 bit の強いハッシュを横に持ち、省いた帯は実際に描いて比べる）:
 
 | アプリ（host） | 帯の比較 | 32 bit の衝突 | 省いた帯 | 省いた帯の画素の食い違い |
 | --- | ---: | ---: | ---: | ---: |
@@ -518,7 +518,7 @@ r5sim（`-DR5SIM_DEVICE=1`、Shiki 版 STRESS）: 160,439 → 154,040 カウン�
 
 ### 23.1 アリーナは実機で取れていなかった
 
-`d5f9e68` の STRESS の起動で `GUEST_ARENA bytes=0`。起動時の空きは free=194,532 B、最大の塊 81,920 B で、§20 の条件（最大の塊 ≥ アリーナ ＋ 56 KiB）は実機では成り立たない（QEMU の heap は塊が大きい）。`6ed273f` で、56 KiB の床を（`pocket_net.c` が見るのと同じ）空きの合計に移し、取ったあとに 24 KiB の塊が残らなければ返して 8 KiB 小さく試す（16 KiB まで）に変えた。QEMU のカウントは変わらない（Shiki 版 154,046、古い STRESS 50,823）。
+`d5f9e68` の STRESS の起動で `GUEST_ARENA bytes=0`。起動時の空きは free=194,532 B、最大の塊 81,920 B で、§20 の条件（最大の塊 ≥ アリーナ ＋ 56 KiB）は実機では成り立たない（QEMU の heap は塊が大きい）。`6ed273f` で、56 KiB の床を（`kobako_net.c` が見るのと同じ）空きの合計に移し、取ったあとに 24 KiB の塊が残らなければ返して 8 KiB 小さく試す（16 KiB まで）に変えた。QEMU のカウントは変わらない（Shiki 版 154,046、古い STRESS 50,823）。
 
 ### 23.2 速さ（`b2cac99` → `d5f9e68`）
 
@@ -552,7 +552,7 @@ r5sim（`-DR5SIM_DEVICE=1`、Shiki 版 STRESS）: 160,439 → 154,040 カウン�
 
 plan は `shiki.data()` の領域（JS が型付き配列で直接書ける）を `LOAD` で読める（`ksn_shiki_plan.region`）。領域を持つ plan は、handle と入力が同じでも出力が変わりうる。なので段階 1 は、入力ではなく **draw の出力（entry のバイト列）** を前のフレームと比べた。これはどの plan にも厳密。
 
-### 24.2 正しさ（host、`-DPOCKET_PROC_SIG_CHECK`、飛ばした帯は両方のフレームで描いて画素を比べる）
+### 24.2 正しさ（host、`-DKOBAKO_PROC_SIG_CHECK`、飛ばした帯は両方のフレームで描いて画素を比べる）
 
 | アプリ | 比べた帯 | ハッシュ版の飛ばした帯 | entry ごとに比べる版 | 区画（16 entry）ごとに比べる版 | 見落とし・画素の不一致 |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -592,12 +592,12 @@ plan は `shiki.data()` の領域（JS が型付き配列で直接書ける）�
 
 ### 25.1 形
 
-- 表示中のフレームの entry は、`commit()` まで 1 本のバッファの先頭にそのまま置く。park の間（VM が `frame()` を持ち越す間）や、例外で閉じたフレームの後の描き直しは、今までどおり前のフレームから描く。以前 1 本にしたとき（b65e830、取り消し 2d38365、`docs/kasane/shiki-jit.md` §23）に問題になった 2 つの振る舞いは、どちらも変わらない（`tools/kasane_contract/test_pocket_proc_turn_qjs.c` の park・例外・`one_buffer_contract`）。
+- 表示中のフレームの entry は、`commit()` まで 1 本のバッファの先頭にそのまま置く。park の間（VM が `frame()` を持ち越す間）や、例外で閉じたフレームの後の描き直しは、今までどおり前のフレームから描く。以前 1 本にしたとき（b65e830、取り消し 2d38365、`docs/kasane/shiki-jit.md` §23）に問題になった 2 つの振る舞いは、どちらも変わらない（`tools/kasane_contract/test_kobako_proc_turn_qjs.c` の park・例外・`one_buffer_contract`）。
 - 組み立て中のフレームは、その後ろ（偶数の位置から）に書く。入りきらない分は追加領域（overflow）に書く。追加領域は初めて要ったときに、そのフレームが取れる最大（上限 − 後ろに入った数）で取り、アプリが終わるまで持つ。`commit()` は後ろの分と追加領域の分を先頭へ写す（ワード単位の自前のコピー。C ライブラリの memmove/memcpy は r5sim で 1 バイトあたり約 1.8 命令だった）。
 - draw は今までどおり呼ばれた時点で実行する。エラーを返す時点も、data 領域を読む時点も変わらない。commit まで遅らせる記録の案（段階 2 の当初の設計）は、DERBY の draw の入力が 8 個で、記録 1 件が 5 entry を取り、出力（平均約 8 entry）とほとんど変わらないので、やめた。
 - 変わる振る舞いは 2 つ（どちらもまれなエラーの経路）: 背景の転送が失敗したとき、今までは前のフレームを描き直したが、新しいフレームを描き直す（前のフレームは commit で上書き済み）。publish が失敗したとき、面は次の commit まで何も出さない。
 
-### 25.2 正しさ（host、`-DPOCKET_PROC_SIG_CHECK`。飛ばした帯は、merge の前に写しておいた前のフレームと画素を比べる）
+### 25.2 正しさ（host、`-DKOBAKO_PROC_SIG_CHECK`。飛ばした帯は、merge の前に写しておいた前のフレームと画素を比べる）
 
 | アプリ | 帯の比較 | 飛ばした帯（ハッシュ版と同じ） | 画素の不一致 | 追加領域を使ったフレーム | 追加領域の大きさ（entry） |
 | --- | ---: | ---: | ---: | ---: | ---: |

@@ -10,7 +10,7 @@ const DEMO_IDLE_S = 15, DEMO_RES = 150, GK = 'a d e s r 1 , / tab'.split(' '), F
 let dm = 0, dk = 0, dn = 0, idle = 0, kp = '', bk, fe = -1000000000, fa = 0, nw = 0;
 // A key ends the demo and is spent doing so (dk '' matches no key).
 function attract(b) {
-  const n = nw = pocket.time ? pocket.time.now() | 0 : 0;
+  const n = nw = kobako.time ? kobako.time.now() | 0 : 0;
   if (!dm && scene !== 'pad') { dk = 0; idle = n; return; }
   const k = K.down().join();
   let hit = b || k && k !== kp;
@@ -22,7 +22,7 @@ function attract(b) {
     else if (n - idle >= DEMO_IDLE_S * 1000) {
       // Its code loads now, under the black curtain; short of heap, the
       // paddock comes back and the idle clock starts over (README).
-      try { pocket.app.load('demo'); } catch (e) { log('DEMOFAIL ' + e); return idle = n; }
+      try { kobako.app.load('demo'); } catch (e) { log('DEMOFAIL ' + e); return idle = n; }
       demo(1, n), fe = n + FX[1];
     }
     return;

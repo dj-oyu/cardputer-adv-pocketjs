@@ -7,7 +7,7 @@ def once(text,old,new):
 
 def instrument(source):
     source=source.replace('\r\n','\n')
-    source=once(source,'const S = pocket.derby;','''const S = pocket.derby;
+    source=once(source,'const S = kobako.derby;','''const S = kobako.derby;
 // Persistent output planes; no per-point pose/project result arrays.
 const pr = new Float64Array(32), pp = new Float64Array(24),
   pg = [200,400,600,800,1000,1000], pw = [DFR,DFR,DFR,DFR,DFR,DNR];''')

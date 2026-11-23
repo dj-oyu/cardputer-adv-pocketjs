@@ -25,8 +25,8 @@ jobs:
           export CACHE="$RUNNER_TEMP/pressure-cache-qjs"
           export OUT="$RUNNER_TEMP/test-pressure-memory"
           gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined \
-            -I components/pocketjs_guest/include tools/test_block_cache.c \
-            components/pocketjs_guest/src/block_cache.c -o "$RUNNER_TEMP/test-block-cache"
+            -I components/kobako_guest/include tools/test_block_cache.c \
+            components/kobako_guest/src/block_cache.c -o "$RUNNER_TEMP/test-block-cache"
           "$RUNNER_TEMP/test-block-cache"
           bash tools/build_memory_test.sh
           "$OUT"

@@ -1,7 +1,7 @@
 // Ordinary APP experiment for registered RGB565 resize and symbolic grid fold.
 // Enter advances the mode; it also cycles automatically.
 (() => {
-  const view = pocket.kasane;
+  const view = kobako.kasane;
   const grid = view.grid;
   const sourceWidth = 60, sourceHeight = 30;
   const modes = [
@@ -136,7 +136,7 @@
     }
     enterHeld = enter;
     const mode = modes[selected];
-    const sourceStart = mode.profile ? pocket.time.now() : 0;
+    const sourceStart = mode.profile ? kobako.time.now() : 0;
     if (mode.profile) {
       if (lastFrameMs) {
         const gap = (sourceStart - lastFrameMs) * 1000;
@@ -163,13 +163,13 @@
     }
     const buffers = {0: mode.source || source};
     if (mode.weights) buffers[2] = mode.weights;
-    const sourceEnd = mode.profile ? pocket.time.now() : 0;
+    const sourceEnd = mode.profile ? kobako.time.now() : 0;
     const backend = mode.profile ?
       grid.run(mode.handle, buffers, undefined, {backend: mode.route}) :
       grid.run(mode.handle, buffers);
     if (mode.profile) {
       sourceUs += (sourceEnd - sourceStart) * 1000;
-      runUs += (pocket.time.now() - sourceEnd) * 1000;
+      runUs += (kobako.time.now() - sourceEnd) * 1000;
       ++samples;
     }
     if (mode.profile && mode.profileSource.resource)

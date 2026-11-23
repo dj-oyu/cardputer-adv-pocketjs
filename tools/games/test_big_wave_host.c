@@ -1,6 +1,6 @@
 /* apps/bigwave/big_wave.js as the firmware runs it, on the host: the real
- * QuickJS, the real pocket.kasane (view + procedural) and the real
- * pocket.input.keys, with key edges fed through the real keymap_poll() and
+ * QuickJS, the real kobako.kasane (view + procedural) and the real
+ * kobako.input.keys, with key edges fed through the real keymap_poll() and
  * keystate, and the real renderer presenting into a 240x135 panel after every
  * frame(). No device, no serial port.
  *
@@ -25,17 +25,17 @@
  *
  *   python3 tools/games/run_big_wave.py      (WSL)
  */
-#include "pocket_kasane.h"
-#include "pocket_input.h"
-#include "pocket_api.h"
-#include "pocket_av.h"
+#include "kobako_kasane.h"
+#include "kobako_input.h"
+#include "kobako_api.h"
+#include "kobako_av.h"
 #include "keymap.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_render.h"
 #include "ui/kasane/ksn_shiki_frame.h"
 #include "ui/kasane/ksn_shiki.h"
 #include "shiki_heap.h"
-#include "pocket_shiki_api.h"
+#include "kobako_shiki_api.h"
 #include "text/ksn_font.h"
 #include "sound.h"
 #include "esp_log.h"
@@ -43,8 +43,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-/* Generated verbatim from pocket_api.c: production subscription semantics. */
-#include "pocket_sub_impl.inc"
+/* Generated verbatim from kobako_api.c: production subscription semantics. */
+#include "kobako_sub_impl.inc"
 
 /* ---- guest allocator charged like the device's TLSF (see test_megademo_app_host.c) */
 typedef struct { size_t n; size_t pad[3]; } pk_hdr;
@@ -66,8 +66,8 @@ static const JSMallocFunctions PEAK_MF={pk_calloc,pk_malloc,pk_free,pk_realloc,p
 
 /* ---- host stubs: surfaces the game does not use (as test_keytest_app.c) */
 void host_capabilities_clear(void);
-int32_t pocket_av_ui_current_player(void){return 0;}
-bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out){(void)id;(void)out;return false;}
+int32_t kobako_av_ui_current_player(void){return 0;}
+bool kobako_av_ui_read(int32_t id,kobako_av_ui_snapshot *out){(void)id;(void)out;return false;}
 bool sys_device_clock_read(sys_clock_state *out){(void)out;return false;}
 void sound_stream_set_observer(sound_stream_observer_fn o){(void)o;}
 void sound_stream_set_observer_interval(sound_stream_observer_fn o,uint32_t n){(void)o;(void)n;}
@@ -75,21 +75,21 @@ void *__real_calloc(size_t count,size_t size);
 void __real_free(void *ptr);
 void __wrap_free(void *ptr){__real_free(ptr);}
 void *__wrap_calloc(size_t count,size_t size){return __real_calloc(count,size);}
-bool pocket_text_active(void){return false;}
+bool kobako_text_active(void){return false;}
 int64_t esp_timer_get_time(void){return 0;}
-esp_err_t pocket_grid_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
-void pocket_grid_reset(void){}
-bool pocket_grid_pending(void){return false;}
-void pocket_grid_present_result(ksn_result r){(void)r;}
-void pocket_grid_source_invalidated(uint32_t id){(void)id;}
-esp_err_t pocket_video_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
-void pocket_video_reset(void){}
-bool pocket_video_pending(void){return false;}
-void pocket_video_present_result(ksn_result r){(void)r;}
-esp_err_t pocket_pixel_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
-void pocket_pixel_reset(void){}
-bool pocket_pixel_pending(void){return false;}
-void pocket_pixel_present_result(ksn_result r){(void)r;}
+esp_err_t kobako_grid_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void kobako_grid_reset(void){}
+bool kobako_grid_pending(void){return false;}
+void kobako_grid_present_result(ksn_result r){(void)r;}
+void kobako_grid_source_invalidated(uint32_t id){(void)id;}
+esp_err_t kobako_video_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void kobako_video_reset(void){}
+bool kobako_video_pending(void){return false;}
+void kobako_video_present_result(ksn_result r){(void)r;}
+esp_err_t kobako_pixel_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void kobako_pixel_reset(void){}
+bool kobako_pixel_pending(void){return false;}
+void kobako_pixel_present_result(ksn_result r){(void)r;}
 
 /* ---- keyboard: one FIFO event per keymap_poll(), as the input task reads it */
 static board_keyevent_t fifo[8];
@@ -170,7 +170,7 @@ static bool eval(const char *source,size_t len,const char *name){
     JS_FreeValue(ctx,v);
     JSContext *c;
     while(JS_ExecutePendingJob(rt,&c)>0){}
-    pocket_kasane_end_turn();
+    kobako_kasane_end_turn();
     return ok;
 }
 static double num(const char *expr){
@@ -187,14 +187,14 @@ static ksn_result send_strip(void *o,uint16_t y,uint16_t rows,const uint16_t *pi
 }
 static void present(void){
     uint64_t now=(uint64_t)frame_no*33333u;
-    pocket_kasane_set_animation_time(now);
-    (void)pocket_kasane_advance(now);
+    kobako_kasane_set_animation_time(now);
+    (void)kobako_kasane_advance(now);
     ksn_display_port port={.strip=get_strip,.present=send_strip,
                            .width=240,.height=135,.strip_rows=8,.text=&ksn_font_port};
     ksn_render_stats stats;
-    ksn_result r=pocket_kasane_present(&port,&stats);
+    ksn_result r=kobako_kasane_present(&port,&stats);
     if(r!=KSN_OK)present_failures++;
-    else pocket_kasane_animations_presented(now);
+    else kobako_kasane_animations_presented(now);
 }
 static const char *ppm_dir;
 static void ppm(const char *label){
@@ -423,10 +423,10 @@ static int oracle(void){
 
 static const char PRELUDE[]=
     "globalThis.console={log:globalThis.__log};"
-    "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,"
+    "globalThis.kobako={kasane:globalThis.kasane,input:globalThis.input,"
     "capabilities:{get:n=>({name:n,supported:__cap(n)||n==='audio.tone',available:true})},"
     "audio:{tone:globalThis.__tone}};"
-    "(function(){const P=pocket.kasane.shiki,R=P.register,U=P.unregister,D=P.draw,B=P.beginFrame,"
+    "(function(){const P=kobako.kasane.shiki,R=P.register,U=P.unregister,D=P.draw,B=P.beginFrame,"
     "C=P.commit,SA=P.data,g=globalThis;"
     /* data(): the window remembers its shape, for __reg's regions. */
     "P.data=function(d){const w=SA.call(P,d);w.__d=[d.type==='i16'?0:d.type==='u16'?1:2,d.q,d.record,d.records];return w};"
@@ -441,7 +441,7 @@ static const char PRELUDE[]=
 static JSValue js_cap(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;
     const char *n=argc?JS_ToCString(c,argv[0]):NULL;
-    bool yes=n&&pocket_api_supported(n);
+    bool yes=n&&kobako_api_supported(n);
     if(n)JS_FreeCString(c,n);
     return JS_NewBool(c,yes);
 }
@@ -458,7 +458,7 @@ static size_t heap_live_peak,heap_peak;
 /* ---- one game frame: the keys the script holds, a pump, frame(), the oracle, present */
 static void frame(uint32_t buttons){
     frame_no++;
-    pocket_input_pump(buttons);
+    kobako_input_pump(buttons);
     char call[64];snprintf(call,sizeof call,"frame(%u)",buttons);
     eval(call,strlen(call),"frame.js");
     oracle();
@@ -518,9 +518,9 @@ int main(int argc,char **argv){
     if(!f){printf("cannot open %s\n",path);return 2;}
     static char src[1<<16];size_t n=fread(src,1,sizeof src-1,f);fclose(f);src[n]=0;
     rt=JS_NewRuntime2(&PEAK_MF,NULL);ctx=JS_NewContext(rt);
-    // As pocketjs_guest_create: apps run hardened (docs/vm/harden.md).
-    // POCKET_NO_HARDEN=1 skips it, for host A/B only.
-    if(!ctx||(!getenv("POCKET_NO_HARDEN")&&JS_PocketHarden(ctx)<0)){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
+    // As kobako_guest_create: apps run hardened (docs/vm/harden.md).
+    // KOBAKO_NO_HARDEN=1 skips it, for host A/B only.
+    if(!ctx||(!getenv("KOBAKO_NO_HARDEN")&&JS_LeanHarden(ctx)<0)){fprintf(stderr,"JS_LeanHarden failed\n");abort();}
     host_capabilities_clear();
     const char *limit_env=getenv("BW_HEAP_LIMIT");
     if(limit_env){
@@ -531,8 +531,8 @@ int main(int argc,char **argv){
     /* BIG WAVE names kasane.shiki: its session takes the Shiki heap before
      * the guest (app_session.c), and kasane then has shiki. */
     if(!shiki_heap_begin(0)){printf("FAIL Shiki heap\n");return 1;}
-    pocket_kasane_install(ctx,NULL);
-    pocket_input_install(ctx,NULL);
+    kobako_kasane_install(ctx,NULL);
+    kobako_input_install(ctx,NULL);
     JSValue g=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,js_log,"log",1));
     JS_SetPropertyStr(ctx,g,"__cap",JS_NewCFunction(ctx,js_cap,"cap",1));
@@ -572,7 +572,7 @@ int main(int argc,char **argv){
     double v0=S_("v"),q0=xi(),s0=S_("score");
     frames(30,"");
     double v1=S_("v"),q1=xi();
-    expect(S_("st")==1&&S_("score")>s0,"trim: riding scores in the pocket","xi %.1f->%.1f v %.2f->%.2f score %.0f->%.0f",q0,q1,v0,v1,s0,S_("score"));
+    expect(S_("st")==1&&S_("score")>s0,"trim: riding scores in the kobako","xi %.1f->%.1f v %.2f->%.2f score %.0f->%.0f",q0,q1,v0,v1,s0,S_("score"));
     /* ---- 3. E pumps: faster than the trimmed ride over the same frames */
     frames(30,"e");
     double v2=S_("v"),q2=xi();
@@ -727,7 +727,7 @@ int main(int argc,char **argv){
     }
     /* ---- 16. Back: the save turn */
     unsigned back0=backs,exc0=exceptions;
-    hold("");pocket_input_pump(0x2000);frame_no++;eval("frame(8192)",11,"frame.js");
+    hold("");kobako_input_pump(0x2000);frame_no++;eval("frame(8192)",11,"frame.js");
     int drew=oracle();
     expect(backs==back0+1&&exceptions==exc0&&!drew,"Back (frame(0x2000)): logs, draws nothing","%s",last_log);
 
@@ -763,7 +763,7 @@ int main(int argc,char **argv){
     printf("frames %u: exceptions=%u present_failures=%u tones=%u wipes LIP=%u ROCK=%u RIDER=%u CAUGHT=%u LAND=%u tube_logs=%u\n",
            frame_no,exceptions,present_failures,tones,wipes[0],wipes[1],wipes[2],wipes[3],wipes[4],tube_logs);
     bool pass=!fails&&!exceptions&&!present_failures&&!oracle_failures&&live_peak<=32&&readys==1;
-    pocket_input_reset();pocket_shiki_api_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+    kobako_input_reset();kobako_shiki_api_reset();kobako_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("%s\n",pass?"BIGWAVE_HOST PASS":"BIGWAVE_HOST FAIL");
     return pass?0:1;
 }

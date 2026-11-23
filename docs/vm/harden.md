@@ -4,7 +4,7 @@
 
 ## 1. 結論
 
-アプリのコンテキストは、作った直後に `JS_PocketHarden()` を通る（`components/pocketjs_guest/src/guest.c`）。以後、次の4つが成り立つ。
+アプリのコンテキストは、作った直後に `JS_LeanHarden()` を通る（`components/kobako_guest/src/guest.c`）。以後、次の4つが成り立つ。
 
 | # | 規則 | 違反したとき |
 |---|---|---|
@@ -43,16 +43,16 @@
 
 `Object.freeze` を全組み込みに掛けると、遅延の組み込み（F2: 関数リストは最初に触るまで shape に入らない。F3: 型付き配列・Map/Set などは最初に使うときに作る。[builtin-floor-plan.md](builtin-floor-plan.md)）を全部作ってしまう。だから「今あるものは書き換え不可にし、まだ無いものは書き換え不可で生まれる」ようにする。
 
-- **今あるもの**（`JS_PocketHarden`）: グローバルの組み込みの束縛と、`ctx->class_proto[]`・`native_error_proto[]`・`function_proto` などから届くオブジェクトを、shape にある値・アクセサ・prototype をたどって鍵をかける（`js_harden_lock`）。グローバルオブジェクト自体は追加可のまま（ファームとアプリが足す）。
+- **今あるもの**（`JS_LeanHarden`）: グローバルの組み込みの束縛と、`ctx->class_proto[]`・`native_error_proto[]`・`function_proto` などから届くオブジェクトを、shape にある値・アクセサ・prototype をたどって鍵をかける（`js_harden_lock`）。グローバルオブジェクト自体は追加可のまま（ファームとアプリが足す）。
 - **後で生まれるもの**: 3箇所。
   - `lazy_define`: 鍵のかかったオブジェクトの関数リストの項目は、書き換え不可で shape に入る。
-  - `JS_AutoInitProperty`: 鍵のかかったオブジェクトが作って渡すもの（`Math` のメソッドの関数オブジェクトなど）は、鍵をかけて渡す。グローバルは鍵をかけないので、「`JS_PocketHarden` が書き換え不可にした束縛」かどうかを属性で見分ける。ファームが後で足す束縛は書き換え可なので、鍵はかからない（`pocket` の名前空間に C から足す処理を壊さない）。
+  - `JS_AutoInitProperty`: 鍵のかかったオブジェクトが作って渡すもの（`Math` のメソッドの関数オブジェクトなど）は、鍵をかけて渡す。グローバルは鍵をかけないので、「`JS_LeanHarden` が書き換え不可にした束縛」かどうかを属性で見分ける。ファームが後で足す束縛は書き換え可なので、鍵はかからない（`kobako` の名前空間に C から足す処理を壊さない）。
   - `js_lazy_make`（F3）: 後で作るクラスのコンストラクタと prototype に鍵をかける。
-- **鍵の印**: 「このオブジェクトは組み込みで、渡すものも鍵付きで生まれる」を、GC ヘッダの空きビット（`dummy0` の bit 1）に持つ。F2 の遅延の印（bit 0）と同じ方法で、ランタイムの生成時に、どちらの見方からも空いていることを確かめてから使う（`rt->lock_ok`。確かめられなければ `JS_PocketHarden` は失敗し、アプリは起動しない）。**この印は書き込みの経路では読まない。** 読むのは上の3箇所、つまり組み込みを作る瞬間だけ。追加不可かどうかで組み込みを見分けられないのは、F2 が追加不可のオブジェクトでも項目を作るため（`lazy_define` の注記）。
+- **鍵の印**: 「このオブジェクトは組み込みで、渡すものも鍵付きで生まれる」を、GC ヘッダの空きビット（`dummy0` の bit 1）に持つ。F2 の遅延の印（bit 0）と同じ方法で、ランタイムの生成時に、どちらの見方からも空いていることを確かめてから使う（`rt->lock_ok`。確かめられなければ `JS_LeanHarden` は失敗し、アプリは起動しない）。**この印は書き込みの経路では読まない。** 読むのは上の3箇所、つまり組み込みを作る瞬間だけ。追加不可かどうかで組み込みを見分けられないのは、F2 が追加不可のオブジェクトでも項目を作るため（`lazy_define` の注記）。
 
 ### 3.3 「override mistake」を緩める
 
-仕様では、prototype の鎖の上に書き換え不可のデータプロパティがあると、受け手のオブジェクトに同じ名前を付ける代入も失敗する。組み込みを書き換え不可にすると、`o.toString = f` が失敗するようになり、それ自体が驚きになる。ファームにも実例がある: `pocket_api.c` の `error_prototype()` は、`Error.prototype` を継いだオブジェクトに `name` を代入する。
+仕様では、prototype の鎖の上に書き換え不可のデータプロパティがあると、受け手のオブジェクトに同じ名前を付ける代入も失敗する。組み込みを書き換え不可にすると、`o.toString = f` が失敗するようになり、それ自体が驚きになる。ファームにも実例がある: `kobako_api.c` の `error_prototype()` は、`Error.prototype` を継いだオブジェクトに `name` を代入する。
 
 harden では、鎖の上の書き換え不可は代入を止めない（`JS_SetPropertyInternal2`、1箇所）。受け手自身が書き換え不可・追加不可なら、今までどおり失敗する。値を読まないので、遅延の項目を作らずに済む。
 
@@ -76,8 +76,8 @@ C の関数は、ほとんどが同じ shape（`length`・`name`）を共有し�
 | ファイル | 内容 |
 |---|---|
 | `components/quickjs-ng/quickjs-ng/quickjs.c` | 上記すべて。`ctx->harden` が立っていなければ、通常のコンテキストの動作は変わらない |
-| `components/quickjs-ng/quickjs-ng/quickjs.h` | `JS_PocketHarden()` |
-| `components/pocketjs_guest/src/guest.c` | コンテキストを作った直後、ヘルパーとファームの面より前に呼ぶ。失敗したらゲストを作らない |
+| `components/quickjs-ng/quickjs-ng/quickjs.h` | `JS_LeanHarden()` |
+| `components/kobako_guest/src/guest.c` | コンテキストを作った直後、ヘルパーとファームの面より前に呼ぶ。失敗したらゲストを作らない |
 | `tools/vmtest/vmrun.c` | `--harden` |
 | `tools/test_stress_app.c`、`tools/test_lessons.c`、`tools/games/test_{derby,lcd_catch,big_wave}_host.c` | 実機と同じく harden を掛ける |
 | `tools/vmtest/corpus/harden.js` | 4つの規則、残るもの、遅延の経路 |
@@ -116,7 +116,7 @@ broker でビルドと書き込み。テストは COM3 から直接（リース�
 | HELLO | `kasane_hello_device_test.py --cycles 3`（broker の hello も） | PASS |
 | DERBY WATCH | broker の `derby`（デモ1周、写真判定、HOME に戻る）、`derby_fixed`（3レース） | 1周を観測、3レース完走、エラーなし |
 | STRESS TEST | `stress_app.py --seconds 60` | PASS（OOM の疑い 0） |
-| IMU CAL・POCKET PET・PET COMPANION | `test_app_resume.py`（中断→再開→退去） | PASS |
+| IMU CAL・KOBAKO PET・PET COMPANION | `test_app_resume.py`（中断→再開→退去） | PASS |
 | MEGADEMO・GRID LAB・VIDEO LAB・LCD CATCH・BIG WAVE | 行を順に起動して 8 秒（`EVAL_ERROR`・`START_FAILED`・例外の行を探す） | 例外・起動失敗なし |
 | TUTORIAL・PLAYGROUND の既定ソース | host の `test_lessons.c` を harden 付きで（教材に eval・prototype の書き換えは無い） | PASS（host） |
 
@@ -138,7 +138,7 @@ broker でビルドと書き込み。テストは COM3 から直接（リース�
 - 命令: +0.25%（+2,600/ターン）。A1 と A2 の差は 1,000。
 - ゲスト: +522 B（A の平均との差）。host の予想（+271〜424 B）よりやや大きい。
 
-**JS の実行内容は同じ。** host の DERBY（楕円・WIDE 2、449 フレーム、同じバイナリで `POCKET_NO_HARDEN=1` の有無）で、1 フレームのバイトコードの実行 10,945.8、組み込み関数の呼び出し 212.9、確保 198.0 が完全に一致した。だから差は C の側（キャッシュの配置、ヒープの並び）にあり、ビルドが違うと命令キャッシュの配置だけで 15% 動くこの機体（CLAUDE.md）では、+0.7% を harden の代償とは言い切れない。命令の +0.25% の出どころは特定していない（書き込みの経路に足した分岐は、DERBY が通る経路では毎回は走らない）。
+**JS の実行内容は同じ。** host の DERBY（楕円・WIDE 2、449 フレーム、同じバイナリで `KOBAKO_NO_HARDEN=1` の有無）で、1 フレームのバイトコードの実行 10,945.8、組み込み関数の呼び出し 212.9、確保 198.0 が完全に一致した。だから差は C の側（キャッシュの配置、ヒープの並び）にあり、ビルドが違うと命令キャッシュの配置だけで 15% 動くこの機体（CLAUDE.md）では、+0.7% を harden の代償とは言い切れない。命令の +0.25% の出どころは特定していない（書き込みの経路に足した分岐は、DERBY が通る経路では毎回は走らない）。
 
 
 ## 8. この先

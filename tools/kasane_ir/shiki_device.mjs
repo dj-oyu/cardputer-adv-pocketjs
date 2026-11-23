@@ -5,7 +5,7 @@
 //   ... --data   the data-region half: apps/shikitest/shiki_data_test.js and
 //                its "SD" lines (spec v1.3, the cases carry regions)
 //
-// Loads apps/shikitest/shiki_test.js as it is (without pocket, so only its
+// Loads apps/shikitest/shiki_test.js as it is (without kobako, so only its
 // generator and hash are defined), makes the same cases the device made,
 // runs them through the C engine (tools/kasane_contract/shiki_run.c, ASan)
 // and the host reference (tools/kasane_ir/shiki_ref.mjs), which must agree,

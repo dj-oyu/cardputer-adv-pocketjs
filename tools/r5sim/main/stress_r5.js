@@ -1,6 +1,6 @@
 // Stress test, vaporwave sea: heap churn + many alpha shapes. See README.md.
 (function () {
-  const V = pocket.kasane, fs = pocket.fs, CAP = [15, 35, 1e9];
+  const V = kobako.kasane, fs = kobako.fs, CAP = [15, 35, 1e9];
   const SEA = [0, 61, 240, 110];   // a moved shape keeps its clip, which defaults to where it began
   const PINK = 0xff71ceff, CYAN = 0x01cdfeff, MINT = 0x05ffa1ff, SUN = 0xfffb96ff, INK = 0x1a0033ff;
   let t = 0, lvl = 0, pool = [], peak = 0, oom = 0, suspect = 0, cyc = 0, err = 0;
@@ -8,7 +8,7 @@
   // The host owns pressure detection. Keep the callback allocation-free: LV3
   // sheds retained load only after a real allocation failure, preserving the
   // stress test's deliberate first OOM and its recovery check.
-  const memory = pocket.memory;
+  const memory = kobako.memory;
   if (memory) memory.onPressure(function (mask) {
     pressure = mask;
     pressureEvents++;

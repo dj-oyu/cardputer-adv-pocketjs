@@ -49,7 +49,7 @@ static esp_err_t kread(uint8_t reg,uint8_t *value) {
 }
 #undef ESP_ERROR_CHECK
 #define ESP_ERROR_CHECK(x) do { esp_err_t e_=(x); if(e_!=ESP_OK) { checked_error=e_;longjmp(check_abort,1); } } while(0)
-/* board.c: the INT probe build (CONFIG_POCKET_KEY_INT_PROBE) is off. */
+/* board.c: the INT probe build (CONFIG_KOBAKO_KEY_INT_PROBE) is off. */
 #define KEY_INT_PROBE 0
 static esp_err_t keyboard_stage(i2c_master_bus_handle_t ih) {
 #include "keyboard_stage.inc"
@@ -69,7 +69,7 @@ void vTaskDelay(TickType_t ticks) {
     assert((uint64_t)ticks*1000000/configTICK_RATE_HZ==10000);
     ++waits; now+=(uint64_t)ticks*1000000/configTICK_RATE_HZ;
 }
-/* The INT gate (CONFIG_POCKET_KEY_INT_GPIO, board.c) configures its pin and
+/* The INT gate (CONFIG_KOBAKO_KEY_INT_GPIO, board.c) configures its pin and
  * logs its level once the keyboard is configured; it is built both ways
  * (run_keyboard_probe.py). Its own behaviour is tools/test_key_int_gate.py's. */
 static unsigned int_configured;
@@ -78,8 +78,8 @@ esp_err_t gpio_config(const gpio_config_t *c) {
     ++int_configured;return ESP_OK;
 }
 int gpio_get_level(int gpio) {
-#if CONFIG_POCKET_KEY_INT_GPIO >= 0
-    if(gpio==CONFIG_POCKET_KEY_INT_GPIO) return 1;
+#if CONFIG_KOBAKO_KEY_INT_GPIO >= 0
+    if(gpio==CONFIG_KOBAKO_KEY_INT_GPIO) return 1;
 #endif
     assert(gpio==8||gpio==9); return gpio==9;
 }
@@ -96,7 +96,7 @@ void test_log(char level,const char *tag,const char *format,...) {
         assert(strstr(row,expected) && strstr(row,"sda=0 scl=1"));
     } else if(level=='I') {
         if(strstr(row,"ADV keyboard detected")) ++configured;
-        else if(strstr(row,"KEY_INT gpio=")) assert(CONFIG_POCKET_KEY_INT_GPIO>=0);
+        else if(strstr(row,"KEY_INT gpio=")) assert(CONFIG_KOBAKO_KEY_INT_GPIO>=0);
         else { assert(strstr(row,"KBD_PROBE ready"));++successes; }
     }
     else { assert(level=='E');++failures;snprintf(failure_summary,sizeof failure_summary,"%s",row); }
@@ -113,7 +113,7 @@ int main(void) {
         assert(warnings+successes+failures<=4);
         assert(writes==(got==ESP_OK?8u:0u) && reads==(got==ESP_OK?10u:0u));
         assert(configured==(got==ESP_OK));
-        assert(int_configured==(CONFIG_POCKET_KEY_INT_GPIO>=0&&got==ESP_OK));
+        assert(int_configured==(CONFIG_KOBAKO_KEY_INT_GPIO>=0&&got==ESP_OK));
         if(got!=ESP_OK) {
             char expected[64];snprintf(expected,sizeof expected,"error=%s(0x%x)",
                                       esp_err_to_name(got),(unsigned)got);

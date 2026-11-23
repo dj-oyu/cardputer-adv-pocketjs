@@ -49,7 +49,7 @@
   for (const f of 'ahb') for (const g of [GEO[0], GEO[1], GEO[2], GEO[3]]) for (const n of NP) CASES.push(['P' + f, g, n]);
   for (const g of [GEO[4], GEO[5]]) for (const n of NP) CASES.push(['Pb', g, n]);
   for (const v of 'sp') for (const n of [1, 2, 3, 4]) CASES.push(['F' + v, null, n]);
-  const HOLD = 30, V = pocket.kasane, H = V.procedural, log = m => console.log('BGS ' + m);
+  const HOLD = 30, V = kobako.kasane, H = V.procedural, log = m => console.log('BGS ' + m);
   H.beginFrame(0);
   const res = H.resource(), P = {seg: H.register(seg), pa: H.register(pseg(0xffffff)), ph: H.register(pseg(0x555555))};
   for (const n of [1, 2, 3, 4]) P['f' + n] = H.register(fan(n));

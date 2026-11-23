@@ -1,4 +1,4 @@
-# MEGADEMO's chunks (pocket.app.load; docs/vm/eval-peak.md section 7).
+# MEGADEMO's chunks (kobako.app.load; docs/vm/eval-peak.md section 7).
 # proc_megademo.js (the entry) loads them in this order while it evaluates:
 # one parse at a time, so the evaluation peak is one chunk's compile over
 # what the earlier ones keep: the big chunks go first. The host tests

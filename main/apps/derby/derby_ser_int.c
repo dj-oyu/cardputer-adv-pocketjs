@@ -3,8 +3,8 @@
 #include <stddef.h>
 #include <string.h>
 
-/* pocket.derby.ser() in integers: docs/apps/derby-ser-division.md sec.4 and
- * derby_ser_int.h. The double ser() that pocket_derby.c had until sec.13
+/* kobako.derby.ser() in integers: docs/apps/derby-ser-division.md sec.4 and
+ * derby_ser_int.h. The double ser() that kobako_derby.c had until sec.13
  * (its copy is tools/games/test_derby_serq.c's ser_ref) is the specification
  * this follows step by step (the same clip, LOD and draw order); the numbers
  * differ by rounding, within the tolerance of sec.5 and the user's decision
@@ -13,12 +13,12 @@
  * where the double series divides too (clip points, the LOD's near bound,
  * 1/Z), about 2.4 a chord. */
 
-/* r5sim's per-part cycle counts (-DR5SIM_DERBY_PROF=1; pocket_derby.c owns
+/* r5sim's per-part cycle counts (-DR5SIM_DERBY_PROF=1; kobako_derby.c owns
  * the arrays and the running mark). */
 #ifdef R5SIM_DERBY_PROF
 extern uint32_t derby_ser_cy[9],derby_sp_t;
-uint32_t pocket_cycles(void);
-#define SP(k) do{const uint32_t _t=pocket_cycles();derby_ser_cy[k]+=_t-derby_sp_t;derby_sp_t=_t;}while(0)
+uint32_t kobako_cycles(void);
+#define SP(k) do{const uint32_t _t=kobako_cycles();derby_ser_cy[k]+=_t-derby_sp_t;derby_sp_t=_t;}while(0)
 #define SC(k) (derby_ser_cy[k]++)
 #else
 #define SP(k) do{}while(0)

@@ -1,6 +1,6 @@
 // USB diagnostic c: current-player source drives a generic mount's visibility.
 (function () {
-  const view = pocket.kasane.mount({version: 1,
+  const view = kobako.kasane.mount({version: 1,
     slots: {state: {type: 'u16'}, positionMs: {type: 'u32'},
             durationMs: {type: 'u32'}, underruns: {type: 'u32'},
             playing: {type: 'bool'}},
@@ -10,7 +10,7 @@
        visible: {slot: 'playing'}, color: 0xe2f0ffff}
     ]}, {state: 0, positionMs: 0, durationMs: 0, underruns: 0,
          playing: false});
-  const source = pocket.audio.playbackSource();
+  const source = kobako.audio.playbackSource();
   let bound = false;
   let playerHandle = null;
   let subscription = null;
@@ -27,33 +27,33 @@
   }
   async function prepare() {
     try {
-      const root = await pocket.fs.requestFolder('sd');
+      const root = await kobako.fs.requestFolder('sd');
       if (root !== 'sd:/') throw new Error('SD folder not granted');
-      playerHandle = await pocket.audio.player.open({
+      playerHandle = await kobako.audio.player.open({
         source: 'sd:/KAKATO/KARA OK 2nd Edition/02 インザハウス.mp3'
       });
       subscription = playerHandle.onState(function (event) {
         console.log('KSN_PLAYBACK_SOURCE STATE ' + event.state);
         if (event.state === 'error') fail('PLAYBACK', event.error);
       });
-      openedMs = pocket.time.now();
+      openedMs = kobako.time.now();
       phase = 'ready';
       console.log('KSN_PLAYBACK_SOURCE OPEN');
     } catch (error) { fail('PREPARE', error); }
   }
   globalThis.frame = function () {
-    const now = pocket.time.now();
+    const now = kobako.time.now();
     if (phase === 'ready' && now - openedMs >= 3000) {
       phase = 'starting';
       playerHandle.play().then(function () {
-        playStartMs = pocket.time.now();
+        playStartMs = kobako.time.now();
         phase = 'playing';
         console.log('KSN_PLAYBACK_SOURCE PLAY');
       }, function (error) { fail('PLAY', error); });
     } else if (phase === 'playing' && now - playStartMs >= 7000) {
       phase = 'pausing';
       playerHandle.pause().then(function () {
-        pauseStartMs = pocket.time.now();
+        pauseStartMs = kobako.time.now();
         phase = 'paused';
         console.log('KSN_PLAYBACK_SOURCE PAUSED positionMs=' +
                     playerHandle.status().positionMs);

@@ -23,9 +23,9 @@
 - **`setRect` は clip を動かさない。** ノードの clip は作ったときの bounds のままなので、動かす ref には行全体の clip を最初に渡してある（渡さないと、元の位置以外では何も見えない。host の画像で一度踏んだ）。
 - **描画は差分だけ。** 毎フレーム `paint()` が「どのセグメントが点くべきか」を作り、`flush()` が前回と違うものだけを1回の `patch` に入れる。変化の無いフレームは `patch` を呼ばない。`patch` が投げたら（前の提出が表示待ちの `BUSY` など）、表示中の状態を「不明」にして次のフレームで全部書き直す。
 - **拍はフレームで数える。** `T.tick` などは 30 fps のフレーム数。実機のフレームが落ちると拍も遅れる（時計で測らないのは、同じ台本で同じ結果を出すためと、液晶ゲームの「カクッ」を拍の単位で保つため）。
-- **音**は `pocket.audio.tone`（capability `audio.tone`、manifest では optional）。拍ごとの短いクリック、受けたとき、ミス、開始。1度に1音で、鳴っている間の次の音は `BUSY` で断られる（握りつぶしている）。音が使えない本体では黙って鳴らさない。
-- **最高得点**は `pocket.storage` の `hi` に `[GAME A, GAME B]`。ゲームオーバーと Back（`frame(0x2000)`）で、更新があったときだけ書く。`storage.kv` は manifest の optional に足した（`main/pocket/app_registry.c` のこのアプリの行）。
-- **乱数**は `pocket.random.create(pocket.random.seed())`。星の筋は前の星から `T.jump` 筋以内（空いた拍1つにつき1筋広がる）に限る — 1拍で届かない筋に続けて落ちると、押す速さでは取れないため。
+- **音**は `kobako.audio.tone`（capability `audio.tone`、manifest では optional）。拍ごとの短いクリック、受けたとき、ミス、開始。1度に1音で、鳴っている間の次の音は `BUSY` で断られる（握りつぶしている）。音が使えない本体では黙って鳴らさない。
+- **最高得点**は `kobako.storage` の `hi` に `[GAME A, GAME B]`。ゲームオーバーと Back（`frame(0x2000)`）で、更新があったときだけ書く。`storage.kv` は manifest の optional に足した（`main/kobako/app_registry.c` のこのアプリの行）。
+- **乱数**は `kobako.random.create(kobako.random.seed())`。星の筋は前の星から `T.jump` 筋以内（空いた拍1つにつき1筋広がる）に限る — 1拍で届かない筋に続けて落ちると、押す速さでは取れないため。
 - `globalThis.lcdCatch` は状態の入れ物で、host の試験（`tools/games/run_lcd_catch.sh`）がこれを読む。
 
 ## 調整用の定数（`T`）

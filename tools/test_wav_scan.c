@@ -1,6 +1,6 @@
 // The WAV chunk walk that audio.playback's open() runs before anything plays,
-// compiled on a host from main/pocket/wav_scan.h -- the same lines
-// pocket_av.c's wav_parse() calls. docs/api/backlog.md (9 節, 音声) named this
+// compiled on a host from main/kobako/wav_scan.h -- the same lines
+// kobako_av.c's wav_parse() calls. docs/api/backlog.md (9 節, 音声) named this
 // gap: tools/test_stream.c covers the ring and the slot walk once a file has
 // already been accepted, and nothing host-side had ever driven the header
 // scan itself. A JUNK chunk in front of fmt, or a data chunk that starts past
@@ -8,15 +8,15 @@
 // real hardware.
 //
 // Every case here builds a WAV as bytes in memory and hands wav_scan() a
-// read callback over that buffer -- the same shape as pocket_av.c's
-// wav_scan_read(), which wraps player_at() over pocket_fs_read_at(). A
+// read callback over that buffer -- the same shape as kobako_av.c's
+// wav_scan_read(), which wraps player_at() over kobako_fs_read_at(). A
 // `truncated` source models a short read (a file that got smaller than what
 // stat() reported, which is exactly the failure player_at() turns into "the
 // source could not be read") rather than a read past a hard end.
 //
 // Build and run (WSL; there is no gcc on the Windows side):
 //   gcc -std=gnu11 -O1 -Wall -Wextra -Werror -fsanitize=address,undefined
-//       -I main/pocket tools/test_wav_scan.c -o /tmp/t && /tmp/t
+//       -I main/kobako tools/test_wav_scan.c -o /tmp/t && /tmp/t
 #include "wav_scan.h"
 #include <stdbool.h>
 #include <stdio.h>
@@ -29,7 +29,7 @@ static int failures;
     printf("FAIL %s:%d ", __func__, __LINE__); printf(__VA_ARGS__); \
     printf("\n"); failures++; } } while(0)
 
-// The two device facts wav_scan() needs and pocket_av.c supplies from
+// The two device facts wav_scan() needs and kobako_av.c supplies from
 // SOUND_SAMPLE_RATE and SOUND_STREAM_SLOT_BYTES. Kept as plain numbers here so
 // this file has no dependency on main/hal at all, per wav_scan.h's own rule.
 #define RATE 24000u
@@ -93,7 +93,7 @@ static void put_fmt(buf_t *b, uint16_t format, uint16_t channels, uint32_t rate,
 }
 
 // ---- the read callback: a bounds-checked window over one of these buffers,
-// same failure shape as player_at() over a short pocket_fs_read_at().
+// same failure shape as player_at() over a short kobako_fs_read_at().
 typedef struct { const uint8_t *data; uint32_t real_len; } src_t;
 static const char *src_read(void *ctx, uint32_t at, uint8_t *out, uint32_t want) {
     src_t *s=ctx;

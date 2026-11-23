@@ -1,6 +1,6 @@
 // Class ids across several sessions, against the real quickjs-ng.
 //
-// WHAT THIS IS FOR. Every pocket surface keeps its JSClassID in a static, and
+// WHAT THIS IS FOR. Every kobako surface keeps its JSClassID in a static, and
 // for a long time that was fine because every session installed the same
 // surfaces in the same order. Overlay sessions broke that: eight surfaces where
 // a foreground app installs sixteen, so which class is built FIRST now varies
@@ -22,7 +22,7 @@
 //     if (class_id < rt->class_count && rt->class_array[class_id].class_id)
 //         return -1;
 //
-// On the board that surfaced as "pocket.fs could not be built: ESP_FAIL", with
+// On the board that surfaced as "kobako.fs could not be built: ESP_FAIL", with
 // file_class=65, on a guest using 97,952 bytes of a 163,840-byte ceiling. The
 // guest was told "no memory to build this namespace", which is what the lazy
 // wrapper calls every failure, and two wrong diagnoses came out of that message
@@ -55,10 +55,10 @@ typedef struct {
 } surface_t;
 
 static surface_t SURFACES[] = {
-    {"api.hub",       0, NULL, {.class_name="PocketHub"}},
-    {"api.token",     0, NULL, {.class_name="PocketCancel"}},
+    {"api.hub",       0, NULL, {.class_name="KobakoHub"}},
+    {"api.token",     0, NULL, {.class_name="KobakoCancel"}},
     {"storage.hub",   0, NULL, {.class_name="StorageHub"}},
-    {"fs.file",       0, NULL, {.class_name="PocketFile"}},
+    {"fs.file",       0, NULL, {.class_name="KobakoFile"}},
     {"ui.screen",     0, NULL, {.class_name="Screen"}},
     {"ui.node",       0, NULL, {.class_name="Node"}},
     {"ui.text",       0, NULL, {.class_name="Text"}},
@@ -70,7 +70,7 @@ static surface_t SURFACES[] = {
 };
 #define SURFACE_N ((int)(sizeof(SURFACES)/sizeof(SURFACES[0])))
 
-// main/pocket/pocket_api.h, copied rather than included: this file must build
+// main/kobako/kobako_api.h, copied rather than included: this file must build
 // with nothing but quickjs on the include path, and the whole point is that the
 // rule is three lines. If it changes there and not here, the next case below
 // starts failing, which is the intended way to notice.
@@ -179,7 +179,7 @@ int main(void) {
 
     // ---- the retry, which is the other half --------------------------------
     //
-    // pocket_api_lazy() leaves the accessor in place when a build fails, so a
+    // kobako_api_lazy() leaves the accessor in place when a build fails, so a
     // read a second later tries again. Registering twice in one runtime is
     // exactly what JS_NewClass refuses, so without the owner check the retry
     // could only ever fail -- turning one transient failure into a permanent
@@ -209,7 +209,7 @@ int main(void) {
         CHECK(build(ctx,&SURFACES[3],1),"session %d after a free",i);
         JS_FreeContext(ctx);
         JS_FreeRuntime(rt);
-        // pocket_fs_reset(): the session ended, so the class belongs to nobody.
+        // kobako_fs_reset(): the session ended, so the class belongs to nobody.
         SURFACES[3].owner=NULL;
     }
 

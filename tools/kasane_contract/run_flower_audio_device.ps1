@@ -2,8 +2,8 @@ param([string]$DiagBuild='build_proc_grid_scan_device',
       [string]$Out='.cache\flower-audio-20260928')
 $ErrorActionPreference='Stop'
 $py='C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe'
-$diag=Join-Path $DiagBuild 'cardputer_pocketjs.bin'
-$normal='build_megademo_install\cardputer_pocketjs.bin'
+$diag=Join-Path $DiagBuild 'cardputer_kobako.bin'
+$normal='build_megademo_install\cardputer_kobako.bin'
 $cache=Join-Path $DiagBuild 'CMakeCache.txt'
 $esp=@('-m','esptool','--chip','esp32s3','--port','COM3',
        '--before','usb-reset','--connect-attempts','3')

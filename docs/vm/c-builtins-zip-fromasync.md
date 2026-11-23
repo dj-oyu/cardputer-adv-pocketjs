@@ -6,7 +6,7 @@
 
 | 項目 | 結論 |
 |---|---|
-| 何が無いか | ROM 版（`CONFIG_POCKET_VM_ROM_INTRINSICS=y`、既定）では `Iterator.zip`・`Iterator.zipKeyed`・`Array.fromAsync` が `undefined`（実測(host)、§1.4）。上流 quickjs-ng 0.14 は 3 つを **JS で書いて bytecode として埋め込み**（`builtin-*.h`、計 6,078 B）、最初の読みで `js_bytecode_autoinit` がコンパイルする（コード、`quickjs.c:10401`）。bytecode は IC・T1 が書くので flash に置けず、生成器が落とした（[rom-intrinsics.md](rom-intrinsics.md) RD5） |
+| 何が無いか | ROM 版（`CONFIG_QJS_LEAN_ROM_INTRINSICS=y`、既定）では `Iterator.zip`・`Iterator.zipKeyed`・`Array.fromAsync` が `undefined`（実測(host)、§1.4）。上流 quickjs-ng 0.14 は 3 つを **JS で書いて bytecode として埋め込み**（`builtin-*.h`、計 6,078 B）、最初の読みで `js_bytecode_autoinit` がコンパイルする（コード、`quickjs.c:10401`）。bytecode は IC・T1 が書くので flash に置けず、生成器が落とした（[rom-intrinsics.md](rom-intrinsics.md) RD5） |
 | 順序 | **zip / zipKeyed を先に、fromAsync を後に。** 主線の提案を支持する（§6.1）。zip は同期で、既存の `JS_CLASS_ITERATOR_HELPER` の枠に 1 つの kind を足すだけで済む。fromAsync は await ごとの継続を C で張る必要があり、形は決まった（§2.2）が検査の面が広い |
 | zip の設計 | 新しい class id は**要らない**。結果は仕様どおり `%IteratorHelperPrototype%` を [[Prototype]] に持つので、`JS_CLASS_ITERATOR_HELPER` に kind `ZIP` を足し、`JSIteratorHelperData` を先頭に持つ拡張レコードに iterator・next・padding・key の列を C の可変長配列で置く（§2.1）。finalizer / mark は kind を見て列を歩く |
 | fromAsync の設計 | **async 関数の `await` と同じ部品で、C の明示的な状態機械にする**: `js_promise_resolve(ctx, ctx->promise_ctor, v)` で包み、`perform_promise_then(promise, {fulfilled, rejected}, {undefined, undefined})` で続きを登録する（`quickjs.c:24344-24362` の await の実装そのもの。cap 側に `undefined` を渡せるのは `promise_reaction_tail` の明示的な拡張、`60435` 行）。状態は RAM の 1 オブジェクト（新 class）に持ち、継続の C 関数は呼び出しごとに 2 つ（fulfilled / rejected、`JS_NewCFunctionData`）を**一度だけ**作って全 await で使い回す（§2.2）。候補 4 つの比較は §2.3 |
@@ -271,7 +271,7 @@ ROM の C 関数は `js_cfunc_realm`（R1）で呼び手の ctx を使う。zip 
 2. **atom**: `mode`・`padding`・`shortest`・`longest`・`strict` は `quickjs-atom.h` に無く、F1 の ROM atom 表（`quickjs-rom-atoms.h`、625 番まで）にも無い（実測(host)、grep）。C から `JS_GetProperty(options, JS_ATOM_mode)` と書くには predefined atom に足す（`quickjs-atom.h` に `DEF(mode, "mode")` ほか 5 行）。すると `JS_ATOM_END` が動くので `tools/vmtest/floor/gen_rom_atoms.sh` で ROM atom 表を、続けて `gen_rom_intrinsics.sh` で intrinsics 表を再生成する（`_Static_assert(JS_ROM_PREDEF_END == JS_ATOM_END)`、`3503-3504` 行、が陳腐化を止める。intrinsics 表は atom 番号を埋め込むので両方）。flash は 5 × 8 B ＋ 文字 32 B ≈ **72 B**（計算）。代案は実行時に `JS_NewAtom(ctx, "mode")`（RAM の atom を 1 つ作る）か文字列比較で、どちらも ROM の意味（確保 0）に合わないので採らない。
 3. `JS_AUTOINIT_ID_BYTECODE` の枝（`629`・`10474`）、`js_bytecode_autoinit`・`js_bytecode_eval`・`js_call_function`・`js_getOwnPropertyKeys`・`js_hasOwnEnumProperty`（`10327-10470`）、3 つの `.h` の `#include`、`JS_DefineAutoInitProperty` の 3 呼び出し（`63894`・`63897`・`63936`）を消し、`js_iterator_funcs`（`51119`）に `JS_CFUNC_MAGIC_DEF("zip", 1, js_iterator_zip, 0)`・`("zipKeyed", 1, js_iterator_zip, 1)`、`js_array_funcs` に `JS_CFUNC_DEF("fromAsync", 1, js_array_fromAsync)` を足す。`.h` ファイル自体を消すかは §6.3。
 
-### 3.4 非 ROM ビルド（RAM、`CONFIG_POCKET_VM_ROM_INTRINSICS=n`）での F2 / F3
+### 3.4 非 ROM ビルド（RAM、`CONFIG_QJS_LEAN_ROM_INTRINSICS=n`）での F2 / F3
 
 - 関数リストの項目になるので、F2（遅延索引）の普通の項目として扱われる: `Iterator`・`Array` の shape に最初に触れるまで入らず、触ったら C 関数オブジェクト 1 つ（≈ 147 B ＋ 3.4 ブロック、rom-intrinsics §2.2 の実測(host)）。**今の 2.7〜7.6 KB（host）のコンパイルが消える**。
 - F3（群の遅延）は Map/Set・型付き配列などの**クラス**の遅延で、`Iterator` と `Array` は eager な基本群。関係なし。

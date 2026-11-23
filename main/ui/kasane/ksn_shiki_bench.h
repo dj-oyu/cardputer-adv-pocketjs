@@ -4,7 +4,7 @@
  * each pair is the same drawing written once with v1.3's scalar data
  * instructions and once with the prototype's vector / batch instructions.
  * The host test (tools/kasane_contract/test_shiki_vec.c) proves each pair
- * emits the same segments; the device bench (pocket_shiki.c bench()) times
+ * emits the same segments; the device bench (kobako_shiki.c bench()) times
  * them in one binary. Nothing here allocates: the caller hands work memory. */
 #include <stdbool.h>
 #include <stddef.h>

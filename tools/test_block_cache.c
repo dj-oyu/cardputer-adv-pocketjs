@@ -1,12 +1,12 @@
-// R3's small-block cache (components/pocketjs_guest/src/block_cache.c) on the
+// R3's small-block cache (components/kobako_guest/src/block_cache.c) on the
 // host under ASan/UBSan: random malloc/free against a model, the flush-and-
 // retry path on a backend failure, and (with an argument) that a use after
 // free through a cached block is still reported. WSL:
 //   gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined
-//     -I components/pocketjs_guest/include tools/test_block_cache.c
-//     components/pocketjs_guest/src/block_cache.c -o /tmp/tbc && /tmp/tbc
+//     -I components/kobako_guest/include tools/test_block_cache.c
+//     components/kobako_guest/src/block_cache.c -o /tmp/tbc && /tmp/tbc
 //   /tmp/tbc uaf   # must abort with heap-use-after-free... from ASan
-#include "pocketjs/block_cache.h"
+#include "kobako/block_cache.h"
 
 #include <stdio.h>
 #include <stdlib.h>

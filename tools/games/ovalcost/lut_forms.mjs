@@ -184,7 +184,7 @@ ${cases}
   };
   const CASES = [];
   for (const k in JS) for (const n of [0, 200, 400]) CASES.push([k, n]);
-  const HOLD = 40, V = pocket.kasane, H = V.procedural, log = m => console.log('BGS ' + m);
+  const HOLD = 40, V = kobako.kasane, H = V.procedural, log = m => console.log('BGS ' + m);
   H.beginFrame(0);
   const res = H.resource();
   let t = 0, built = 0;
@@ -205,8 +205,8 @@ ${cases}
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, src);
   // The bench must run: every case once in Node (same JS).
-  const g = { pocket: { kasane: { procedural: { beginFrame() {}, resource() { return 0; }, commit() {} }, replace() {}, patch() {} } }, console: { log() {} } };
-  new Function('pocket', 'console', 'globalThis', src)(g.pocket, g.console, g);
+  const g = { kobako: { kasane: { procedural: { beginFrame() {}, resource() { return 0; }, commit() {} }, replace() {}, patch() {} } }, console: { log() {} } };
+  new Function('kobako', 'console', 'globalThis', src)(g.kobako, g.console, g);
   for (let i = 0; i < 40 * 3 * 15; ++i) g.frame();
   console.log('wrote', path.relative(ROOT, out));
   process.exit(0);

@@ -1,0 +1,216 @@
+#pragma once
+#include "esp_err.h"
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+// One-shot Wi-Fi clock synchronization. Connects, asks SNTP for the time,
+// hands it to solar_time, and takes the whole radio stack back down again.
+//
+// Nothing here stays connected. docs/platform/architecture.md:122 budgets the radio as
+// something to switch on and measure, and the guest heap is the scarce resource
+// on a board with no PSRAM, so the design is a task that runs to completion and
+// exits rather than a service that holds an association. The lasting cost is the
+// Wi-Fi driver's .bss, which the linker charges once the component is in the
+// image whether the radio ever starts or not.
+//
+// This module never handles timezones. SNTP writes UTC through settimeofday()
+// and solar_time.c reads that directly (docs/scenes/solar-sail.md).
+
+#define WIFI_TIME_SSID_MAX 32   // 802.11 SSID: 32 bytes, no NUL on the wire
+#define WIFI_TIME_PSK_MAX  64   // WPA2 passphrase 8..63, or a 64 hex digit PSK
+
+typedef enum {
+    WIFI_TIME_IDLE,      // no sync attempted since boot
+    WIFI_TIME_RUNNING,
+    WIFI_TIME_OK,        // the system clock was set from the network
+    WIFI_TIME_FAILED
+} wifi_time_state_t;
+
+// How far the attempt got. The UI shows this rather than a bare error, because
+// "wrong password" and "no such network" want different things from the user.
+typedef enum {
+    WIFI_TIME_STAGE_NONE,
+    WIFI_TIME_STAGE_NVS,     // no stored credentials, or NVS itself is unusable
+    WIFI_TIME_STAGE_INIT,    // netif / event loop / driver bring-up
+    WIFI_TIME_STAGE_ASSOC,   // scanning and associating: AP not found, too weak
+    WIFI_TIME_STAGE_AUTH,    // the AP answered and rejected us: wrong PSK
+    WIFI_TIME_STAGE_DHCP,    // associated, no address
+    WIFI_TIME_STAGE_SNTP     // addressed, no usable answer from the servers
+} wifi_time_stage_t;
+
+typedef struct {
+    wifi_time_state_t state;
+    wifi_time_stage_t stage;
+    // At ASSOC and AUTH this is a wifi_err_reason_t from the disconnect event;
+    // elsewhere an esp_err_t. Zero when the stage carries no further detail.
+    int  reason;
+    int  rssi;                // 0 until associated
+    char ip[16];              // "" until DHCP completes
+} wifi_time_status_t;
+
+// Once at boot, before any start: creates the permanent worker task that runs
+// scans and links, with its stack in RTC fast memory (rtc_task.h). Without it
+// the starts below return ESP_ERR_NO_MEM.
+void wifi_time_init(void);
+// Start lwIP's core (esp_netif_init) now, at boot, when the radio is going to
+// come up later (a network is stored). What it allocates is permanent
+// (esp_netif_deinit is not supported), and made later it lands in the middle
+// of the heap: the tcpip thread's stack split DERBY's two largest holes
+// (docs/vm/lv3-heap-exhaustion.md sec.6.6). The radio itself stays lazy.
+void wifi_time_stack_early(void);
+// Log the least stack lwIP's tcpip thread has had left (NET_STACK), if the
+// thread exists.
+void wifi_time_stack_report(const char *why);
+
+// Stable lower-case token for the log marker and for the UI, e.g. "auth".
+const char *wifi_time_stage_name(wifi_time_stage_t stage);
+
+// Credentials live in NVS namespace "wifi", keys "ssid" and "psk".
+//
+// The PSK goes in and never comes back out: there is no getter for it, and no
+// code path logs it at any level. docs/api/common-api.md section 3 requires that a Wi-Fi
+// password stay out of the ordinary logs, and a truncated password is still a
+// password with its search space cut down.
+esp_err_t wifi_time_credentials_set(const char *ssid, const char *psk);
+esp_err_t wifi_time_credentials_clear(void);
+bool      wifi_time_has_credentials(void);
+// Copies the stored SSID, always NUL terminating. ESP_ERR_NVS_NOT_FOUND when
+// nothing is stored; out is set to "" in that case so the UI can print it.
+esp_err_t wifi_time_ssid_get(char *out, size_t size);
+
+// There is no sync starter here any more: a manual sync is
+// net_autosync_sync_now() (net_autosync.h), the same link-plus-SNTP path the
+// automatic one takes. Poll wifi_time_status() for its progress either way.
+
+// Safe from any task at any time.
+wifi_time_status_t wifi_time_status(void);
+
+// Overwrites the status a finished attempt left. For net_autosync.c, which
+// syncs the clock over a link rather than through the sync task: the link
+// reports OK once it has an address, and the Wi-Fi screen would read that as
+// "clock set" whether or not SNTP then answered. Safe from any task.
+void wifi_time_status_settle(wifi_time_state_t state, wifi_time_stage_t stage,
+                             int reason);
+
+// Whether a sync, a scan or a link holds the radio right now -- the single
+// attempt lock itself. A caller that gave the radio back and must not build
+// anything until the heap has returned waits for this to go false.
+bool wifi_time_busy(void);
+
+// Whether the driver is initialised right now. A capability probe needs this to
+// tell "the radio is already up, so using it is free" from "the radio has to be
+// brought up, which costs about 48 KB and fails outright below that". Safe from
+// any task; it is a plain read of a flag the attempt task owns.
+bool wifi_time_radio_is_up(void);
+
+// ------------------------------------------------------------------ scanning
+//
+// So the SSID is chosen from what is actually in the air rather than typed. A
+// typed SSID fails as WIFI_REASON_NO_AP_FOUND whether the network is absent or
+// the spelling is wrong, and those want opposite things from the person.
+
+#define WIFI_TIME_SCAN_MAX 16   // docs/api/common-api.md section 11 caps a scan at 16
+
+typedef struct {
+    char   ssid[WIFI_TIME_SSID_MAX+1];
+    int8_t rssi;
+    bool   secure;               // anything but an open network
+} wifi_time_network_t;
+
+// Brings the radio up, scans, and takes it down again, like the sync task and
+// under the same single-attempt lock: a scan and a sync cannot overlap.
+// Returns immediately; poll wifi_time_scan_state().
+esp_err_t wifi_time_scan_start(void);
+wifi_time_state_t wifi_time_scan_state(void);
+
+// Copies up to max networks, strongest first, into out; returns how many. One
+// entry per SSID — a mesh answering from three radios is one network to choose.
+// truncated, when given, reports that something was dropped: more than
+// WIFI_TIME_SCAN_MAX distinct networks, or an SSID that was not valid UTF-8 and
+// so could not be drawn or stored (docs/api/common-api.md section 4).
+unsigned wifi_time_scan_networks(wifi_time_network_t *out, unsigned max,
+                                 bool *truncated);
+
+// ---------------------------------------------------------------- the link
+//
+// A held association, for kobako_net.c. Same radio_up()/tear_down() pair as the
+// clock and the scan and, through the same single-attempt lock, mutually
+// exclusive with both: whoever asks second gets ESP_ERR_INVALID_STATE. Nothing
+// here syncs a clock or touches solar_time.
+//
+// This is the only part of this module that stays up. It exists because HTTP
+// wants the radio for the length of a request and possibly across several, and
+// paying a multi-second association per request would be worse for both the
+// battery and the app. The lease is the app's to end; wifi_time_link_stop()
+// and a session ending are the only things that take it away.
+
+typedef enum {
+    WIFI_TIME_LINK_DOWN,        // no link held
+    WIFI_TIME_LINK_CONNECTING,
+    WIFI_TIME_LINK_UP,          // associated with an address
+    WIFI_TIME_LINK_FAILED       // never came up, or the AP took it away
+} wifi_time_link_t;
+
+// Who a link belongs to. One link exists at a time and only its holder can
+// stop it: kobako_net.c's teardown stops "the link" whenever it sees one
+// connecting, and without an owner that would include net_service.c's.
+typedef enum {
+    WIFI_TIME_LINK_APP=1,       // kobako.net's lease (kobako_net.c)
+    WIFI_TIME_LINK_SERVICE=2,   // net_service.c, for native holders
+} wifi_time_link_owner_t;
+
+// Starts the link task. Returns immediately; poll wifi_time_link_state().
+// ESP_ERR_INVALID_STATE when a sync, a scan or another link already has the
+// radio. Uses the credentials in NVS, exactly as the clock does.
+esp_err_t wifi_time_link_start_for(wifi_time_link_owner_t owner);
+esp_err_t wifi_time_link_start(void);          // for WIFI_TIME_LINK_APP
+
+// Asks for the link back. Non-blocking and idempotent: the task tears the radio
+// down and clears the lock on its own. The stage of a failure is in
+// wifi_time_status(), which the link fills the same way a sync does. A request
+// from anyone but the current owner is ignored. A stop that lands while the
+// link is still associating ends it within CONNECT_SLICE_MS (100 ms) plus the
+// teardown, and leaves the state DOWN rather than FAILED.
+void wifi_time_link_stop_for(wifi_time_link_owner_t owner);
+void wifi_time_link_stop(void);                // for WIFI_TIME_LINK_APP
+
+// The current holder, or 0 when no link exists.
+wifi_time_link_owner_t wifi_time_link_owner(void);
+
+wifi_time_link_t wifi_time_link_state(void);
+
+// Copies the address the link holds, always NUL terminating; "" when it has
+// none. Safe from any task.
+void wifi_time_link_ip(char *out, size_t size);
+
+// SNTP over a link, for a holder on another task (net_autosync.c). The link
+// task's teardown also deinitialises SNTP, and ESP-IDF v6.0.1's
+// esp_netif_sntp_deinit() deletes the semaphore esp_netif_sntp_sync_wait() may
+// be blocked on -- a lost AP would do that under the waiter. These three and
+// the teardown take one mutex, so a deinit waits out a wait (one slice), and a
+// start after the link stopped being UP is refused rather than leaving SNTP
+// running past the event loop the teardown deletes.
+//
+// start: ESP_ERR_INVALID_STATE unless the link is UP. wait: one slice, as
+// esp_netif_sntp_sync_wait(); ESP_ERR_INVALID_STATE once the link is not UP
+// or SNTP was already torn down. stop: idempotent, and the caller's to make
+// before it releases the link.
+esp_err_t wifi_time_link_sntp_start(void);
+esp_err_t wifi_time_link_sntp_wait(unsigned slice_ms);
+void      wifi_time_link_sntp_stop(void);
+
+#ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
+/* A paired frame holds the optional Core 0 renderer until its last join. */
+bool wifi_time_try_render_core0(void);
+void wifi_time_release_render_core0(void);
+#endif
+
+#ifdef CONFIG_AYATSURI_COMPANION_NET_PROBE
+// Opt in before starting the measured link. Defaults to false. A link samples
+// this once immediately before driver init, and releases its own reservation.
+void wifi_time_probe_reserve_init(bool enabled);
+// The probe owner starts one short capture, then prints it after the last frame.
+void wifi_time_probe_trace_begin(void);
+void wifi_time_probe_trace_report(void);
+#endif

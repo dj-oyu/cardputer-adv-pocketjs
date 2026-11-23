@@ -1,6 +1,6 @@
 #include "pet_hub.h"
 #include "pet_hub_core.h"
-#include "pocket_api.h"
+#include "kobako_api.h"
 #include "paint.h"
 #include "sound.h"
 #include "system/sys_device.h"
@@ -128,24 +128,24 @@ static void number(JSContext *c,JSValue o,const char *k,double n){JS_SetProperty
 // Both writers below roll the value back before they throw, so the caller learns
 // the write did not land -- not merely that something went wrong.
 static JSValue save_failed(JSContext *c,const char *op) {
-    return pocket_api_throw(c,opened?POCKET_ERR_IO_ERROR:POCKET_ERR_NOT_AVAILABLE,op,
+    return kobako_api_throw(c,opened?KOBAKO_ERR_IO_ERROR:KOBAKO_ERR_NOT_AVAILABLE,op,
                             opened?"NVS write failed":"pet storage is not open",
-                            opened,POCKET_OUTCOME_NOT_APPLIED);
+                            opened,KOBAKO_OUTCOME_NOT_APPLIED);
 }
 // NULL when the string is acceptable, else the code to throw with: over the
 // published length is LIMIT_EXCEEDED, anything not printable ASCII is
 // INVALID_ARGUMENT. That split is what lets an app read maxLabelChars and act.
 static const char *text_code(const char *s,unsigned max) {
-    if(!s||!*s)return POCKET_ERR_INVALID_ARGUMENT;
-    if(strlen(s)>max)return POCKET_ERR_LIMIT_EXCEEDED;
-    for(;*s;s++)if((unsigned char)*s<32||(unsigned char)*s>126)return POCKET_ERR_INVALID_ARGUMENT;
+    if(!s||!*s)return KOBAKO_ERR_INVALID_ARGUMENT;
+    if(strlen(s)>max)return KOBAKO_ERR_LIMIT_EXCEEDED;
+    for(;*s;s++)if((unsigned char)*s<32||(unsigned char)*s>126)return KOBAKO_ERR_INVALID_ARGUMENT;
     return NULL;
 }
 static JSValue select_pet(JSContext *c,JSValueConst self,int argc,JSValueConst *a) {
     (void)self;
     if(argc) {
         int32_t n;if(JS_ToInt32(c,&n,a[0]))return JS_EXCEPTION;
-        if(n<0||n>=12)return pocket_api_throw(c,POCKET_ERR_INVALID_ARGUMENT,"pet.select",
+        if(n<0||n>=12)return kobako_api_throw(c,KOBAKO_ERR_INVALID_ARGUMENT,"pet.select",
                                              "pet index 0..11",false,NULL);
         uint32_t old=hub.saved.selected;hub.saved.selected=n;
         if(!persist()){hub.saved.selected=old;return save_failed(c,"pet.select");}
@@ -155,7 +155,7 @@ static JSValue select_pet(JSContext *c,JSValueConst self,int argc,JSValueConst *
 static JSValue rewards(JSContext *c,JSValueConst self,int argc,JSValueConst *a) {
     (void)self;int32_t n=hub.saved.selected;
     if(argc&&JS_ToInt32(c,&n,a[0]))return JS_EXCEPTION;
-    if(n<0||n>=12)return pocket_api_throw(c,POCKET_ERR_INVALID_ARGUMENT,"pet.rewards",
+    if(n<0||n>=12)return kobako_api_throw(c,KOBAKO_ERR_INVALID_ARGUMENT,"pet.rewards",
                                          "pet index 0..11",false,NULL);
     return JS_NewFloat64(c,hub.saved.food[n]);
 }
@@ -168,10 +168,10 @@ static JSValue clock_read(JSContext *c,JSValueConst self,int argc,JSValueConst *
 }
 static JSValue wake(JSContext *c,JSValueConst self,int argc,JSValueConst *a) {
     (void)self;int32_t hour,minute=0;
-    if(!argc)return pocket_api_throw(c,POCKET_ERR_INVALID_ARGUMENT,"pet.wake","hour required",false,NULL);
+    if(!argc)return kobako_api_throw(c,KOBAKO_ERR_INVALID_ARGUMENT,"pet.wake","hour required",false,NULL);
     if(JS_ToInt32(c,&hour,a[0])||(argc>1&&JS_ToInt32(c,&minute,a[1])))return JS_EXCEPTION;
     if(hour < -1||hour>23||minute<0||minute>59)
-        return pocket_api_throw(c,POCKET_ERR_INVALID_ARGUMENT,"pet.wake","invalid alarm time",false,NULL);
+        return kobako_api_throw(c,KOBAKO_ERR_INVALID_ARGUMENT,"pet.wake","invalid alarm time",false,NULL);
     int32_t old=hub.saved.wake_minute;hub.saved.wake_minute=hour<0?-1:hour*60+minute;
     if(!persist()){hub.saved.wake_minute=old;return save_failed(c,"pet.wake");}
     sys_wall_invalidate(sys_device_wall());
@@ -179,27 +179,27 @@ static JSValue wake(JSContext *c,JSValueConst self,int argc,JSValueConst *a) {
 }
 static JSValue alarm_set(JSContext *c,JSValueConst self,int argc,JSValueConst *a) {
     (void)self;
-    if(argc<3)return pocket_api_throw(c,POCKET_ERR_INVALID_ARGUMENT,"pet.alarm",
+    if(argc<3)return kobako_api_throw(c,KOBAKO_ERR_INVALID_ARGUMENT,"pet.alarm",
                                       "id, seconds, label required",false,NULL);
     const char *id=JS_ToCString(c,a[0]),*label=JS_ToCString(c,a[2]);
     double seconds;
     const char *code=JS_ToFloat64(c,&seconds,a[1])==0&&isfinite(seconds)&&
-                     (seconds==0||seconds>=1)&&seconds<=604800?NULL:POCKET_ERR_INVALID_ARGUMENT;
+                     (seconds==0||seconds>=1)&&seconds<=604800?NULL:KOBAKO_ERR_INVALID_ARGUMENT;
     if(!code)code=text_code(id,PET_ID_CHARS);
     if(!code)code=text_code(label,PET_LABEL_CHARS);
     // A full timer table is worth retrying: the four slots free themselves as
     // they fire, which is not true of any of the checks above it.
     bool busy=!code&&!pet_hub_timer(&hub,id,label,seconds?now_ms()+(uint64_t)(seconds*1000):0);
     JS_FreeCString(c,id);JS_FreeCString(c,label);
-    if(busy)return pocket_api_throw(c,POCKET_ERR_LIMIT_EXCEEDED,"pet.alarm",
+    if(busy)return kobako_api_throw(c,KOBAKO_ERR_LIMIT_EXCEEDED,"pet.alarm",
                                     "all four timers are busy",true,NULL);
-    if(code)return pocket_api_throw(c,code,"pet.alarm",
+    if(code)return kobako_api_throw(c,code,"pet.alarm",
                                     "id up to 16 and label up to 24 printable ASCII, 0 or 1..604800 seconds",
                                     false,NULL);
     return JS_UNDEFINED;
 }
 static JSValue notify(JSContext *c,JSValueConst self,int argc,JSValueConst *a) {
-    (void)self;if(!argc)return pocket_api_throw(c,POCKET_ERR_INVALID_ARGUMENT,"pet.notify",
+    (void)self;if(!argc)return kobako_api_throw(c,KOBAKO_ERR_INVALID_ARGUMENT,"pet.notify",
                                                 "label required",false,NULL);
     const char *s=JS_ToCString(c,a[0]);
     const char *code=text_code(s,PET_LABEL_CHARS);
@@ -207,14 +207,14 @@ static JSValue notify(JSContext *c,JSValueConst self,int argc,JSValueConst *a) {
     // "later", not a "never".
     bool full=!code&&!pet_hub_notify(&hub,s);
     JS_FreeCString(c,s);
-    if(full)return pocket_api_throw(c,POCKET_ERR_LIMIT_EXCEEDED,"pet.notify",
+    if(full)return kobako_api_throw(c,KOBAKO_ERR_LIMIT_EXCEEDED,"pet.notify",
                                     "eight notifications are queued",true,NULL);
-    if(code)return pocket_api_throw(c,code,"pet.notify",
+    if(code)return kobako_api_throw(c,code,"pet.notify",
                                     "label: up to 24 printable ASCII characters",false,NULL);
     return JS_UNDEFINED;
 }
 static JSValue timer_read(JSContext *c,JSValueConst self,int argc,JSValueConst *a) {
-    (void)self;if(!argc)return pocket_api_throw(c,POCKET_ERR_INVALID_ARGUMENT,"pet.timer",
+    (void)self;if(!argc)return kobako_api_throw(c,KOBAKO_ERR_INVALID_ARGUMENT,"pet.timer",
                                                 "timer id required",false,NULL);
     const char *id=JS_ToCString(c,a[0]);if(!id)return JS_EXCEPTION;
     JSValue result=JS_NULL;
@@ -227,7 +227,7 @@ static JSValue timer_read(JSContext *c,JSValueConst self,int argc,JSValueConst *
 }
 static JSValue usage(JSContext *c,JSValueConst self,int argc,JSValueConst *a) {
     (void)self;int32_t n=0;if(argc&&JS_ToInt32(c,&n,a[0]))return JS_EXCEPTION;
-    if(n<0||n>1)return pocket_api_throw(c,POCKET_ERR_INVALID_ARGUMENT,"pet.usage",
+    if(n<0||n>1)return kobako_api_throw(c,KOBAKO_ERR_INVALID_ARGUMENT,"pet.usage",
                                         "provider 0=Codex, 1=Claude",false,NULL);
     pet_usage_t *p=&hub.saved.usage[n];JSValue o=JS_NewObject(c),windows=JS_NewArray(c);
     number(c,o,"observed",p->observed);
@@ -243,24 +243,24 @@ static JSValue usage(JSContext *c,JSValueConst self,int argc,JSValueConst *a) {
 }
 // Every number here is enforced a few lines up or in pet_hub_core.c; nothing is
 // published that the code does not refuse to exceed.
-static const pocket_limit_t pet_limits[]={
-    {.name="maxPets",         .kind=POCKET_LIMIT_INT,.number=12},
-    {.name="maxNotifications",.kind=POCKET_LIMIT_INT,.number=PET_MAX_ALERTS},
-    {.name="maxTimers",       .kind=POCKET_LIMIT_INT,.number=PET_MAX_TIMERS},
-    {.name="maxLabelChars",   .kind=POCKET_LIMIT_INT,.number=PET_LABEL_CHARS},  // notify() and alarm()
-    {.name="maxTimerIdChars", .kind=POCKET_LIMIT_INT,.number=PET_ID_CHARS},
-    {.name="maxAlarmSeconds", .kind=POCKET_LIMIT_INT,.number=604800},
+static const kobako_limit_t pet_limits[]={
+    {.name="maxPets",         .kind=KOBAKO_LIMIT_INT,.number=12},
+    {.name="maxNotifications",.kind=KOBAKO_LIMIT_INT,.number=PET_MAX_ALERTS},
+    {.name="maxTimers",       .kind=KOBAKO_LIMIT_INT,.number=PET_MAX_TIMERS},
+    {.name="maxLabelChars",   .kind=KOBAKO_LIMIT_INT,.number=PET_LABEL_CHARS},  // notify() and alarm()
+    {.name="maxTimerIdChars", .kind=KOBAKO_LIMIT_INT,.number=PET_ID_CHARS},
+    {.name="maxAlarmSeconds", .kind=KOBAKO_LIMIT_INT,.number=604800},
     {0},
 };
 // Without NVS the hub keeps nothing and drops every usage frame, so rewards()
 // never moves and select()/wake() always throw: not available, even though
 // clock() and place() still answer. opened never changes after pet_hub_init(),
-// so there is no moment that would call pocket_api_capability_changed().
+// so there is no moment that would call kobako_api_capability_changed().
 #define PET_REASON_NO_STORAGE "NO_STORAGE"
-static void pet_probe(const pocket_capability_t *cap,bool *available,const char **reason) {
+static void pet_probe(const kobako_capability_t *cap,bool *available,const char **reason) {
     (void)cap;*available=opened;*reason=opened?NULL:PET_REASON_NO_STORAGE;
 }
-static const pocket_capability_t capability={.name="pet.companion",.supported=true,
+static const kobako_capability_t capability={.name="pet.companion",.supported=true,
     .available=false,.reason=PET_REASON_NO_STORAGE,.limits=pet_limits,.probe=pet_probe};
 // Milliseconds on the monotonic clock. The apps pace their animation and
 // autosave by it, so it is a plain reading rather than wall time.
@@ -270,7 +270,7 @@ static JSValue now_read(JSContext *c,JSValueConst self,int argc,JSValueConst *ar
 }
 // The sprite, speech-bubble and texture methods (place/say/show) drew through
 // the legacy renderer and went with it; the apps draw the pet through
-// pocket.kasane.resource('pets') instead.
+// kobako.kasane.resource('pets') instead.
 static esp_err_t build_pet(JSContext *ctx,JSValueConst ns,void *user) {
     (void)user;
     JSValue pet=(JSValue)ns;
@@ -282,11 +282,11 @@ static esp_err_t build_pet(JSContext *ctx,JSValueConst ns,void *user) {
     return ESP_OK;
 }
 esp_err_t pet_hub_install(JSContext *ctx,void *unused) {
-    (void)unused;pocket_api_register(&capability);
-    // Eager and outside the namespace: Pocket Pet calls it directly, so reading
-    // the clock must not build pocket.pet.
+    (void)unused;kobako_api_register(&capability);
+    // Eager and outside the namespace: Kobako Pet calls it directly, so reading
+    // the clock must not build kobako.pet.
     JSValue global=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,global,"__petNow",JS_NewCFunction(ctx,now_read,"__petNow",0));
     JS_FreeValue(ctx,global);
-    return pocket_api_lazy(ctx,"pet",build_pet,NULL);
+    return kobako_api_lazy(ctx,"pet",build_pet,NULL);
 }

@@ -1,9 +1,9 @@
 // The display task (docs/perf/two-core-pipeline.md, stages P1/P2a):
 // present_frame() can run on a task of its own, pinned to
-// CONFIG_POCKET_DISP_CORE. disp_run() hands a job over and waits for it (P1).
+// CONFIG_KOBAKO_DISP_CORE. disp_run() hands a job over and waits for it (P1).
 // disp_start() hands it over and returns at once; disp_join() waits for it and
 // then runs its finish step on the caller's task (P2a). Without
-// CONFIG_POCKET_DISP_TASK, or with on_task false, the job runs in place inside
+// CONFIG_KOBAKO_DISP_TASK, or with on_task false, the job runs in place inside
 // disp_start() and the finish step still waits for disp_join(), so callers
 // have one shape either way.
 #pragma once
@@ -15,7 +15,7 @@ typedef esp_err_t (*disp_job_fn)(void);
 typedef void (*disp_finish_fn)(esp_err_t result);
 
 #ifndef ESP_PLATFORM
-// Host tests: no display task and nothing ever in flight, so the pocket code
+// Host tests: no display task and nothing ever in flight, so the kobako code
 // that joins compiles and runs unchanged (a deferred join is not modelled).
 static inline void disp_join(void) {}
 static inline bool disp_busy(void) { return false; }
@@ -31,7 +31,7 @@ void disp_join(void);
 // A job is in flight or its finish step has not run yet.
 bool disp_busy(void);
 
-#ifdef CONFIG_POCKET_DISP_TASK
+#ifdef CONFIG_KOBAKO_DISP_TASK
 // Creates the task (static stack and TCB). Before the first job.
 esp_err_t disp_init(void);
 // Runs `fn` on the display task and returns its result once it has finished.

@@ -3,7 +3,7 @@
 #include "esp_log.h"
 #include <string.h>
 #include <stdio.h>
-// vmprobe.h is CONFIG_POCKET_VM_PROBE-gated internally (see its own header
+// vmprobe.h is CONFIG_QJS_LEAN_PROBE-gated internally (see its own header
 // comment): on a shipping build this include adds nothing and the binding
 // below compiles out along with it. Included here, not just guarded here, so
 // this file does not have to separately pull in sdkconfig.h to see the macro.
@@ -111,11 +111,11 @@ static JSValue host_error(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-#ifdef CONFIG_POCKET_VM_PROBE
+#ifdef CONFIG_QJS_LEAN_PROBE
 // G1 device side (vmprobe.h's vmprobe_depth_stack_sample): the probe
 // workload calls this at a call depth it chose, from inside its own deepest
 // frame, so the reported stack high-water mark is attributable to that
-// depth. Not part of pocket.* -- this exists only in a probe build and is
+// depth. Not part of kobako.* -- this exists only in a probe build and is
 // meaningless (and absent) otherwise, same rule as everything else this
 // config gates.
 static JSValue host_vmprobe_stack_sample(JSContext *ctx, JSValueConst this_val,
@@ -144,7 +144,7 @@ esp_err_t jsconsole_install(JSContext *ctx, void *user_data) {
     JS_SetPropertyStr(ctx,global,"print",print);
     JS_SetPropertyStr(ctx,global,"__pjs_error",
                       JS_NewCFunction(ctx,host_error,"__pjs_error",2));
-#ifdef CONFIG_POCKET_VM_PROBE
+#ifdef CONFIG_QJS_LEAN_PROBE
     JS_SetPropertyStr(ctx,global,"__vmprobe_stack_sample",
                       JS_NewCFunction(ctx,host_vmprobe_stack_sample,
                                       "__vmprobe_stack_sample",1));

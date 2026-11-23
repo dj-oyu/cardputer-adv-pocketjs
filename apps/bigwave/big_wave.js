@@ -8,7 +8,7 @@
   const K = {
     vw: [9, 10.5, 12], H: [5, 6.5, 8], len: [320, 360, 400], rock: [70, 55, 42], sec: [120, 90, 70],
     rid: [160, 120, 95], acc: 5, brake: 6, drag: .05, grav: 6, turn: 1.9, carve: 3.6, cost: 2.5,
-    relax: 1.4, head: 1.05, face: 7, pop: 5.5, g: 13, land: .8, air: 4, tube: 7, pocket: 22, sh: 34,
+    relax: 1.4, head: 1.05, face: 7, pop: 5.5, g: 13, land: .8, air: 4, tube: 7, kobako: 22, sh: 34,
     taper: 40, hmin: .3, tuck: .6, grace: 8, hitX: 1.3, hitP: .12, lives: 3, wipe: 48, inv: 45,
     pts: [12, 80, 4, 40, 400]
   };
@@ -88,8 +88,8 @@
   const H = () => K.H[S.set];
   function curlAt(x) {
     const q = x - S.xc;
-    let c = q < K.tube ? 1 : q < K.pocket ? 1 - .8 * (q - K.tube) / (K.pocket - K.tube) :
-      q < K.sh - 4 ? .2 * (1 - (q - K.pocket) / (K.sh - 4 - K.pocket)) : 0;
+    let c = q < K.tube ? 1 : q < K.kobako ? 1 - .8 * (q - K.tube) / (K.kobako - K.tube) :
+      q < K.sh - 4 ? .2 * (1 - (q - K.kobako) / (K.sh - 4 - K.kobako)) : 0;
     const s = S.course.secs;
     for (let i = 0; i < s.length; ++i) {
       const u = x - s[i].x, w = s[i].w;
@@ -112,12 +112,12 @@
     return [h * ((b1 + b2) * PF.L + b3 * (PF.l + c * PF.dl)), h * (b2 * PF.V + b3 * (PF.v + c * PF.dv))];
   }
   function power(q) {
-    return q < 0 ? .3 : q < K.tube ? .75 : q < K.pocket ? 1 : q < K.sh ? 1 - .5 * (q - K.pocket) / (K.sh - K.pocket) :
+    return q < 0 ? .3 : q < K.tube ? .75 : q < K.kobako ? 1 : q < K.sh ? 1 - .5 * (q - K.kobako) / (K.sh - K.kobako) :
       M.max(.1, .5 - .4 * (q - K.sh) / K.taper);
   }
 
   // ---- Plans: handles by key; a queue registers one per frame (a decode is 12-20 ms).
-  const P = typeof pocket !== 'undefined' && pocket.kasane && pocket.kasane.shiki;
+  const P = typeof kobako !== 'undefined' && kobako.kasane && kobako.kasane.shiki;
   const PL = {}, WIN = {}, queue = [];
   function spec(k, set, tier) {
     if (k[0] === 's' && k[1] === 'p') { const p = sprite(+k.slice(2)); return poly(p[0], p[1], 0xffe0); }
@@ -138,9 +138,9 @@
   function loadSet(k) { SETK.forEach(n => load(n, k, S.tier)); }
 
   // ---- Keys and sound.
-  const KEYS = P && pocket.input && pocket.input.keys;
-  const cap = n => { try { return pocket.capabilities.get(n).supported; } catch (e) { return false; } };
-  const AU = P && cap('audio.tone') ? pocket.audio : null;
+  const KEYS = P && kobako.input && kobako.input.keys;
+  const cap = n => { try { return kobako.capabilities.get(n).supported; } catch (e) { return false; } };
+  const AU = P && cap('audio.tone') ? kobako.audio : null;
   let sq = [], busy = 0;
   function snd(l) { if (AU && sq.length < 6) sq = sq.concat(l); }
   function sound() {
@@ -203,7 +203,7 @@
       }
     }
     if (s.inv > 0) --s.inv;
-    // Zones: caught, barrel (tuck and stay low), pocket, shoulder.
+    // Zones: caught, barrel (tuck and stay low), kobako, shoulder.
     const inTube = q >= 0 && q < K.tube || secAt(s.x);
     if (q < 0) return wipe('CAUGHT');
     if (inTube && !air) {
@@ -215,7 +215,7 @@
     } else {
       if (s.tube > 20) log('TUBE ' + s.tube);
       s.tube = 0; s.hit = 0;
-      if (q < K.pocket) s.score += K.pts[0] * dt * s.v / K.vw[s.set];
+      if (q < K.kobako) s.score += K.pts[0] * dt * s.v / K.vw[s.set];
       else s.score += 2 * dt;
     }
     if ((inp.cl || inp.cr) && s.p > .85 && !air && !(s.t % 8)) s.score += K.pts[3] / 4;
@@ -247,7 +247,7 @@
     const t = r.t0 === undefined ? 0 : (S.t - r.t0) / 30;
     return [r.x + r.v * t, cl(r.p + .15 * M.sin(.9 * t + r.ph), .05, .9)];
   }
-  // Title autopilot: hold the pocket so the attract loop shows the wave.
+  // Title autopilot: hold the kobako so the attract loop shows the wave.
   function auto() {
     const q = S.x - S.xc;
     return {e: q < 12, s: q > 17, a: S.p < .35, d: S.p > .55};
@@ -276,7 +276,7 @@
     if (s.st === 3) return;
     // Wave runs: slices grouped between breakpoints, each run overlaps the last
     // slice of the previous one so the lip rail stays connected.
-    const bp = [s.xc + K.tube, s.xc + K.pocket, s.xc + K.sh - 4, s.xc + K.sh, s.xc + K.sh + K.taper];
+    const bp = [s.xc + K.tube, s.xc + K.kobako, s.xc + K.sh - 4, s.xc + K.sh, s.xc + K.sh + K.taper];
     s.course.secs.forEach(c => { if (secAmp(c)) bp.push(c.x - 4, c.x, c.x + c.w, c.x + c.w + 4); });
     bp.sort((a, b) => a - b);
     const ms = M.max(m0, M.ceil(s.xc / d)), H = K.H[s.set], ex = e.map(v => v * H);
@@ -320,7 +320,7 @@
     add('sp' + (b + s.tuck * NB), []);
   }
 
-  const V = P && pocket.kasane;
+  const V = P && kobako.kasane;
   let res, R = {}, shown = {}, built = 0, fr = 0;
   const FULL = [0, 0, 240, 135];
   function ui(tx) {

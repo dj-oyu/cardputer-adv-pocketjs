@@ -1,7 +1,7 @@
 # Explicit occlusion material backend and actor integration
 
 `stream_graph_occlusion_backend.h` constructs opt-in material hooks for the
-existing pocket streaming actor. It calls the explicitly named occlusion band
+existing kobako streaming actor. It calls the explicitly named occlusion band
 preflight/render functions; no macro substitution, default backend change,
 firmware auto-registration or asset installation occurs. The old band backend
 remains usable in the same translation unit.
@@ -27,7 +27,7 @@ actor's existing drain/rollback/repair rules.
 The explicit band backend passes Windows O0/O2 pixel comparison at 1/2/4/8 rows,
 clipped nonlinear attributes, overflow, binding and alias checks.
 
-`test_stream_occlusion_display.py` uses the actual pocket/Kasane actor, synthetic
+`test_stream_occlusion_display.py` uses the actual kobako/Kasane actor, synthetic
 geometry and a copied-DMA host port. It adds five opaque background layers to the
 clipped nonlinear foreground, compares every displayed pixel with unrestricted
 composition, and exercises changed driver payloads, failed completion, old READY
@@ -36,7 +36,7 @@ Parent independently ran the Linux ASan/UBSan synthetic actor suite: PASS,
 0 failures. The initial build found a misleading-indentation warning in the new
 fixture; the loop was braced and the final source was rerun successfully.
 
-The private `run-material-actor-six.private.py` runner links the actual pocket
+The private `run-material-actor-six.private.py` runner links the actual kobako
 harness and the existing restored-model provider in separate translation units.
 It evaluates the same source-derived 63-pose controls/rig/wrap pipeline, builds
 bounded payloads from actual recompiled alpha/base-color programs and copied

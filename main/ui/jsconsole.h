@@ -15,7 +15,7 @@ unsigned jsconsole_count(void);
 const char *jsconsole_line(unsigned i);   // 0 is the oldest kept line
 
 // Registers print, console.log/error and __pjs_error on the realm. Pass to
-// pocketjs_guest_quickjs_install_once().
+// kobako_guest_quickjs_install_once().
 esp_err_t jsconsole_install(JSContext *ctx, void *user_data);
 
 // The last error a script reported, or NULL. Owned here, bounded.

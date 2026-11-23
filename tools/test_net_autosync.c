@@ -1,7 +1,7 @@
 // The automatic clock sync and the link service under it, on the host.
 //
-// What runs here is the real main/pocket/net_service.c and the policy and
-// attempt halves of main/pocket/net_autosync.c; what is faked is everything
+// What runs here is the real main/kobako/net_service.c and the policy and
+// attempt halves of main/kobako/net_autosync.c; what is faked is everything
 // they stand on -- wifi_time.c's link (a script of how long association,
 // SNTP and the teardown take, and an AP that leaves after the link is UP), the
 // clock (advanced only by the attempt's own sleeps, so every deadline is

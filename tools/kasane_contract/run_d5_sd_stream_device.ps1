@@ -1,10 +1,10 @@
 param([string]$DiagBuild='build_d5_file_stream',
-      [string]$NormalBin='build_megademo_install\cardputer_pocketjs.bin',
+      [string]$NormalBin='build_megademo_install\cardputer_kobako.bin',
       [string]$Out='.cache\d5-sd-stream-device',
       [string]$Port='COM3')
 $ErrorActionPreference='Stop'
 $py='C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe'
-$diag=Join-Path $DiagBuild 'cardputer_pocketjs.bin'
+$diag=Join-Path $DiagBuild 'cardputer_kobako.bin'
 $cache=Join-Path $DiagBuild 'CMakeCache.txt'
 $runner='tools\kasane_contract\run_d5_sd_stream_device.py'
 $homeCheck='tools\kasane_contract\check_home.py'

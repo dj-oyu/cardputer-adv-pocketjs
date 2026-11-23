@@ -32,7 +32,7 @@ static JSValue function(JSContext *ctx,const char *name){
 static void call(JSContext *ctx,JSValueConst fn,JSValueConst arg){
     JSValue value=JS_Call(ctx,fn,JS_UNDEFINED,1,&arg);
     if(JS_IsException(value)){JSValue e=JS_GetException(ctx);const char *s=JS_ToCString(ctx,e);fprintf(stderr,"call: %s\n",s?s:"exception");CHECK(0);}
-    JS_FreeValue(ctx,value);pocket_kasane_end_turn();
+    JS_FreeValue(ctx,value);kobako_kasane_end_turn();
 }
 static void copy_floats(JSContext *ctx,const char *name,void *out,size_t n){
     JSValue g=JS_GetGlobalObject(ctx),v=JS_GetPropertyStr(ctx,g,name);JS_FreeValue(ctx,g);
@@ -98,13 +98,13 @@ static void oom(JSRuntime *rt,JSContext *ctx){
 #endif
 int SKIN_JS_MAIN(int argc,char **argv){
     CHECK(argc==4);strip_rows=(unsigned)atoi(argv[1]);g_ksn_image_rows=atoi(argv[2]);delayed=true;CHECK(strip_rows==4||strip_rows==8);
-    JSRuntime *rt=JS_NewRuntime();CHECK(rt);JSContext *ctx=JS_NewContext(rt);CHECK(ctx&&JS_PocketHarden(ctx)==0);JS_SetMemoryLimit(rt,160*1024);
-    host_capabilities_clear();CHECK(shiki_heap_begin(0));CHECK(pocket_kasane_install(ctx,NULL)==ESP_OK);CHECK(pocket_shape_install(ctx,NULL)==ESP_OK);
+    JSRuntime *rt=JS_NewRuntime();CHECK(rt);JSContext *ctx=JS_NewContext(rt);CHECK(ctx&&JS_LeanHarden(ctx)==0);JS_SetMemoryLimit(rt,160*1024);
+    host_capabilities_clear();CHECK(shiki_heap_begin(0));CHECK(kobako_kasane_install(ctx,NULL)==ESP_OK);CHECK(kobako_shape_install(ctx,NULL)==ESP_OK);
     JSValue g=JS_GetGlobalObject(ctx);CHECK(JS_SetPropertyStr(ctx,g,"detachBuffer",JS_NewCFunction(ctx,detach_buffer,"detachBuffer",1))>=0);
     CHECK(JS_SetPropertyStr(ctx,g,"freezeBuffer",JS_NewCFunction(ctx,freeze_buffer,"freezeBuffer",1))>=0);JS_FreeValue(ctx,g);
     install_foreign(ctx,"foreignJ",48);install_foreign(ctx,"foreignG",96);
     expose_fixture(ctx,argv[3],"plain","fixture");expose_fixture(ctx,argv[3],"holes","holes");expose_fixture(ctx,argv[3],"sided","sided");expose_fixture(ctx,argv[3],"plain","cycleFixture");
-    eval(ctx,"globalThis.pocket={kasane,ayatsuri};globalThis.P=kasane.shiki;const resource=P.resource();kasane.replace(tx=>{tx.background(0x000011ff);tx.image({resource,bounds:[0,0,240,135],clip:[0,0,240,135],sourceWidth:240,sourceHeight:135});})");CHECK(present()==KSN_OK);
+    eval(ctx,"globalThis.kobako={kasane,ayatsuri};globalThis.P=kasane.shiki;const resource=P.resource();kasane.replace(tx=>{tx.background(0x000011ff);tx.image({resource,bounds:[0,0,240,135],clip:[0,0,240,135],sourceWidth:240,sourceHeight:135});})");CHECK(present()==KSN_OK);
     FILE *f=fopen("tools/ayatsuri/skin/js_scenario.js","rb");CHECK(f);static char source[16384];size_t count=fread(source,1,sizeof source-1,f);CHECK(feof(f)&&fclose(f)==0);source[count]=0;eval(ctx,source);SKIN_JS_SETUP(ctx);eval(ctx,"setup()");
     size_t blob_bytes;uint8_t *blob=load_fixture(argv[3],"plain",&blob_bytes);ayatsuri_model model;CHECK(ayatsuri_model_open(blob,blob_bytes,&model)==AYATSURI_MODEL_OK);
     size_t arena_bytes=ayatsuri_model_instance_bytes(&model);void *arena=malloc(arena_bytes);CHECK(arena);unsigned owner=0;ayatsuri_model_instance direct;
@@ -115,8 +115,8 @@ int SKIN_JS_MAIN(int argc,char **argv){
         unsigned frame=visit<120?visit:239-visit;size_t before=alloc_calls;
         call(ctx,evaluate,JS_NewInt32(ctx,(int)frame));warm_evaluate+=alloc_calls-before;
         oracle(ctx,&direct,&owner);before=alloc_calls;call(ctx,draw,JS_UNDEFINED);
-        if(visit==37){fail_send=true;CHECK(present()==KSN_IO&&pocket_proc_pending());}
-        CHECK(present()==KSN_OK&&!pocket_proc_pending()&&!memcmp(panel,reference,sizeof panel));warm_submit+=alloc_calls-before;
+        if(visit==37){fail_send=true;CHECK(present()==KSN_IO&&kobako_proc_pending());}
+        CHECK(present()==KSN_OK&&!kobako_proc_pending()&&!memcmp(panel,reference,sizeof panel));warm_submit+=alloc_calls-before;
         uint32_t hash=2166136261u;for(unsigned j=0;j<240*135;++j)hash=(hash^panel[j])*16777619u;
         if(visit<120)hashes[frame]=hash;else CHECK(hash==hashes[frame]);
         size_t used,limit;JS_GetMemoryCounters(rt,&used,&limit);CHECK(limit==160*1024);if(used>guest_peak)guest_peak=used;
@@ -144,11 +144,11 @@ int SKIN_JS_MAIN(int argc,char **argv){
     eval(ctx,"A.evaluate(C,L);inspectA(576);drawA()");CHECK(present()==KSN_OK);uint32_t restored=2166136261u;for(unsigned j=0;j<240*135;++j)restored=(restored^panel[j])*16777619u;CHECK(restored==hashes[0]);
     eval(ctx,"closeModel()");call(ctx,evaluate,JS_NewInt32(ctx,30));oracle(ctx,&direct,&owner);
     CHECK(ayatsuri_model_instance_dispose(&direct,&owner,1)==AYATSURI_MODEL_OK);free(arena);free(blob);
-    eval(ctx,"pendingThenDispose()");JS_RunGC(rt);CHECK(pocket_proc_pending()&&present()==KSN_OK&&!memcmp(panel,reference,sizeof panel));
+    eval(ctx,"pendingThenDispose()");JS_RunGC(rt);CHECK(kobako_proc_pending()&&present()==KSN_OK&&!memcmp(panel,reference,sizeof panel));
     eval(ctx,"implicitRelease();cycleModel.stats(modelStats);check(modelStats.instances===1);cycleModel=null");JS_RunGC(rt);
-    pocket_proc_mesh_bytes memory;pocket_proc_mesh_memory(&memory);
+    kobako_proc_mesh_bytes memory;kobako_proc_mesh_memory(&memory);
     printf("SKIN_JS_HOST rows=%u direct=%d frames=240 warm_evaluate_alloc=%zu submit_present_alloc=%zu guest_frame_peak=%zu requested_live=%zu requested_peak=%zu C_oracle_cold=%zu C_oracle_arena=%zu snapshot_capacity=%zu workspace=%zu\n",strip_rows,g_ksn_image_rows,warm_evaluate,warm_submit,guest_peak,live_bytes,peak_bytes,blob_bytes,arena_bytes,memory.candidate+memory.committed,memory.workspace);
     JS_FreeValue(ctx,evaluate);JS_FreeValue(ctx,draw);JS_FreeValue(ctx,tick_fn);
-    pocket_shiki_api_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);shiki_heap_end();host_capabilities_clear();CHECK(!live_bytes&&!live_blocks);
+    kobako_shiki_api_reset();kobako_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);shiki_heap_end();host_capabilities_clear();CHECK(!live_bytes&&!live_blocks);
     puts("SKIN_JS_PASS strict_buffers invalid_atomic SAB_detached_alignment immutable_input busy_recovery independent_actor cold_restore IO_retry pending_source_disposal cyclic_GC release0");return 0;
 }

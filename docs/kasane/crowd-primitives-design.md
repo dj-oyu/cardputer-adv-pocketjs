@@ -41,7 +41,7 @@
 
 ```text
 JS  draw(handle, [入力 8 個])
- │   pocket_shiki_frame.c draw_impl: 入力を float にして plan を始める
+ │   kobako_shiki_frame.c draw_impl: 入力を float にして plan を始める
  ▼
 VM  ksn_proc_begin: 命令 (12 B × ≤64) を VM にコピー → 検証 (valid_program)
     ksn_proc_step を 1 命令ずつ: レジスタ 16 本 (float32)、入力 8、ループ深さ 8
@@ -63,7 +63,7 @@ commit → 表示  8 行の帯ごとに: 下地を塗る → ksn_proc_render_ban
     実測: 帯に入る 1 回 0.35 µs、横の 1 画素 0.143 µs（34 サイクル）
 ```
 
-登録時: `ksn_proc_analyze`（読み書きするレジスタ、効果、失敗の種類、基本ブロック、ループ）→ 隣り合う算術 2 命令の融合の印（`ksn_proc_plan.c`）。組み込みの plan は命令が flash の表にあり、heap には 40 + 4 × 引数 B だけ（[flash-plan.md](flash-plan.md)）。フレームを歩く側は、帯描画のほかに damage の計算（`pocket_shiki_frame.c` `frame_damage`、`ksn_shiki_surface.c`）がある。
+登録時: `ksn_proc_analyze`（読み書きするレジスタ、効果、失敗の種類、基本ブロック、ループ）→ 隣り合う算術 2 命令の融合の印（`ksn_proc_plan.c`）。組み込みの plan は命令が flash の表にあり、heap には 40 + 4 × 引数 B だけ（[flash-plan.md](flash-plan.md)）。フレームを歩く側は、帯描画のほかに damage の計算（`kobako_shiki_frame.c` `frame_damage`、`ksn_shiki_surface.c`）がある。
 
 費用を決めているのは、VM 側が「ステップ 0.45 µs・SIN +1 µs・emit 約 1 µs・draw の固定費 50〜110 µs」、帯側が「エントリの数（0.85 µs/本/フレーム）と帯ごとの固定費 17 µs」（[derby-background-cost.md](derby-background-cost.md) の実測）。観客 1 人を点や線で描くかぎり、人数ぶんのステップと emit が要る。**新しいプリミティブの狙いは、人数に比例する部分を VM から帯ラスタライザの画素ループへ移すこと**（1 画素 10〜25 命令、VM の 1 ステップは約 108 サイクル）。
 
@@ -113,7 +113,7 @@ commit → 表示  8 行の帯ごとに: 下地を塗る → ksn_proc_render_ban
 
 - 命令の符号化（12 B: op, dst, a, b, value, color）は変えない。flash の plan の表（`ksn_proc_rom_entry`、引数のパッチ先 A／VALUE／COLOR）もそのまま使える（タイル番号は COLOR、周期は VALUE のパッチで登録の引数にできる）。
 - **`plan_js.mjs`／`kir.mjs` は未対応**（試作の plan は手書きの IR）。出荷には、組み込み関数 `pline(x, y, pattern, a, b, u0, u1, w0, w1, N)` と `tile(x, y, id, u0, v0, u1, v1, frame)`、連続するレジスタ 7 本・5 本の割り当て（`CUBIC` の r0..r7 固定の処理が近い）、文字形式の文字 2 つ、float32 の参照実行（`reference()`）への追加が要る。
-- `pocket_shiki_frame.c` の `entry()` は op を値として通すので、API の形は変わらない。`capabilities` の `limits` に出す値も変わらない。
+- `kobako_shiki_frame.c` の `entry()` は op を値として通すので、API の形は変わらない。`capabilities` の `limits` に出す値も変わらない。
 
 ### 2.5 変更するファイル（試作で触ったもの = 出荷でも触るもの）
 
@@ -122,7 +122,7 @@ commit → 表示  8 行の帯ごとに: 下地を塗る → ksn_proc_render_ban
 | `main/ui/kasane/ksn_shiki_frame.h` | op 2 つ、2 エントリの符号化、`ext`、`ksn_proc_frame_next`、タイルの型 | +80 |
 | `main/ui/kasane/ksn_shiki_frame.c` | 検証、emit、step の 2 命令、帯描画（模様線・タイル・拡張フレームのループ） | +270 |
 | `main/ui/kasane/ksn_proc_analysis.c` | 2 命令の読み・効果・失敗 | +17 |
-| `main/ui/kasane/ksn_shiki_surface.c`、`main/pocket/pocket_shiki_frame.c` | フレームを歩く 3 箇所を `ksn_proc_frame_next` に、`ext` の引き継ぎ | +20 |
+| `main/ui/kasane/ksn_shiki_surface.c`、`main/kobako/kobako_shiki_frame.c` | フレームを歩く 3 箇所を `ksn_proc_frame_next` に、`ext` の引き継ぎ | +20 |
 | `tools/kasane_contract/test_proc_crowd_prim.c`、`run.sh` | host 契約試験 | 新規 440 |
 | `tools/games/pancost/crowd_prim.mjs`、`crowd_prim_host.c`、`crowd_look.mjs`（export だけ） | 画・GIF・費用の表 | 新規 420 |
 | （出荷で追加）`tools/kasane_ir/{kir,plan_js,emit_rom_plans}.mjs`、タイル表の生成器と CMake、`apps/derby/*`、`KASANE_BGCOST_TRACE` の集計 | コンパイラ、資源、アプリ | 未着手 |
@@ -143,7 +143,7 @@ commit → 表示  8 行の帯ごとに: 下地を塗る → ksn_proc_render_ban
 ## 3. host 試作と試験
 
 - 旧試作 `test_proc_crowd_prim.c`（現行の採用範囲の試験は [`test_proc_pattern_line.c`](../../tools/kasane_contract/test_proc_pattern_line.c)、§7 の比較表を参照）（`run.sh` に登録、ASan/UBSan と `-O2`）: 模様線の全画素を試験の側の式と照合（周期 5・24、端数の刻み、右から左、画面外のクリップ）、8 方向の斜線が同じ形の `LINE` と同じ画素になること、3 画素ごとの模様が歩数どおりであること、ノイズ（密度 0 は何も描かない）、遠近の弦（割り目の座標と u）、タイル（1:1、拡大、逆向きの角、コマの床と巻き、キー色）、**1・7・8・9 行の帯を下から描いても全画面と一致**、重ね順（線 → タイル → 線 → 模様線）、歩く側が見る形と費用、surface の damage、途中で切れたフレームの拒否、上限（512 個、ラスタ）、値域の拒否 約 20 通り、解析と融合した plan の一致。
-- 既存: 手続き描画の host 試験 13 本、`run_pocket_proc_qjs.py`、`run_pocket_proc_limits_qjs.py`、`tools/games/run_derby.py`、`tools/kasane_ir/check_equivalence.py` が通る。`run_pocket_proc_rom_qjs.py` は **6098c13 のままでも同じ箇所で落ちる**（`register: invalid instruction entry`。この変更とは無関係、WSL の環境で確認）。
+- 既存: 手続き描画の host 試験 13 本、`run_kobako_proc_qjs.py`、`run_kobako_proc_limits_qjs.py`、`tools/games/run_derby.py`、`tools/kasane_ir/check_equivalence.py` が通る。`run_kobako_proc_rom_qjs.py` は **6098c13 のままでも同じ箇所で落ちる**（`register: invalid instruction entry`。この変更とは無関係、WSL の環境で確認）。
 - 画の経路の検査（`crowd_prim.mjs check`）: 今の観客の 96 枚（12 場面 × 8 フレーム）が、`crowd_look.mjs` の実行器の線分を帯ラスタライザと同じ歩き方で描いたものと全画素一致。なお `crowd_look.mjs` 自身の描画は Bresenham の同点の扱いが逆で、86 枚で斜線が 1 px 違う（以前の資料の画の側の差で、実機の画ではない）。
 
 ```sh
@@ -240,7 +240,7 @@ wsl bash -lc 'cd <worktree> && node tools/games/pancost/crowd_prim.mjs table|she
 4. **入力 8 個・レジスタ 16 本の縁。** 首振りのタイルの plan は両方を使い切り、コマを u に詰めている。観客以外の用途では足りなくなる（入力を 9 個以上にするのは VM の構造体と解析に波及する）。
 5. **タイルのラスタ費用の換算（1/4）と上限 8,192。** 推定に基づく定数で、画面いっぱいの矩形（32,400 画素）が 1 draw に入る。帯の時間の上限として妥当かは実測で決める。
 6. **ゲスト heap（余裕 約 1.3 KB）と評価のピーク（余裕 約 22.7 KB）。** JS 側の差し替えの大きさは見積もっていない。
-7. `KASANE_BGCOST_TRACE` の集計（`pocket_proc_bgcost_take`）は拡張エントリを知らない（診断ビルドだけ）。
+7. `KASANE_BGCOST_TRACE` の集計（`kobako_proc_bgcost_take`）は拡張エントリを知らない（診断ビルドだけ）。
 
 ## 確信の低い点
 
@@ -248,7 +248,7 @@ wsl bash -lc 'cd <worktree> && node tools/games/pancost/crowd_prim.mjs table|she
 - 首振りの模様線は、弦の中が線形で、弦の継ぎ目は座標を丸めた点。カメラが動くと継ぎ目の位置が 1 px 揺れうる（GIF に出ている範囲のもの）。体の線は 1 px のままで、近景でも太らない。
 - 首振りの 800 m は強制した場面（実際は横見になる位置）。大型画面は描いていない。
 - タイルの絵・色・密度（座席の埋まる割合 39%／64%／88%）、ノイズの密度（35%／55%／74%）、コマの速さ（2 フレームごと）は仮の値。
-- `run_pocket_proc_rom_qjs.py` が元から落ちている原因は調べていない。
+- `run_kobako_proc_rom_qjs.py` が元から落ちている原因は調べていない。
 
 ## ユーザーが決めること
 

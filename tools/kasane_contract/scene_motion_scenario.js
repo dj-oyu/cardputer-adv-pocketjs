@@ -9,7 +9,7 @@ var rotation=[0,0,0],position=[0,0,0],rootPosition=[0,0,0];
 var rotationPatch={rotation},positionPatch={position},rootPatch={position:rootPosition};
 var statsOut={},modelOut={};
 var keys=new Float32Array([0,0,0,10,.4,-6,35,-.6,9,80,0,0]);
-function openModel(){M=pocket.ayatsuri.modelOpen(fixture);fixture=null;}
+function openModel(){M=kobako.ayatsuri.modelOpen(fixture);fixture=null;}
 function attemptScene(){return AyatsuriNative.scene({model:M});}
 function setupScenes(){
   S=AyatsuriNative.scene({model:M,camera:{center:[120,67]},light:{direction:[0,0,1]}});

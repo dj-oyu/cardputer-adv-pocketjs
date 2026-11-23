@@ -1,7 +1,7 @@
-// What one pocket.kasane.shiki.draw() costs, split into its stages
+// What one kobako.kasane.shiki.draw() costs, split into its stages
 // (docs/kasane/shiki-bundle.md): README.md. Started by the USB broker.
 'use strict';
-const S = pocket.kasane.shiki, D = pocket.shikiDebug, N = 200, ROUNDS = 5;
+const S = kobako.kasane.shiki, D = kobako.shikiDebug, N = 200, ROUNDS = 5;
 const asm = (inputs, code) => {
   const head = 12 + inputs.length, body = (head + 3) & ~3;
   const b = new Uint8Array(body + 12 * code.length), dv = new DataView(b.buffer);

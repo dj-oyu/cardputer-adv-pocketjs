@@ -5,7 +5,7 @@
 // 1000-step chain never run.
 //
 // Two things are being fixed in place. The queue is discarded UNRUN --
-// JS_FreeRuntime's own behaviour, and the same choice pocket_api_reset()
+// JS_FreeRuntime's own behaviour, and the same choice kobako_api_reset()
 // already makes for in-flight promises -- and "#info jobs_dropped=1" records
 // it as the single bit it can honestly be (counting would need a hook inside
 // JS_EnqueueJob, which is a VM change L1 may not make).

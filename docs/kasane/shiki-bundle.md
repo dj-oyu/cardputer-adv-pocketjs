@@ -4,14 +4,14 @@
 
 ## 1. 動機と、今わかっていること
 
-- 束ねの動機は「draw 1 回の固定費 約 100〜115 µs」（[derby-background-cost.md](derby-background-cost.md) §3）。これは**旧 API**（`pocket.kasane.procedural`、float の plan）で、算術 769 ステップの draw の時間をステップ数に回帰した**切片（推定）**で、直接は測っていない。
+- 束ねの動機は「draw 1 回の固定費 約 100〜115 µs」（[derby-background-cost.md](derby-background-cost.md) §3）。これは**旧 API**（`kobako.kasane.procedural`、float の plan）で、算術 769 ステップの draw の時間をステップ数に回帰した**切片（推定）**で、直接は測っていない。
 - 一方、Shiki のエンジンの中の空の draw（`SET` 1 つ）は**実測 264 サイクル＝1.1 µs**（[shiki-jit.md](shiki-jit.md) §24.6.3）。したがって、Shiki の draw の固定費の大半は、あるとすればエンジンの外（JS からネイティブへの呼び出し、引数の検査と入力の読み取り、handle とフレームの準備、フレームへの複写）にある。
 - **束ねの設計の前に、Shiki の draw 1 回の費用を段ごとに実測する**（§2）。固定費が小さければ、束ねは要らないか、別の形になる。
 
 ## 2. 測り方
 
 - アプリ `local.drawcost`（[apps/shikitest/draw_cost.js](../../apps/shikitest/draw_cost.js)、[README](../../apps/shikitest/README.md)）。JS のループ 200 回を `shikiDebug.cycles()` で包み、5 回の最小。
-- 同時に `shikiDebug.drawProfile()` がネイティブの段を積む（`main/pocket/pocket_shiki_frame.h` の `pocket_shiki_draw_prof`）: `parse`（`js_draw` の引数の検査と入力の読み取り）、`lookup`（handle・フレーム・作業領域の準備）、`engine`（`ksn_shiki_draw`）、`copy`（線分をフレームへ）。`total` からこれらを引いた残りが、JS の呼び出しの費用（QuickJS の関数呼び出し、引数の受け渡し）。
+- 同時に `shikiDebug.drawProfile()` がネイティブの段を積む（`main/kobako/kobako_shiki_frame.h` の `kobako_shiki_draw_prof`）: `parse`（`js_draw` の引数の検査と入力の読み取り）、`lookup`（handle・フレーム・作業領域の準備）、`engine`（`ksn_shiki_draw`）、`copy`（線分をフレームへ）。`total` からこれらを引いた残りが、JS の呼び出しの費用（QuickJS の関数呼び出し、引数の受け渡し）。
 - 対照: 空の JS 関数（`loop`）、ネイティブの空呼び出し（`native`、`cycles()` 自身）。
 
 ## 3. 結果（実機、`94aea92`、2026-11-01）
@@ -85,7 +85,7 @@
 草案 `674c3c9` の独立レビュー（重大 2・中 5・軽微 4）。
 
 - **重大 R1**: `maxDrawsPerCall` の根拠（「止められない時間を抑える」）が数で成り立っていなかった。1 draw は最大 10,000 ステップで 約 3〜4.5 ms（推定）、256 回で 約 0.8〜1.2 s で、ターンの期限 250 ms の 4 倍を超えうる。→ いったん draw と draw の間でセッションの監視を確かめる形にした（`c33603c`）が、draw 1 回 約 600 サイクルに対して監視（時刻の読み出しと比較）の費用が見合わないとして、**ユーザーの判断で外した**（2026-11-01）。止められない時間は最悪 約 1 秒（推定）と仕様に明記し、256 は長さの上限のまま。起きるのは停止への応答の遅れとそのフレームの遅れで、致命的ではない（ユーザーの判断）。
-- **重大 R2**: 誤りの `index` が common-api §4 の `PocketError` の契約の外だった → common-api §4 に「面の仕様は読み取り専用のプロパティを足してよい」を足し、`outcome` は失敗した draw 自身を指すと書いた。
+- **重大 R2**: 誤りの `index` が common-api §4 の `KobakoError` の契約の外だった → common-api §4 に「面の仕様は読み取り専用のプロパティを足してよい」を足し、`outcome` は失敗した draw 自身を指すと書いた。
 - **中**: `stride = 0` なら `inputs` を検査しない（M1）、登録されていない handle は範囲外の値も含めて `CLOSED`（`draw()` とはここが違う。M2）、draw `i` の handle と入力は draw `i` の始めに読む＝データ領域の窓を入力にすると前の draw の書き込みが映る（M3）、`Int32Array` の Q 形式は `handles[i]` の式の宣言による（M4）、検査の順と空の `handles`（M5）。
 - **軽微**: 内部名 `BADINPUT` を §4.8 の 7 の誤りに、失敗した draw の `operation` は `"kasane.shiki.draw"`、§10 に別名・範囲外の handle・割り込み・実機の最悪時間の要件。
 - 確認（host）: JS API の自己試験 50 件（整数の経路を変換と比べる、窓を入力にした別名、範囲外の handle、空の `handles`）。
@@ -100,4 +100,4 @@
 
 ## 10. native の呼び出し元（2026-11-13）
 
-`pocket.derby` が 1 本ずつ出す draw（`pocket_proc_draw_fixed`）の入口の内訳と、それを軽くした変更は [shiki-draw-entry.md](shiki-draw-entry.md)。
+`kobako.derby` が 1 本ずつ出す draw（`kobako_proc_draw_fixed`）の入口の内訳と、それを軽くした変更は [shiki-draw-entry.md](shiki-draw-entry.md)。

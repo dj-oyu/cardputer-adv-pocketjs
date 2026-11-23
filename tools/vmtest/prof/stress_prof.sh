@@ -22,26 +22,26 @@ import pathlib, sys
 data = pathlib.Path('apps/pet/assets/pets-compact.bin').read_bytes()
 pathlib.Path(sys.argv[1]).write_text('static const uint8_t pet_test_data[] = {' + ','.join(map(str, data)) + '};\n')
 PY
-DEFS="-DQUICKJS_NG_BUILD -D_GNU_SOURCE ${PROF_DEFS:-}"
+DEFS="-DQUICKJS_NG_BUILD -DQJS_LEAN_LAZY_BUILTINS=1 -D_GNU_SOURCE ${PROF_DEFS:-}"
 for f in dtoa libregexp libunicode quickjs quickjs-vm; do
-  gcc -std=gnu11 -c -O2 -g -w $F $DEFS -I "$QJS" -I components/pocketjs_guest/include \
+  gcc -std=gnu11 -c -O2 -g -w $F $DEFS -I "$QJS" -I components/kobako_guest/include \
       "$QJS/$f.c" -o "$CACHE/$f.o"
 done
 gcc -std=gnu11 -O2 -g -w $F -fno-omit-frame-pointer \
-  -I "$QJS" -I tools/hostshim -I main -I main/pocket -I main/ui -I main/ui/kasane \
+  -I "$QJS" -I tools/hostshim -I main -I main/kobako -I main/ui -I main/ui/kasane \
   -I main/text -I main/hal -I "$CACHE" \
-  tools/test_stress_app.c tools/hostshim/pocket_api_stub.c tools/hostshim/pocket_surface_stubs.c \
+  tools/test_stress_app.c tools/hostshim/kobako_api_stub.c tools/hostshim/kobako_surface_stubs.c \
   main/text/ksn_font.c tools/hostshim/jpfont.c \
   main/pet/ksn_pet.c main/pet/pet_pixels.c tools/hostshim/ksn_pet_builtin.c \
-  main/pocket/pocket_clock_source.c main/pocket/pocket_clock.c main/pocket/pocket_av_playback_source.c \
-  main/pocket/pocket_av_output_source.c main/pocket/app_view_assets.c main/pocket/app_view_provider.c \
-  main/apps/player/app_music_view.c main/pocket/app_legacy_presenter.c main/pocket/pocket_kasane.c main/pocket/pocket_shiki_frame.c main/ayatsuri/ayatsuri_model.c main/ayatsuri/ayatsuri_visibility.c main/ayatsuri/compact_opaque.c main/ui/kasane/ksn_mesh_depth.c main/pocket/shiki_heap.c main/ui/kasane/ksn_shiki.c \
-  main/ui/kasane/ksn_shiki_frame.c main/pocket/pocket_shiki_api.c "$CACHE/stress_shiki_rom.c" \
-  main/pocket/pocket_memory.c \
+  main/kobako/kobako_clock_source.c main/kobako/kobako_clock.c main/kobako/kobako_av_playback_source.c \
+  main/kobako/kobako_av_output_source.c main/kobako/app_view_assets.c main/kobako/app_view_provider.c \
+  main/apps/player/app_music_view.c main/kobako/app_legacy_presenter.c main/kobako/kobako_kasane.c main/kobako/kobako_shiki_frame.c main/ayatsuri/ayatsuri_model.c main/ayatsuri/ayatsuri_visibility.c main/ayatsuri/compact_opaque.c main/ui/kasane/ksn_mesh_depth.c main/kobako/shiki_heap.c main/ui/kasane/ksn_shiki.c \
+  main/ui/kasane/ksn_shiki_frame.c main/kobako/kobako_shiki_api.c "$CACHE/stress_shiki_rom.c" \
+  main/kobako/kobako_memory.c \
   main/ui/kasane/ksn_runtime.c main/ui/kasane/ksn_schema.c main/ui/kasane/ksn_schema_session.c \
   main/ui/kasane/ksn_source.c main/ui/kasane/ksn_source_pool.c main/ui/kasane/ksn_source_pool_adapter.c \
   main/ui/kasane/ksn_core.c main/ui/kasane/ksn_view.c main/ui/kasane/ksn_cache.c main/ui/kasane/ksn_modal.c \
-  main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/pocket/app_notice.c \
+  main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/kobako/app_notice.c \
   "$CACHE/dtoa.o" "$CACHE/libregexp.o" "$CACHE/libunicode.o" "$CACHE/quickjs.o" "$CACHE/quickjs-vm.o" \
   -Wl,--wrap=calloc -Wl,--wrap=free -lm -o "$OUT"
 VALGRIND_LIB=$VG/usr/libexec/valgrind "$VG/usr/bin/valgrind" --tool=callgrind \

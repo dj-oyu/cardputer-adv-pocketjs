@@ -1,7 +1,7 @@
-"""Play BIG WAVE on the host: real QuickJS, real pocket.kasane, real input.keys.
+"""Play BIG WAVE on the host: real QuickJS, real kobako.kasane, real input.keys.
 
 Builds tools/games/test_big_wave_host.c with the source list of
-tools/build_kasane_test.sh plus pocket.input (keymap, keystate) and the Q14
+tools/build_kasane_test.sh plus kobako.input (keymap, keystate) and the Q14
 point PIE model, runs the scripted play and the key-driven bot (see the C
 file's header for what is checked), and with --sheet writes the preview contact
 sheet (docs/apps/big-wave-preview.png by default) from the labelled frames.
@@ -41,8 +41,8 @@ def shiki_rom() -> str:
 # API and the built-in table BIG WAVE registers by name). The tools that build
 # copies of the harness (tools/vmtest/mixed_numeric, tools/experiments,
 # run_bigwave_curl.py) link this list too.
-EXTRA = ["main/pocket/pocket_input.c", "main/hal/keymap.c", "main/hal/keystate.c",
-         "main/pocket/pocket_shiki_api.c", shiki_rom()]
+EXTRA = ["main/kobako/kobako_input.c", "main/hal/keymap.c", "main/hal/keystate.c",
+         "main/kobako/kobako_shiki_api.c", shiki_rom()]
 SHEET = ["02_ride", "04_turn_left", "05_turn_right", "06_air", "07_tube", "08_wipeout_lip",
          "10_wipeout_splash", "14_dusk", "15_clear"]
 
@@ -51,7 +51,7 @@ def kasane_sources() -> list[str]:
     """The .c list of tools/build_kasane_test.sh (minus its default test)."""
     text = (ROOT / "tools/build_kasane_test.sh").read_text()
     return [s for s in re.findall(r"(?:main|tools)/[\w/]+\.c", text)
-            if not s.startswith("tools/test_pocket_kasane")]
+            if not s.startswith("tools/test_kobako_kasane")]
 
 
 def build(m32: bool) -> Path:
@@ -69,21 +69,21 @@ def build(m32: bool) -> Path:
     pets = (ROOT / "apps/pet/assets/pets-compact.bin").read_bytes()
     (cache / "kasane_pet_test_data.h").write_text(
         "static const uint8_t pet_test_data[] = {" + ",".join(map(str, pets)) + "};\n")
-    api = (ROOT / "main/pocket/pocket_api.c").read_text()
+    api = (ROOT / "main/kobako/kobako_api.c").read_text()
     a = api.index("// ----------------------------------------------------------- subscriptions")
     b = api.index("// ------------------------------------------------------- async completions", a)
-    (cache / "pocket_sub_impl.inc").write_text(api[a:b])
-    defs = ["-DQUICKJS_NG_BUILD", "-D_GNU_SOURCE"]
+    (cache / "kobako_sub_impl.inc").write_text(api[a:b])
+    defs = ["-DQUICKJS_NG_BUILD", "-DQJS_LEAN_LAZY_BUILTINS=1", "-D_GNU_SOURCE"]
     objects = []
     for name in ("dtoa", "libregexp", "libunicode", "quickjs", "quickjs-vm"):
         obj, src = cache / f"{name}.o", ROOT / QJS / f"{name}.c"
         if not obj.exists() or src.stat().st_mtime > obj.stat().st_mtime:
             subprocess.run(["gcc", "-std=gnu11", "-c", "-O1", "-g", "-w", *flags, *defs, "-I", QJS,
-                            "-I", "components/pocketjs_guest/include", str(src), "-o", str(obj)],
+                            "-I", "components/kobako_guest/include", str(src), "-o", str(obj)],
                            cwd=ROOT, check=True)
         objects.append(str(obj))
     binary = cache / "test-big-wave"
-    includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/pocket", "main/ui",
+    includes = [f"-I{d}" for d in (QJS, "tools/hostshim", "main", "main/kobako", "main/ui",
                                    "main/ui/kasane", "main/text", "main/hal", str(cache))]
     subprocess.run(["gcc", "-std=gnu11", "-O1", "-g", *flags, *os.environ.get("KSN_HOST_CFLAGS", "").split(), "-DKSN_PROC_POINTS_PIE_MODEL",
                     "-Wall", "-Wextra", "-Werror", "-fno-omit-frame-pointer", *includes,

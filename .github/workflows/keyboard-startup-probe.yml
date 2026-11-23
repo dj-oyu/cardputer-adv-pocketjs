@@ -62,31 +62,34 @@ jobs:
           assert not any(k+'=y' in c for k in ('CONFIG_SECURE_BOOT','CONFIG_SECURE_BOOT_V2_ENABLED','CONFIG_SECURE_FLASH_ENC_ENABLED','CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK'))
           # main enables ROM intrinsics by default; the only sdkconfig delta
           # from the previous pin is its CONFIG line and '# default:' marker.
-          # POCKET_SHIKI_MEMSTAT (a diagnostic) and POCKET_VM_QJS_PGO (the
+          # KOBAKO_SHIKI_MEMSTAT (a diagnostic) and KOBAKO_QJS_PGO (the
           # QuickJS PGO trial, docs/vm/qjs-pgo.md), both default n, are the
           # options added since this pin: their lines and '# default:' markers
           # are dropped before hashing, so the pin still holds for every other
           # line. CONFIG_ESP_SYSTEM_MEMPROT=n (sdkconfig.defaults, the Shiki
           # JIT's executable RAM, 481f7ce) moved the pin; hash from CI at 56949dc.
           # The guest-memory and two-core work (PR 131) moved it again: new
-          # options, every probe default n (POCKET_GC_STATS, HEAP_MAP, OOM_GC_PROBE,
+          # options, every probe default n (QJS_LEAN_GC_STATS, HEAP_MAP, OOM_GC_PROBE,
           # DISP_TASK, DISP_ASSERT, FRAME_BREAKDOWN, ICACHE_AB, KEY_INT_PROBE),
           # VM_GUEST_CHUNK_KB=0, VM_GUEST_ARENA_KB=64, GUEST_NATIVE_FLOOR_KB=16,
           # LCD_ISR_CORE=-1, KEY_INT_GPIO=11, and LWIP_TCPIP_TASK_STACK_SIZE
           # 3072 -> 2560 (sdkconfig.defaults). The old pin reproduces on main;
           # this one locally and in CI at 6d6c214, with nothing else changed.
-          # POCKET_VM_QJS_HOTCOLD (docs/vm/qjs-hotcold.md) is dropped the same
+          # KOBAKO_QJS_HOTCOLD (docs/vm/qjs-hotcold.md) is dropped the same
           # way as the two options above, in either state: it was default n when
           # this pin was taken and is default y since the device A/B.
-          # POCKET_NATIVE_HOTCOLD (the same layout on main/, qjs-hotcold.md
+          # KOBAKO_NATIVE_HOTCOLD (the same layout on main/, qjs-hotcold.md
           # sec.13, default y) is dropped likewise.
           # CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_DISABLE=y (sdkconfig.defaults,
           # the non-debug firmware of PR 137, docs/vm/upstream-v018.md) moved the
           # pin: the assertion choice, the three ASSERTION_LEVELs 2 -> 0 and
           # LWIP_ESP_LWIP_ASSERT. The old pin reproduces from the same tree with
           # only that defaults line removed; this one locally and in CI at d57ce0d.
+          # The kobako rename (f4eb867) renamed the options (POCKET_* -> KOBAKO_*,
+          # POCKET_VM_* -> QJS_LEAN_*) and the diagnostics menu; against main the
+          # Kconfig diff is names only. Hash from CI at 8ced5c8.
           lines=(b/'sdkconfig').read_text().splitlines(keepends=True)
-          for off in ('# CONFIG_POCKET_SHIKI_MEMSTAT is not set','# CONFIG_POCKET_VM_QJS_PGO is not set',('# CONFIG_POCKET_VM_QJS_HOTCOLD is not set','CONFIG_POCKET_VM_QJS_HOTCOLD=y'),('# CONFIG_POCKET_NATIVE_HOTCOLD is not set','CONFIG_POCKET_NATIVE_HOTCOLD=y'), '# CONFIG_POCKET_KASANE_AB is not set', '# CONFIG_POCKET_FIXED_RANDOM_SEED is not set', '# CONFIG_POCKET_SHIKI_DEBUG is not set', ('# CONFIG_POCKET_DERBY_SER_PIE is not set', 'CONFIG_POCKET_DERBY_SER_PIE=y'), '# CONFIG_POCKET_DERBY_SER_PIE_IRAM is not set', '# CONFIG_POCKET_DERBY_SER_PIE_SELFTEST is not set', '# CONFIG_POCKET_DERBY_SER_PROBE is not set', '# CONFIG_POCKET_DERBY_SER_IRAM is not set'):
+          for off in ('# CONFIG_KOBAKO_SHIKI_MEMSTAT is not set','# CONFIG_KOBAKO_QJS_PGO is not set',('# CONFIG_KOBAKO_QJS_HOTCOLD is not set','CONFIG_KOBAKO_QJS_HOTCOLD=y'),('# CONFIG_KOBAKO_NATIVE_HOTCOLD is not set','CONFIG_KOBAKO_NATIVE_HOTCOLD=y'), '# CONFIG_KOBAKO_KASANE_AB is not set', '# CONFIG_KOBAKO_FIXED_RANDOM_SEED is not set', '# CONFIG_KOBAKO_SHIKI_DEBUG is not set', ('# CONFIG_KOBAKO_DERBY_SER_PIE is not set', 'CONFIG_KOBAKO_DERBY_SER_PIE=y'), '# CONFIG_KOBAKO_DERBY_SER_PIE_IRAM is not set', '# CONFIG_KOBAKO_DERBY_SER_PIE_SELFTEST is not set', '# CONFIG_KOBAKO_DERBY_SER_PROBE is not set', '# CONFIG_KOBAKO_DERBY_SER_IRAM is not set'):
               i=next(i for i,l in enumerate(lines) if l.startswith(off))
               del lines[i]
               if i and lines[i-1].startswith('# default:'):del lines[i-1]
@@ -105,18 +108,18 @@ jobs:
               del lines[i]
               if i and lines[i-1].startswith('# default:'):del lines[i-1]
           digest=hashlib.sha256(''.join(lines).encode()).hexdigest();print('sdkconfig pin',digest)
-          assert digest=='6ee0da722e4c304186d67ad1f471ce77a109b9058ac6e5149778c1b51067d325'
+          assert digest=='367dfcf3d2eb05eaa83adc68db5a6111e9c930abf67590aa0289fd87dd9af893'
           # The partition table moved with the Companion characters: storage shrank from
           # 0x270000 to 0xC0000 and the unused tail became ay_chars (0x650000, 0x1B0000).
           # The old pin (5acbaec1...) is the table built from the previous partitions.csv;
           # this one is gen_esp32part.py on the new csv, 8 MiB, checked against the build.
           assert hashlib.sha256((b/'partition_table/partition-table.bin').read_bytes()).hexdigest()=='e41a9e40229f9e08820e778968f1521560ebfe1b067f06729c797bc6c2645183'
           cache=(b/'CMakeCache.txt').read_text().splitlines()
-          for k in ('POCKET_PROBES','POCKET_DERBY_COURSE_CACHE','POCKET_DERBY_PROJECT_BATCH','KASANE_MEGADEMO_TRACE'):
+          for k in ('KOBAKO_PROBES','KOBAKO_DERBY_COURSE_CACHE','KOBAKO_DERBY_PROJECT_BATCH','KASANE_MEGADEMO_TRACE'):
               assert k+':BOOL=OFF' in cache,k
-          elf=(b/'cardputer_pocketjs.elf').read_bytes()
+          elf=(b/'cardputer_kobako.elf').read_bytes()
           assert b'Application information:' in elf and b'KBD_PROBE' in elf
-          names=['cardputer_pocketjs.bin','cardputer_pocketjs.elf','cardputer_pocketjs.map','bootloader/bootloader.bin','partition_table/partition-table.bin','sdkconfig','CMakeCache.txt','flasher_args.json']
+          names=['cardputer_kobako.bin','cardputer_kobako.elf','cardputer_kobako.map','bootloader/bootloader.bin','partition_table/partition-table.bin','sdkconfig','CMakeCache.txt','flasher_args.json']
           images={n:dict(bytes=(b/n).stat().st_size,sha256=hashlib.sha256((b/n).read_bytes()).hexdigest()) for n in names}
           (b/'experiment.json').write_text(json.dumps(dict(source_head=os.environ['SOURCE_HEAD'],idf='6.0.1',profile='normal-product-keyboard-startup',hardware_tested=False,images=images),indent=2)+'\n')
           (b/'SHA256SUMS').write_text(''.join(v['sha256']+'  '+n+'\n' for n,v in images.items()))

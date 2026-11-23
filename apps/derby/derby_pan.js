@@ -1,6 +1,6 @@
 'use strict';
-// ---- The panning view (README "首振りカメラ"): pocket.derby holds the unit
-// (aim()) and draws the series (main/pocket/pocket_derby.c,
+// ---- The panning view (README "首振りカメラ"): kobako.derby holds the unit
+// (aim()) and draws the series (main/kobako/kobako_derby.c,
 // docs/apps/derby-ser-native.md); the JS gives depths and steps (Q16 m).
 // Nothing deeper than 75 m past the leader (150 at LIGHT); posts 4 px apart
 // at least (8 with the screen in view).

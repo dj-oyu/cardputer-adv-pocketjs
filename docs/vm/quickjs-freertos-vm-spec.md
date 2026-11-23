@@ -1,6 +1,6 @@
 # QuickJS / FreeRTOS 実行基盤・移動可能スタック仕様案
 
-状態: **L0・L1・L2 は実装・実機検証まで完了した（L0/L1 は 2026-09-12、L2 は 2026-09-23。タグ `vm-L0` / `vm-L1` / `vm-L2`、§4）。L3a（動かせる）は実装・検証済みだが既定 n、L4 はホストで2方式を試してどちらも不採用。実機の G12（2026-09-25）でも出荷アプリの確保失敗は 0、セグメントを退かして救えた失敗も 0 だったので、**L3/L4 は閉じた**（§8・§9、[vm-L3-results.md](vm-L3-results.md) §15）。L5 は未着手。** 本書のレベルは段階的な到達点であり、全レベルの実装を前提としない。出荷ビルドの既定は L2c まで有効（`CONFIG_POCKET_VM_YIELD=y`）で、TCO と FAIR は互換性の判断として無効のまま。
+状態: **L0・L1・L2 は実装・実機検証まで完了した（L0/L1 は 2026-09-12、L2 は 2026-09-23。タグ `vm-L0` / `vm-L1` / `vm-L2`、§4）。L3a（動かせる）は実装・検証済みだが既定 n、L4 はホストで2方式を試してどちらも不採用。実機の G12（2026-09-25）でも出荷アプリの確保失敗は 0、セグメントを退かして救えた失敗も 0 だったので、**L3/L4 は閉じた**（§8・§9、[vm-L3-results.md](vm-L3-results.md) §15）。L5 は未着手。** 本書のレベルは段階的な到達点であり、全レベルの実装を前提としない。出荷ビルドの既定は L2c まで有効（`CONFIG_QJS_LEAN_YIELD=y`）で、TCO と FAIR は互換性の判断として無効のまま。
 
 本書は着手前の設計案として書かれたが、L0・L1 の実装と実測で確定・訂正された事項は該当する節（主に §5・§6・§7・§11・§12）の本文に直接反映してある。**節番号は実装後も変わっていない**ので、コード中のコメントが指す `sec.N` はそのまま現在の内容を指す。実測の詳細と生データは [vm-L0-report.md](vm-L0-report.md)・[vm-L1-design.md](vm-L1-design.md)・[vm-L1-report.md](vm-L1-report.md) を参照。VM の改造とは独立に見つかった未修正の不具合は [backlog.md](backlog.md) に一本化した。
 
@@ -16,15 +16,15 @@ Cardputer ADV の quickjs-ng を対象に、デバイス完了通知と JS 実�
 
 ## 2. 現状と用語
 
-quickjs-ng 0.14.0 と pocketjs_guest / pocketjs_ui_qjs は `components/` にリポジトリ取り込み済みで（取り込みコミットは各コンポーネントの履歴の先頭、改変はそれ以降の差分）、以下の構造になっている。上流を更新する際は取り込みコミットの上に新しい版を置き、改変をその上に載せ直す（`vm-branching.md`）。
+quickjs-ng 0.14.0 と kobako_guest / kobako_ui_qjs は `components/` にリポジトリ取り込み済みで（取り込みコミットは各コンポーネントの履歴の先頭、改変はそれ以降の差分）、以下の構造になっている。上流を更新する際は取り込みコミットの上に新しい版を置き、改変をその上に載せ直す（`vm-branching.md`）。
 
 - `main/app_session.c`: 各 pump で完了を取り込み、JS のフレーム処理を経て描画する。L1 のジョブ境界予算・継続ターン・起床の骨格もここにある（§6）。
-- `main/pocket/pocket_api.c`: 完了済み要求の resolve / reject を JS 所有側で呼ぶ。完了記録の公開後に起床通知を送る（§6）。
-- `components/pocketjs_guest/src/guest.c`: `drain_jobs()` が `vm_sched_drain()`（§6）経由で `JS_ExecutePendingJob()` をジョブ境界の予算が尽きるかキューが空になるまで呼ぶ。
+- `main/kobako/kobako_api.c`: 完了済み要求の resolve / reject を JS 所有側で呼ぶ。完了記録の公開後に起床通知を送る（§6）。
+- `components/kobako_guest/src/guest.c`: `drain_jobs()` が `vm_sched_drain()`（§6）経由で `JS_ExecutePendingJob()` をジョブ境界の予算が尽きるかキューが空になるまで呼ぶ。
 - `components/quickjs-ng/quickjs-ng/quickjs.c`: runtime ごとの FIFO ジョブキュー、C 再帰による通常の JS 呼び出し、`alloca()` による通常フレームの値領域、ヒープ上の async/generator 保存状態を持つ。**quickjs.c 自体は L1 の改造で 1 バイトも変更していない**（§6 完了条件）。
 - `JSVarRef` は生存フレーム内の値を生ポインタで参照し、変数の寿命がフレームから分離すると自身の保持領域へ切り替える。
 
-L0 の計測プローブ（`CONFIG_POCKET_VM_PROBE`、既定 n）と、それが使うワークロード・採取スクリプトは常設で本線にある（§5）。ホスト側の判定基盤 `tools/vmtest/`（写した `vmrun` と L1 以降はリンクする `vm_sched.c`／`vm_clock.c`、コーパス、Test262 部分集合）も同様に常設（§12）。
+L0 の計測プローブ（`CONFIG_QJS_LEAN_PROBE`、既定 n）と、それが使うワークロード・採取スクリプトは常設で本線にある（§5）。ホスト側の判定基盤 `tools/vmtest/`（写した `vmrun` と L1 以降はリンクする `vm_sched.c`／`vm_clock.c`、コーパス、Test262 部分集合）も同様に常設（§12）。
 
 | 用語 | 本書での意味 |
 | --- | --- |
@@ -81,7 +81,7 @@ Go の G（保存する処理）、M（OS スレッド）、P（実行権と管�
 ### 実装状況
 
 - ワークロード 6 本（USB の `A`〜`F`）と競合条件 5 種（`P`〜`W`、`apps/vmprobe/condition.js` が UI・音声・Wi-Fi を実物の面で動かす）、採取スクリプト `tools/vm_l0_capture.py` は常設。ホームの一覧には出ない。
-- `CONFIG_POCKET_VM_PROBE`（既定 n）が無効なビルドは、プローブ関連コードを 1 バイトも含まない（シンボル表一致・DIRAM ±0 を確認済み）。有効時のみ `VMPROBE_*` 系マクロと `apps/vmprobe/` が effective になる。
+- `CONFIG_QJS_LEAN_PROBE`（既定 n）が無効なビルドは、プローブ関連コードを 1 バイトも含まない（シンボル表一致・DIRAM ±0 を確認済み）。有効時のみ `VMPROBE_*` 系マクロと `apps/vmprobe/` が effective になる。
 - ホスト側の判定基盤は `tools/vmtest/`（`guest.c` を写した `vmrun`、コーパス、Test262 部分集合、時間の基準、確保トレース）。§12 の「ホスト上の差分実行」を実際に担っている。
 
 ### 実装範囲
@@ -136,18 +136,18 @@ Go の G（保存する処理）、M（OS スレッド）、P（実行権と管�
 | `VM_JOB_BACKSTOP` | 64 件 | 時計が壊れていても止まる天井 |
 | `VM_RUNAWAY_US` / `VM_RUNAWAY_JOBS` | 250,000 µs / 100,000 件 | **暴走検知は「1 本の論理 drain が drain の中で使った時間」で見る。** ターン数で数える初版は、正直な長い連鎖（2,500 段）を旧ガードの半分以下で殺した |
 | 時計 | `esp_timer_get_time()` | CCOUNT は 33 倍安いが、drain の実測差はノイズ以下。コア固定に永久に縛られ `CONFIG_PM_ENABLE` で壊れるので採らない |
-| `ui_task` の配置 | core 1 に固定（`CONFIG_POCKET_UI_TASK_CORE`、既定 1） | core 0 は ESP-IDF が Wi-Fi ドライバを固定する側で、LCD 転送 +0.6 ms、JS 実行 5.6〜12.6%、JS 実行中の HTTP +15.6% 悪化する |
+| `ui_task` の配置 | core 1 に固定（`CONFIG_KOBAKO_UI_TASK_CORE`、既定 1） | core 0 は ESP-IDF が Wi-Fi ドライバを固定する側で、LCD 転送 +0.6 ms、JS 実行 5.6〜12.6%、JS 実行中の HTTP +15.6% 悪化する |
 | 表示周期の課金 | `frame()` 1 回につき 1 回だけ、その周期の開始時刻から | 継続ターンにも 33 ms を課金すると、継続を要するアプリの `frame()` が 28.2 → 7.7 fps に落ちる（JS の仕事量は不変で、増えるのは待ち時間だけ） |
 | 未処理 rejection の報告 | キューが空になる境界でのみ | 予算の切れ目で判定すると、同じ連鎖の後ろにある `catch` を未処理と誤報する |
-| 継続の優先順位 | 新しい外部イベントより優先（互換モード、出荷既定） | 順序互換のため。代償は継続を要するアプリの完了遅延（音声競合下で legacy の 1.9 倍、audio 条件）。順序互換を捨てる「公平モード」は build 時スイッチ `CONFIG_POCKET_VM_FAIR`（既定 n、off では 1 バイトも生成しない）として存在し、該当ワークロードで完了遅延を 3〜7 倍縮める。**2026-09-23 に実機で測り直したところ、現在の負荷と出荷アプリではこの利益は再現せず、費用だけが見えた**（[vm-L2-results.md](vm-L2-results.md) §9.2）。既定 n で確定 |
+| 継続の優先順位 | 新しい外部イベントより優先（互換モード、出荷既定） | 順序互換のため。代償は継続を要するアプリの完了遅延（音声競合下で legacy の 1.9 倍、audio 条件）。順序互換を捨てる「公平モード」は build 時スイッチ `CONFIG_KOBAKO_VM_FAIR`（既定 n、off では 1 バイトも生成しない）として存在し、該当ワークロードで完了遅延を 3〜7 倍縮める。**2026-09-23 に実機で測り直したところ、現在の負荷と出荷アプリではこの利益は再現せず、費用だけが見えた**（[vm-L2-results.md](vm-L2-results.md) §9.2）。既定 n で確定 |
 
 構造体の実測値は §11 の仮置きと一致した（`JSValue` 8 B、`JSStackFrame` 48 B、`JSVarRef` 32 B）。「未処理ジョブもイベントも無い場合だけ待機する」は文字どおりには満たしていない — `ui_task` は 30 fps のフレームループで、専用タスク化（推定 DIRAM +24〜32 KiB）は L0 の RAM 上限を超えるため見送った。フレーム待ちを完了通知で早く抜ける形に留めている（backlog.md）。
 
 ## 7. L2: 移動しない VM スタックと中断・再開
 
-**完了（2026-09-23、tag `vm-L2`）。** 出荷ビルドは `CONFIG_POCKET_VM_YIELD=y` で、安全地点での中断・再開が
+**完了（2026-09-23、tag `vm-L2`）。** 出荷ビルドは `CONFIG_QJS_LEAN_YIELD=y` で、安全地点での中断・再開が
 既定の経路である。値段は実測で JS ターン +0.05ms・Flash +3,784B・静的 DRAM +32B、持ち込んだ frame ガードは
-実アプリの最悪フレーム（競合条件下 12.90ms）に対し 250ms。`CONFIG_POCKET_VM_TCO` と `CONFIG_POCKET_VM_FAIR` は
+実アプリの最悪フレーム（競合条件下 12.90ms）に対し 250ms。`CONFIG_KOBAKO_VM_TCO` と `CONFIG_KOBAKO_VM_FAIR` は
 既定 n のまま — 前者は `Error.stack` と再帰の予算境界、後者は JS から観測できるジョブ順序を変えるため、
 値段ではなく互換性の判断として残す（[vm-L2-results.md](vm-L2-results.md) §9）。
 段階ごとの実測と関所の結果は同 §3〜§9、設計と決定表 D1〜D43 は [vm-L2-design.md](vm-L2-design.md)。

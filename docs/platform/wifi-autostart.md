@@ -7,7 +7,7 @@
 - **常駐のオンラインは既定にしない。** 入れたのは「一過性の自動時刻同期」と「参照カウント付きの接続サービス（ネイティブのみ）」の2層。
 - **自動同期**: 資格情報が保存されていて、設定 AUTO TIME SYNC が ON（既定）のとき、**ホーム画面が10秒アイドル**になったら別タスクで 接続 → SNTP → 無線停止。成功したら次は12時間後。失敗は 1分・5分・30分で再試行し、**連続4回の失敗でそのブートは打ち切る**（設定を ON にし直すと再開）。1ブートの試行は最大32回（アプリへ譲った中断は数えない。§11.3）。
 - **アプリが優先**: 「アプリ・別画面・オーバーレイ・診断が動いている間は始めない」と「ゲストを作る直前に中断して、無線を止め、ヒープが戻るまで待つ」の**両方**を入れた（§3.3）。ゲームがホームの無線と同時に存在することはない。
-- **接続サービス** `net_service_acquire(reason)` / `net_service_release(reason)`。時刻同期が最初の利用者。`pocket.net` の lease とは**無線を共有しない**が、**所有者付きの停止**にして、互いのリンクを止められないようにした（§4）。
+- **接続サービス** `net_service_acquire(reason)` / `net_service_release(reason)`。時刻同期が最初の利用者。`kobako.net` の lease とは**無線を共有しない**が、**所有者付きの停止**にして、互いのリンクを止められないようにした（§4）。
 - 静的 DIRAM は **+224 B**（計算: クリーンな HEAD とのマップ比較）。**動的なコストの本体は実機で測る**（ピーク、そして「一度無線を上げると約4.8KiB戻らない」がブートごとに必ず払われるようになる点、§5.3）。
 
 ## 2. 読んだ事実と、依頼文との食い違い
@@ -16,11 +16,11 @@
 | --- | --- | --- |
 | 同期済みの印 | `solar_time_set_synchronized(true)` | 手動同期は `wifi_time.c` から `sys_clock_set_synchronized(true)` を直接呼ぶ。`solar_time_set_synchronized()` はそれへの転送だけ（`scene/solar_time.c:7`）。自動同期も `sys_clock_set_synchronized(true)` を**成功時に1か所だけ**呼ぶ。`false` はどこからも呼ばない（従来どおり） |
 | リンクの失敗 | — | 接続に失敗したリンクは `WIFI_TIME_LINK_DOWN` で終わる。`FAILED` は「一度上がって失われた」だけ。サービスは「保持者がいるのにリンクが無い」を FAILED と読む |
-| 停止の競合 | — | `pocket_net_reset()` / `pocket_net_suspend()` は、自分の lease が無くても `wifi_time_link_state()==CONNECTING` なら `wifi_time_link_stop()` を呼んでいた。リンクの持ち主が増えると、**アプリの終了が他人のリンクを止める**。今回、所有者付きにした（§4） |
+| 停止の競合 | — | `kobako_net_reset()` / `kobako_net_suspend()` は、自分の lease が無くても `wifi_time_link_state()==CONNECTING` なら `wifi_time_link_stop()` を呼んでいた。リンクの持ち主が増えると、**アプリの終了が他人のリンクを止める**。今回、所有者付きにした（§4） |
 | 接続中の停止 | — | `associate_and_wait()` は15秒を1回で待っており、接続中に停止を頼んでも最大15秒止まらなかった。100 ms 刻みに分け、リンクの停止要求を見るようにした（手動同期の振る舞いは不変） |
-| Wi-Fi 画面の表示 | — | リンクはアドレスを得ると `status.state=OK` を書き、Wi-Fi 画面はそれを「CLOCK SET FROM NTP」と表示する。**`pocket.net` の lease の後でも同じ表示になる既存の誤表示**（今回は直していない）。自動同期は SNTP の結果で status を上書きし、中断したときは IDLE に戻す（`wifi_time_status_settle()`） |
+| Wi-Fi 画面の表示 | — | リンクはアドレスを得ると `status.state=OK` を書き、Wi-Fi 画面はそれを「CLOCK SET FROM NTP」と表示する。**`kobako.net` の lease の後でも同じ表示になる既存の誤表示**（今回は直していない）。自動同期は SNTP の結果で status を上書きし、中断したときは IDLE に戻す（`wifi_time_status_settle()`） |
 
-## 3. 自動時刻同期（`main/pocket/net_autosync.c`）
+## 3. 自動時刻同期（`main/kobako/net_autosync.c`）
 
 ### 3.1 いつ始まるか
 
@@ -83,7 +83,7 @@ DESK CLOCK は時計なので、同期の恩恵が最も大きい。オーバー
 
 `min_free` は `heap_caps_monitor_local_minimum_free_size_start/stop` による**その試行の区間の本当の最小値**で、§5 のピークを実機で置き換えるための数字。MEGADEMO のトレースビルドが同じ監視を使っているときは「(shared monitor)」と付く。
 
-## 4. 接続サービス（`main/pocket/net_service.c`）
+## 4. 接続サービス（`main/kobako/net_service.c`）
 
 ```c
 void net_service_init(void);                       // ブート時、1回
@@ -101,9 +101,9 @@ void net_service_pump(void);                       // UI タスクが毎フレ�
 - 保持者がいるのにリンクが失敗したら FAILED。再試行はしない（保持者が acquire し直すと起こし直す）。最後の release の直後、まだ後片付け中のリンクへの acquire は `ESP_ERR_INVALID_STATE`（すぐ消えるリンクに数えない）。
 - 通知は `net_service_pump()` を回すタスク（UI タスク）の上で呼ぶ。リンクのタスクからは他人のコードを呼ばない。
 
-**`pocket.net` の lease との整合**: `wifi_time.c` のリンクに所有者（`WIFI_TIME_LINK_APP` / `WIFI_TIME_LINK_SERVICE`）を付け、`wifi_time_link_stop_for(owner)` は**所有者のときだけ**効くようにした。`pocket_net.c` は1行も変えていない — 従来の `wifi_time_link_start()` / `wifi_time_link_stop()` が APP 所有の版になっただけ。両者は従来どおり1つのロック（`running`）で排他で、後から来た方が `ESP_ERR_INVALID_STATE`（アプリには BUSY、retryable）を受ける。今回の自動同期はゲストを作る前に必ず譲るので、両者が同時に存在することは無い。**共有（アプリの lease がサービスのリンクに相乗りすること）は今回やっていない**。必要になるのは §7 の常駐サービスで、要る変更は §7.3。
+**`kobako.net` の lease との整合**: `wifi_time.c` のリンクに所有者（`WIFI_TIME_LINK_APP` / `WIFI_TIME_LINK_SERVICE`）を付け、`wifi_time_link_stop_for(owner)` は**所有者のときだけ**効くようにした。`kobako_net.c` は1行も変えていない — 従来の `wifi_time_link_start()` / `wifi_time_link_stop()` が APP 所有の版になっただけ。両者は従来どおり1つのロック（`running`）で排他で、後から来た方が `ESP_ERR_INVALID_STATE`（アプリには BUSY、retryable）を受ける。今回の自動同期はゲストを作る前に必ず譲るので、両者が同時に存在することは無い。**共有（アプリの lease がサービスのリンクに相乗りすること）は今回やっていない**。必要になるのは §7 の常駐サービスで、要る変更は §7.3。
 
-`pocket.net` への副作用は1つ: 接続中の `acquire` を取り消したとき（cancel・timeout・アプリ終了）、従来は接続を最後まで待ってから（最大15 s）落ちたが、今は100 ms 刻みで止まり、状態は DOWN で終わる。アプリから見える結果（取り消されたという reject）は同じ。
+`kobako.net` への副作用は1つ: 接続中の `acquire` を取り消したとき（cancel・timeout・アプリ終了）、従来は接続を最後まで待ってから（最大15 s）落ちたが、今は100 ms 刻みで止まり、状態は DOWN で終わる。アプリから見える結果（取り消されたという reject）は同じ。
 
 ## 5. ヒープ
 
@@ -111,7 +111,7 @@ void net_service_pump(void);                       // UI タスクが毎フレ�
 
 | 内訳 | 値 | 種別 |
 | --- | --- | --- |
-| `esp_wifi_init` | 27,192 B | 実測（2026-09-07、`pocket_net.c` の `NET_RADIO_MIN_FREE` のコメント） |
+| `esp_wifi_init` | 27,192 B | 実測（2026-09-07、`kobako_net.c` の `NET_RADIO_MIN_FREE` のコメント） |
 | netif とイベントループ | 約21,000 B | 実測（同上） |
 | 無線を上げる床 `NET_RADIO_MIN_FREE` | 56 KiB | 実測に余裕を足した値（同上） |
 | 接続・DHCP・SNTP 中の動的 RX/TX バッファ、タスク stack（`autosync` 4 KiB、`wifi_link` 4 KiB） | 8 KiB 程度 | **推定**。stack の 8 KiB は計算、動的バッファは未測定 |
@@ -122,7 +122,7 @@ void net_service_pump(void);                       // UI タスクが毎フレ�
 
 ### 5.2 無線を止めた後
 
-`esp_wifi_stop`/`deinit`/netif 破棄の後に戻る量は、既存の記録では「一度無線を起動すると約4.8KiB は戻らない」（`linkRetainedBytes` 4,915 B、実測、`pocket_net.c`。`esp_netif_deinit()` が IDF v6.0.1 で `ESP_ERR_NOT_SUPPORTED` のため、LWIP のタスクと緩衝が残る）。
+`esp_wifi_stop`/`deinit`/netif 破棄の後に戻る量は、既存の記録では「一度無線を起動すると約4.8KiB は戻らない」（`linkRetainedBytes` 4,915 B、実測、`kobako_net.c`。`esp_netif_deinit()` が IDF v6.0.1 で `ESP_ERR_NOT_SUPPORTED` のため、LWIP のタスクと緩衝が残る）。
 
 ### 5.3 この変更で**毎ブート**払うようになるもの
 
@@ -153,11 +153,11 @@ void net_service_pump(void);                       // UI タスクが毎フレ�
 | A. 起動前に明け渡す | 前景の起動時にサービスのリンクを一時停止（保持者には FAILED/一時停止を通知）、前景の終了後に張り直す | 今回の自動同期と同じ規則で、ゲームは常に無線無しの heap を得る | 背景サービスは前景アプリの間オフライン。再接続に数秒（未測定）と、張り直しのたびの一過性ピーク |
 | B. 宣言量で判定 | マニフェストに前景アプリの必要量（または前回実行の実測ピーク）を持ち、「空き−必要量 ≥ 余裕」なら共存、足りなければ A に落ちる | 軽いアプリの間は接続が続く | 必要量の宣言・記録の仕組みが要る。見積もりが外れると前景が START_FAILED |
 | C. 起動を断る | 常時接続の保持者がいる間、重いアプリは NO ROOM | 実装が最小 | ゲームが起動できない。利用者から見て原因が遠い |
-| D. 能力で分ける | `pocket.net` を使うアプリ（lease を共有する）だけ共存、それ以外は A | ネットを使うアプリには自然 | lease の共有（§7.3）が前提 |
+| D. 能力で分ける | `kobako.net` を使うアプリ（lease を共有する）だけ共存、それ以外は A | ネットを使うアプリには自然 | lease の共有（§7.3）が前提 |
 
 ### 7.3 共有に要る変更（D か B を選ぶ場合）
 
-`pocket_net.c` の lease をサービスの保持者にする: `js_acquire` → `net_service_acquire("app")`、`lease_release` → `net_service_release("app")`、失敗経路での release、`LINK_LOST` をサービスの FAILED として両方へ通知、サービス側の再接続の方針（バックオフ）。`wifi_time.c` のリンクはサービスだけが持つ形になる。
+`kobako_net.c` の lease をサービスの保持者にする: `js_acquire` → `net_service_acquire("app")`、`lease_release` → `net_service_release("app")`、失敗経路での release、`LINK_LOST` をサービスの FAILED として両方へ通知、サービス側の再接続の方針（バックオフ）。`wifi_time.c` のリンクはサービスだけが持つ形になる。
 
 ### 7.4 判断に要る実測
 
@@ -172,13 +172,13 @@ void net_service_pump(void);                       // UI タスクが毎フレ�
 
 | | 項目 | 手順 | 見るもの |
 | --- | --- | --- | --- |
-| (a) | ホームの空き（自動同期あり／なし） | ブート→ホームで放置。AUTO TIME SYNC ON と OFF で1回ずつ。`python tools/memlog.py --map build_wifiauto/cardputer_pocketjs.map --port COM3 --check` をブート直後・`AUTOSYNC_DONE` の直後・5分後に | ON の `idle_free` が OFF より約4.8KiB 低いか（§5.2）。`AUTOSYNC_DONE free_after` |
+| (a) | ホームの空き（自動同期あり／なし） | ブート→ホームで放置。AUTO TIME SYNC ON と OFF で1回ずつ。`python tools/memlog.py --map build_wifiauto/cardputer_kobako.map --port COM3 --check` をブート直後・`AUTOSYNC_DONE` の直後・5分後に | ON の `idle_free` が OFF より約4.8KiB 低いか（§5.2）。`AUTOSYNC_DONE free_after` |
 | (b) | 同期中のピークと戻る量 | (a) の ON のログ | `AUTOSYNC_START free=` → `min_free=` の差（一過性ピーク）、`RADIO_INIT cost=`、`free_after` と `free_before` の差（戻らない量）。`AUTOSYNC_MIN_FREE` の推定8KiBをここで置き換える |
 | (c) | 同期中・同期後のゲーム | ①同期後（`AUTOSYNC_DONE ok`）に DERBY WATCH・BIG WAVE・MEGADEMO を起動。②`AUTOSYNC_START` を見てすぐ各ゲームを起動。③DESK CLOCK を ON にして放置し同期させる | `START_FAILED`・OOM・`OVERLAY_STOPPED FAULTED` の有無、各ゲームのネイティブ最小空きと最大連続領域（DERBY は `internalFreeBytes`、MEGADEMO は起動時の10KB）。OFF のブートとの差 |
 | (d) | 中断の挙動と遅延 | `AUTOSYNC_START` を見てから、接続中（1〜2 s 後）と SNTP 中（`LINK_UP` の直後）に Enter でアプリを起動。Wi-Fi 行で Enter も | `AUTOSYNC_YIELD app waited_ms=`（`LATE` が出ないこと）、続く `AUTOSYNC_DONE aborted`、アプリの `RUN ... ESP_OK`。1分後の再試行 |
 | (e) | ブート時間 | ブートから `HOME_READY` までと、最初の10 s の fps（`PERF`）を ON/OFF で | 同期はアイドル10 s 後に始まるので `HOME_READY` までは不変のはず。同期中の `PERF` の低下 |
-| (f) | 時刻が合うこと | 同期前後で `pocket.clock` か SOLAR SAIL の表示、または `SYNC`/`AUTOSYNC_DONE ok` 直後の `date` 相当 | UTC が合う。`sys_clock` の synchronized が立つ（天体が DEMO から実時刻に切り替わる） |
-| (g) | 乱数の観察 | 同期の前と後に `pocket.random.seed()` を数回 | 値が毎回違うか（RF 有効の副産物の観察。設計の根拠にはしない、common-api.md §8.1） |
+| (f) | 時刻が合うこと | 同期前後で `kobako.clock` か SOLAR SAIL の表示、または `SYNC`/`AUTOSYNC_DONE ok` 直後の `date` 相当 | UTC が合う。`sys_clock` の synchronized が立つ（天体が DEMO から実時刻に切り替わる） |
+| (g) | 乱数の観察 | 同期の前と後に `kobako.random.seed()` を数回 | 値が毎回違うか（RF 有効の副産物の観察。設計の根拠にはしない、common-api.md §8.1） |
 
 あわせて `python tools/test_settings.py --port COM3`（行6の反転と復元、`finally` の7回上）と `python tools/capture_home.py --port COM3` を流す。
 
@@ -280,7 +280,7 @@ void net_service_pump(void);                       // UI タスクが毎フレ�
 | (k) | 眠っているアプリ | アプリ（IMU CAL など再開フックのあるもの）を Back で眠らせ、ホームで10 s 以上放置 | `AUTOSYNC_DEFERRED app_asleep <id>` が1分おき。無線が上がらない。アプリを再開または別アプリで退去した後、次の1分で `AUTOSYNC_START` |
 | (l) | yield の分布と LATE | §8 (d) を繰り返す | `AUTOSYNC_YIELD app waited_ms=` の分布、`LATE` の有無、yield 中のホームの停止時間。LATE が出たら直後に Wi-Fi 画面へ入り、見出しが `WAITING FOR RADIO` → `SCANNING` になり `SCAN BUSY` が出ないこと |
 | (m) | 中断の後の間隔 | ホームで10 s 放置 → `AUTOSYNC_START` を見てアプリ起動、を繰り返す | `AUTOSYNC_DONE aborted` の後の `AUTOSYNC_NEXT in_s=300`。何度繰り返しても `AUTOSYNC_GAVE_UP` が出ない |
-| (n) | 空きの記録 | 同期の前後 | `python tools/memlog.py --map build_wifireview/cardputer_pocketjs.map --port COM3 --check` を同期の前と `AUTOSYNC_DONE` の後で |
+| (n) | 空きの記録 | 同期の前後 | `python tools/memlog.py --map build_wifireview/cardputer_kobako.map --port COM3 --check` を同期の前と `AUTOSYNC_DONE` の後で |
 
 ### 11.7 確信の低い点
 
@@ -303,12 +303,12 @@ void net_service_pump(void);                       // UI タスクが毎フレ�
   - 最大使用量（確保 − 空き）: `input` 1,240 B（`INPUT_STACK_HWM free=808`）、`wifi` 2,308 B（link のみ。`free=764`）、`timesync` 1,472 B（自動のみ。`free=576`）。**余裕は 576〜808 B で、2,048 B の `timesync` が一番薄い。** `wifi` は旧計測（link 約2,000 B）より約300 B 増えた（ワーカーのループとログの分と推定）。
   - 自動同期は通った: `AUTOSYNC_START free=155668` → `LINK_UP` → `AUTOSYNC_DONE ok ms=3713 min_free=113520 free_after=149972`。旧実測の `min_free=104548` より約9 KB 高い（スタックを RTC に移した分と、タスクを作らない分。内訳は未分離）。ホームは約 30 fps のまま（`PERF fps=29.6〜30.2`）。
   - `AUTOSYNC_DONE ok stage=assoc` の `stage=assoc` は、後始末の disconnect イベントが status の stage を上書きするため（この変更の前からある。OK の判定には影響しない）。
-- **未検証**: 手動 sync・scan（設定画面と `pocket.net`）— ブローカーはキー入力を送れず、この環境からは動かせなかった。`wifi` の scan 側と `timesync` の手動側の HWM、`input` のキー入力の遅れ、`test_settings.py` / `capture_home.py`。人が設定画面で sync と scan を1回ずつ押し、`SYNC_DONE` / `SCAN_DONE` / `WIFI_STACK_HWM` / `SYNC_STACK_HWM` を見る。
+- **未検証**: 手動 sync・scan（設定画面と `kobako.net`）— ブローカーはキー入力を送れず、この環境からは動かせなかった。`wifi` の scan 側と `timesync` の手動側の HWM、`input` のキー入力の遅れ、`test_settings.py` / `capture_home.py`。人が設定画面で sync と scan を1回ずつ押し、`SYNC_DONE` / `SCAN_DONE` / `WIFI_STACK_HWM` / `SYNC_STACK_HWM` を見る。
 - `AUTOSYNC_DONE ok` の直後でも PERF の `clock=DEMO` は変わらなかった。この表示がいつ実時刻に切り替わるかは未確認（自動同期の経路はこの変更で変えていない）。
 
 ## 14. RTC FAST を命令の置き場にできるか（実測、2026-11-06、`f9d9934` のプローブビルド。再現するならこのコミットを使う）
 
-測定用のプローブ（`CONFIG_POCKET_FETCH_PROBE`。測定後に除去した。コードはコミット `ab03f25` にある）が、同じ中身のコード（`add` の並び 512 命令＝1,536 B と、32 B ごとに 1 ラインずつ別のラインへ飛ぶ 48 ライン）を IRAM・RTC FAST・flash から走らせて時間を測る。ブート直後、割り込み禁止、他のタスクなし。3 回の繰り返しは全項目同じ値。**実測（実機）。**
+測定用のプローブ（`CONFIG_KOBAKO_FETCH_PROBE`。測定後に除去した。コードはコミット `ab03f25` にある）が、同じ中身のコード（`add` の並び 512 命令＝1,536 B と、32 B ごとに 1 ラインずつ別のラインへ飛ぶ 48 ライン）を IRAM・RTC FAST・flash から走らせて時間を測る。ブート直後、割り込み禁止、他のタスクなし。3 回の繰り返しは全項目同じ値。**実測（実機）。**
 
 | 場所 | 並び（サイクル／命令） | 飛び（サイクル／命令） | flash のミス（サイクル／ライン） |
 | --- | --- | --- | --- |

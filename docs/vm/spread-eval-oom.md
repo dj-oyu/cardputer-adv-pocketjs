@@ -41,12 +41,12 @@ it->idx = idx;
 
 今は正しいが、インライン展開が変われば同じ消え方をしうる（今回の行も、上流で長く動いていたコード）。**判断はユーザー**: (1) 6 箇所の型を合わせる（各1語）、(2) quickjs.c から `-Wno-incompatible-pointer-types` を外して、以後の混入をビルドで止める、(3) quickjs.c だけ `-fno-strict-aliasing`（網羅的だが、インタプリタの速度への影響は未測定）。
 
-## 3. 再現アプリ（`POCKET_HEAPPROBE`、既定 OFF）
+## 3. 再現アプリ（`KOBAKO_HEAPPROBE`、既定 OFF）
 
 `apps/heapprobe/heapprobe.js` の `//@ 名前` ごとに別のソース。ホームで USB `Q<番号>[,<上限>]\n` を送ると、メニューのアプリと同じ `begin_run` の経路で新しいゲストに評価され、`HEAPPROBE before/eval ... used=` と `HEAPPROBE_MU`（`JS_ComputeMemoryUsage` の種別）がログに出る。`tools/heapprobe_device.py` が全変種を回し（`--only`、`--limit`）、`--bisect N` で「評価できる最小のヒープ上限」（評価のピークを実機の課金で測ったもの）を二分探索する。通常の image には何も入らない（map に `heapprobe` の記号が無いことを確認）。
 
 ```powershell
-idf.py -B build_hp -DPOCKET_HEAPPROBE=ON build
+idf.py -B build_hp -DKOBAKO_HEAPPROBE=ON build
 idf.py -B build_hp -p COM3 flash
 python tools\heapprobe_device.py --port COM3
 ```

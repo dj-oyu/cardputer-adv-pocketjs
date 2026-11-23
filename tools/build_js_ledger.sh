@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds tools/test_js_ledger.c against the real quickjs-ng. Same cached-object
-# trick as tools/build_pocket_text_test.sh: the vendor code is not sanitized,
+# trick as tools/build_kobako_text_test.sh: the vendor code is not sanitized,
 # the file under test is.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -13,7 +13,7 @@ mkdir -p "$CACHE"
 for f in dtoa libregexp libunicode quickjs quickjs-vm; do
   if [ ! -f "$CACHE/$f.o" ] || [ "$QJS/$f.c" -nt "$CACHE/$f.o" ] \
      || [ -n "$(find "$QJS" -name '*.h' -newer "$CACHE/$f.o" -print -quit)" ]; then
-    gcc -c -O1 -g -w -DQUICKJS_NG_BUILD -D_GNU_SOURCE -I "$QJS" -I components/pocketjs_guest/include \
+    gcc -c -O1 -g -w -DQUICKJS_NG_BUILD -DQJS_LEAN_LAZY_BUILTINS=1 -D_GNU_SOURCE -I "$QJS" -I components/kobako_guest/include \
       "$QJS/$f.c" -o "$CACHE/$f.o"
   fi
 done

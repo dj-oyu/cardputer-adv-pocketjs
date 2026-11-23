@@ -20,7 +20,7 @@ const tx = {
   image: options => {resource = options.resource;},
 };
 const context = {
-  pocket: {
+  kobako: {
     input: {onAction: callback => {onAction = callback;}},
     kasane: {
       video: {

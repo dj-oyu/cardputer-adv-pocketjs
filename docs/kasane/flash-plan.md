@@ -1,6 +1,6 @@
 # 組み込みアプリの plan を flash に置き、名前で登録する（q33）
 
-2026-10-01、ブランチ `vm/flash-plan`（`vm/main` 806b10b から）。[js-to-ir.md](js-to-ir.md) §4 B の設計を具体化し、native（`pocket_shiki_frame.c`・`ksn_proc_plan.*`・`ksn_procedural.*`）と表の生成器を実装して host で検証した。**firmware への表の組み込み（CMake・`make_app_chunks.py`）と DERBY の移行はしていない**（q34 の実機測定の後の別作業、§8）。`apps/` は変えていない。実機は使っていない。
+2026-10-01、ブランチ `vm/flash-plan`（`vm/main` 806b10b から）。[js-to-ir.md](js-to-ir.md) §4 B の設計を具体化し、native（`kobako_shiki_frame.c`・`ksn_proc_plan.*`・`ksn_procedural.*`）と表の生成器を実装して host で検証した。**firmware への表の組み込み（CMake・`make_app_chunks.py`）と DERBY の移行はしていない**（q34 の実機測定の後の別作業、§8）。`apps/` は変えていない。実機は使っていない。
 
 **2026-10-01 追記（ブランチ `vm/rom-plans`、`vm/main` 806b10b から。首振り（段階 3）は含まない）: §2 の組み込みと DERBY の 14 本の移行を実装し、実機で測った（§10）。**
 
@@ -10,7 +10,7 @@
 
 ## 結論
 
-- **API**: `pocket.kasane.procedural.register('derby.crowd', args, points?)`。第 1 引数が文字列なら組み込みの表を引き、配列なら今までの経路（バイト単位で不変）。`args` は plan 関数が宣言した引数の数ちょうど（無ければ `undefined`/`null`/`[]`）。
+- **API**: `kobako.kasane.procedural.register('derby.crowd', args, points?)`。第 1 引数が文字列なら組み込みの表を引き、配列なら今までの経路（バイト単位で不変）。`args` は plan 関数が宣言した引数の数ちょうど（無ければ `undefined`/`null`/`[]`）。
 - **native の常駐**: 1 本 **40 + 4 × 引数 B**（Xtensa、`_Static_assert` で固定、ビルド確認）。命令は表（flash）に残り、`draw()` のたびに VM の自前の写し（`vm->owned_code`、今もここへ写している）へ写してから引数を当てて検証する。DERBY の同時 25 本（host 実測、3 段階とも）で **9,936 → 1,244 B（−8.7 KB、推定）**。
 - **ゲスト**: `derby_prog.js` を id 形（`T` の値が `'derby.rail'` の文字列、復号器なし）にすると、評価後・評価のピークとも **−3,108 B**（host m32 実測）。`T` ごと無くす形（`load()` が `'derby.' + n` で名前を作る）なら評価後 **−5,676 B**・ピーク **−4,204 B**（同）。依頼時の見込み −5.5 KB は後者の評価後に相当する。
 - **出力**: DERBY の 13 本（捕獲した入力と摂動、12,971 ベクトル）と点列の `nil` で、配列登録と名前登録の VM の状態・全線分（端点・色・順序）・ラスタ step が全件一致（ASan/UBSan、スカラーと偽 PIE の 2 通り）。名前登録も融合の経路を通る（参照経路への fallback 0 回を数えて確認）。
@@ -29,7 +29,7 @@ const q = H.register(rows, points);                                  // 今ま�
 | 第 1 引数が文字列 | 表を引く。引数は 1〜3 個（名前、引数、点列）。4 個以上は `INVALID_ARGUMENT` |
 | 第 1 引数がそれ以外 | 今の配列の経路。コードは点列の読みを関数に括り出しただけで、判定・順序・確保は同じ |
 
-誤りはすべて `PocketError`、`outcome: not_applied`。**種類の順は配列の経路と同じ**（呼び方の形 → スロット上限 → 値 → program）:
+誤りはすべて `KobakoError`、`outcome: not_applied`。**種類の順は配列の経路と同じ**（呼び方の形 → スロット上限 → 値 → program）:
 
 | 条件 | code | message |
 | --- | --- | --- |
@@ -44,7 +44,7 @@ const q = H.register(rows, points);                                  // 今ま�
 | 引数を当てた program を解析が拒む（例: `REPEAT $0` に 0） | INVALID_ARGUMENT | `invalid procedural program`（同） |
 | 点列 | 配列の経路と同じ（`point allocation failed` / `invalid typed point batch`） | |
 
-- **名前の名前空間**: `アプリのディレクトリ名.plan 名`（`apps/derby` の `@plan crowd` → `derby.crowd`）。生成器が表全体で重複を拒む（ビルド時）。**実行中のアプリが自分の名前空間しか使えない、という強制はしない**: plan は描くだけの関数で capability を持たず、他のアプリの plan を描けても害が無い。強制するには `pocket_shiki_frame.c` が実行中のアプリの id を知る必要があり、その配線に見合う利益が無い。
+- **名前の名前空間**: `アプリのディレクトリ名.plan 名`（`apps/derby` の `@plan crowd` → `derby.crowd`）。生成器が表全体で重複を拒む（ビルド時）。**実行中のアプリが自分の名前空間しか使えない、という強制はしない**: plan は描くだけの関数で capability を持たず、他のアプリの plan を描けても害が無い。強制するには `kobako_shiki_frame.c` が実行中のアプリの id を知る必要があり、その配線に見合う利益が無い。
 - **配列の経路より厳しい点（意図的）**: 使わない引数も有限の数でなければならない。配列の経路では `prog()` が使わない引数を読まないので、文字列でも通っていた。名前の経路は引数を float で保つので、数でないものは受け取れない。
 - **feature-test は足さない**: 組み込みの名前は firmware と同じビルドで作ったアプリだけが使う（§2）。SD やエディタのプログラムは配列の経路のまま。`capabilities` に出すのは、SD のアプリが組み込み plan を使いたくなったときに決める（CLAUDE.md の「実装した面だけ true」の規則に合わせ、実装した今なら出せる）。
 
@@ -65,14 +65,14 @@ node tools/kasane_ir/emit_rom_plans.mjs OUT.c derby=apps/derby/derby_prog.js [ap
 
 1. **アプリの選択**: `@planDecoder` の印に `rom` を付けたアプリ（`/** @planDecoder rom */`）だけを flash 形にする。`make_app_chunks.py` がそれを見て、そのアプリの `@plan` チャンクを `APP_CHUNK_ROM`（アプリ id と元ファイルの組）に入れ、`APP_CHUNK_LOWER` の変換を `lower_plans.mjs --ids APP --file`（`--file` に `--ids` を通す小改修）にする。印の無いアプリは今の詰めた形のまま。1 つのアプリが両方の形を持つことは configure で拒む。
 2. **CMake**: `add_custom_command(OUTPUT build/generated/ksn_proc_rom_plans.c COMMAND node emit_rom_plans.mjs OUT app=src ... DEPENDS 元ファイル emit_rom_plans.mjs plan_js.mjs kir.mjs pack.mjs)`、`target_sources` に追加。`APP_CHUNK_ROM` が空なら `make_app_chunks.py` が空の表（`count 0`）を Python で直接書く（**Node は今と同じく `@plan` があるときだけ要る**）。
-3. **登録**: `app_session.c` がゲストの生成前に 1 度 `pocket_proc_rom_plans(ksn_proc_rom_plans, ksn_proc_rom_plans_count)` を呼ぶ（`reset()` は表を保つ。呼ばなければ全部の名前が未知）。extern の宣言を `ksn_proc_plan.h` に足す。
+3. **登録**: `app_session.c` がゲストの生成前に 1 度 `kobako_proc_rom_plans(ksn_proc_rom_plans, ksn_proc_rom_plans_count)` を呼ぶ（`reset()` は表を保つ。呼ばなければ全部の名前が未知）。extern の宣言を `ksn_proc_plan.h` に足す。
 4. **host**: `tools/games/run_derby.py` の `lower()` が同じ `--ids` の変換を通し、`test_derby_host.c` が表をリンクして設定する。その oracle（`js_cap_reg` は行の配列を読む）は、名前と引数から表の行を組み立てる形に直す。
 
 **実装での違い**:
 
 - `lower_plans.mjs --rom APP` は `--ids` と別の形にした: plan を `'APP.name'` の文字列に置き換えず、plan と復号器を消し、空になったオブジェクトリテラル（DERBY の `const T = {};`）も消す（§6.2 の「`T` なし」の形）。アプリは `'derby.' + 名前` で登録する。ディレクトリの変換（`run_derby.py` の `lower()`）は印を見て自分で `--rom` にする。印と変換の形が合わなければ止まる。
 - `APP_CHUNK_LOWER` は `元 生成物 形` の 3 つ組（`packed` か `rom:APP`）、表は `APP_CHUNK_ROM`（`APP=元`）から `emit_rom_plans.mjs` が `build/generated/ksn_proc_rom_plans.c` に書く。rom のアプリが無ければ `make_app_chunks.py` が空の表 `ksn_proc_rom_plans_none.c` を書き、`APP_CHUNK_ROM_C` がどちらかを指す（Node は今までどおり `@plan` があるときだけ要る）。
-- host の `test_derby_host.c` の oracle は、名前の登録では表の命令に引数を当てた行（`ksn_proc_apply_binding`）を配列の経路と同じ解析と検査に通す。`run_derby.py` の `build()` が同じ生成器で表を作ってリンクする。`run_pocket_proc_rom_qjs.py` は、比較相手の詰めた形を rom の印を外したコピーから作る。
+- host の `test_derby_host.c` の oracle は、名前の登録では表の命令に引数を当てた行（`ksn_proc_apply_binding`）を配列の経路と同じ解析と検査に通す。`run_derby.py` の `build()` が同じ生成器で表を作ってリンクする。`run_kobako_proc_rom_qjs.py` は、比較相手の詰めた形を rom の印を外したコピーから作る。
 - `check_equivalence.py`: crowd は q27 から手書き IR が古いので compiled 同士で比べ、JS の関数との比較（`JS REFERENCE PASS`）を実質の検査にした。`check_lowered.py` は手書き IR の時点（e9b88bc）の非 plan 部分が前提の移行時の道具で、q27 から成り立たない（直していない）。
 
 **版の管理**: アプリの JS と表は**同じビルドが同じ `@plan` 関数から作る**ので、組み込みアプリでは食い違いが起きない。ninja は両方を同じ元ファイルに依存させるので、片方だけ古くなることもない。食い違いうるのは firmware の外から入るプログラム（SD・エディタ・保存したプログラム）だけで、そのときは未知の名前（`INVALID_ARGUMENT`）か引数の数の不一致で止まる。plan の中身だけが変わり引数の数が同じ場合は検出できない。必要になったら、名前に内容のハッシュを付ける（`'derby.crowd#5f3a1c'`、名前の比較は完全一致なので native の変更は要らない。ゲストに 1 本 7 B 増える）。
@@ -111,7 +111,7 @@ typedef struct {                                                      /* heap: 4
 ```
 
 - `_Static_assert(sizeof(void *)!=4 || (sizeof==40 && offsetof(args)==40))`: 実機と m32 host で 40 B を固定（Xtensa のコンパイルと m32 の DERBY のビルドで通った）。64 bit の host はヘッダが 48 B に伸びるので、`ksn_proc_rom_plan_bytes(p)` は `max(sizeof, offsetof(args) + 4p)`。
-- 固定長・sized の plan とは別の型にした（sized の plan にポインタを足すと、配列で登録する全 plan が 4 B ずつ太る）。`pocket_shiki_frame.c` のスロットは `uint32_t handle:31, rom:1; void *plan; proc_points *points;` で、種類の 1 bit を handle の語に入れた（handle は `INT32_MAX` 以下、`register` が保証）。**スロットは 12 B のまま**（`.bss` の `slots` 384 B、ビルド確認）。
+- 固定長・sized の plan とは別の型にした（sized の plan にポインタを足すと、配列で登録する全 plan が 4 B ずつ太る）。`kobako_shiki_frame.c` のスロットは `uint32_t handle:31, rom:1; void *plan; proc_points *points;` で、種類の 1 bit を handle の語に入れた（handle は `INT32_MAX` 以下、`register` が保証）。**スロットは 12 B のまま**（`.bss` の `slots` 384 B、ビルド確認）。
 - `ksn_proc_rom_entry_valid()`: 1..64 命令、引数 8 個以下、patch が pc 順で pc・引数・欄が範囲内。`register` は名前を引いた直後にこれを呼ぶ（壊れた項目は確保の前に拒む）。
 
 ## 5. 解析・融合の印・上限の検査: 登録時に行う
@@ -162,16 +162,16 @@ host のゲーム（m32、LIGHT・MID・HEAVY）の `load()`/`drop()` に記録�
 | `main/ui/kasane/ksn_shiki_frame.h/.c` | `ksn_proc_patch`・`ksn_proc_binding`・`ksn_proc_apply_binding()`・`ksn_proc_begin_bound()`。`ksn_proc_begin_state()` は同じ内部関数の束縛なしの呼び出しになった |
 | `main/ui/kasane/ksn_proc_plan.h/.c` | `ksn_proc_rom_entry`・`ksn_proc_rom_plan` と prepare/begin/run、`rom_matches()`。`run_core()` のループを `run_loop()` に括り出した |
 | `main/ui/kasane/ksn_proc_plan_points.c` | 点列の登録と実行の rom 版 |
-| `main/pocket/pocket_shiki_frame.h/.c` | `register(name, args, points)`、`pocket_proc_rom_plans()`、スロットの種類の bit、点列の読みの括り出し（`attach_points()`、配列の経路も同じ関数を通る） |
+| `main/kobako/kobako_shiki_frame.h/.c` | `register(name, args, points)`、`kobako_proc_rom_plans()`、スロットの種類の bit、点列の読みの括り出し（`attach_points()`、配列の経路も同じ関数を通る） |
 | `tools/kasane_ir/emit_rom_plans.mjs` | 表の生成器（新規） |
 | `tools/kasane_ir/flash_plan_estimate.py` | §6 の見積もり（新規） |
-| `tools/kasane_contract/test_pocket_proc_rom_qjs.c`、`run_pocket_proc_rom_qjs.py` | §8 の試験（新規）。`run.sh` に追加 |
+| `tools/kasane_contract/test_kobako_proc_rom_qjs.c`、`run_kobako_proc_rom_qjs.py` | §8 の試験（新規）。`run.sh` に追加 |
 
-**大きさ（ビルド確認、Xtensa `-Os`）**: `pocket_shiki_frame.c` の `.text`+`.literal`+`.rodata` が 7,702 → 8,873 B（+1,171、実際のビルドの `.obj`）、`ksn_proc_plan.c` の `.text` 1,032 → 1,734（+702）、`ksn_shiki_frame.c` 2,472 → 2,820（+348）、`ksn_proc_plan_points.c` 320 → 472（+152）（後の 3 つは単独のコンパイル）。計 **約 +2.4 KB の flash**。IRAM には置いていない（リンカ断片に無い）。静的 DRAM は `rom_table`・`rom_count` の **+8 B**。DERBY の表を組み込めば flash がさらに **6,203 B**。`idf.py -B build_flashplan build` は通る（表は未リンク）。
+**大きさ（ビルド確認、Xtensa `-Os`）**: `kobako_shiki_frame.c` の `.text`+`.literal`+`.rodata` が 7,702 → 8,873 B（+1,171、実際のビルドの `.obj`）、`ksn_proc_plan.c` の `.text` 1,032 → 1,734（+702）、`ksn_shiki_frame.c` 2,472 → 2,820（+348）、`ksn_proc_plan_points.c` 320 → 472（+152）（後の 3 つは単独のコンパイル）。計 **約 +2.4 KB の flash**。IRAM には置いていない（リンカ断片に無い）。静的 DRAM は `rom_table`・`rom_count` の **+8 B**。DERBY の表を組み込めば flash がさらに **6,203 B**。`idf.py -B build_flashplan build` は通る（表は未リンク）。
 
 ## 8. 検証（host）
 
-`python3 tools/kasane_contract/run_pocket_proc_rom_qjs.py [--mutate]`（WSL、`bash -lc`。捕獲が無ければ最初に約 3 分で作る）。実際の QuickJS と、`pocket_shiki_frame.c` を取り込んだ試験（アダプタの VM・scratch・スロットを直接読む）。ASan/UBSan、スカラーと偽 PIE の 2 通り。
+`python3 tools/kasane_contract/run_kobako_proc_rom_qjs.py [--mutate]`（WSL、`bash -lc`。捕獲が無ければ最初に約 3 分で作る）。実際の QuickJS と、`kobako_shiki_frame.c` を取り込んだ試験（アダプタの VM・scratch・スロットを直接読む）。ASan/UBSan、スカラーと偽 PIE の 2 通り。
 
 1. **等価性**: DERBY の捕獲した入力（LIGHT・MID・HEAVY の台本）と摂動（check_equivalence.py と同じ `cases.json`）で、plan ごと・引数の組ごとに、**出荷しているアプリの詰めた文字列を出荷している復号器で行にして配列で登録したもの**と、**名前で登録したもの**を同じ入力で描き、JS の結果・VM の status・step・pc・レジスタ・ペン・scratch と candidate の全線分・ラスタ step を比べた。**40 登録・12,971 ベクトル（描けた 11,924、同じ形で失敗 1,047）で全件一致**。登録ごとに、名前の plan の確保がちょうど `ksn_proc_rom_plan_bytes(引数)` の 1 回であること、両者の融合の印が同じことも確認。runner の引数は捕獲に無い（`load()` が馬ごとに作る）ので、毛色と勝負服の色を与えた。
 2. **融合の経路**: 等価性の全描画で参照経路への fallback が 0 回（`--wrap=ksn_proc_run` で数えた）。同じ項目を別の引数で登録した plan で走らせた VM、1 バイト違う行から begin した VM は参照経路に落ち、結果は参照と同じ。NULL の束縛は INVALID。
@@ -180,7 +180,7 @@ host のゲーム（m32、LIGHT・MID・HEAVY）の `load()`/`drop()` に記録�
 5. **壊れた表**: 0 命令、65 命令、引数 9 個、命令なし、patch なし、patch の pc・引数・欄の範囲外、pc 順でない patch の 9 項目が、どれも**確保の前に**拒まれる（`calloc` 0 回）。正しい項目の `REPEAT $1` に 0 と 1.5 は拒否、3 は描く。
 6. **32 本**: 名前と配列を交互に 32 本、33 本目は `args` の getter を一度も呼ばずに LIMIT_EXCEEDED、確保失敗の下でも LIMIT_EXCEEDED、1 本空ければ OUT_OF_MEMORY。両方の形を 32 スロットに 600 回登録・解除して描く churn。最後に LeakSanitizer が解放漏れと二重解放を見る。
 7. **変異**（`--mutate`、それぞれ単独で外して ASan で止まることを確認）: 引数の数の検査 → heap-buffer-overflow、表の項目の命令数の検査 → スタックの溢れ（ASan の unknown-crash）、plan の確保を 4 B 少なく → heap-buffer-overflow。
-8. **既存の経路は不変**: `run.sh`（`GAMES_M32=0`）が全部通る（EXIT 0。WSL の git が worktree を読めないので、MEGADEMO の baseline を `.cache/kasane_megademo_app/proc_megademo_baseline.js` に置いた。MEGADEMO・LCD CATCH・BIG WAVE・DERBY の台本と画素ハッシュ、`run_pocket_proc_qjs.py` の 48 フレーム、`run_pocket_proc_limits_qjs.py` の既存の契約）。さらに、DERBY のコンパイル後の 13 本を `tools/kasane_ir/run_ir.c` で元の VM（806b10b）と新しい VM で走らせ、12,971 ベクトルの出力がバイト単位で同一。
+8. **既存の経路は不変**: `run.sh`（`GAMES_M32=0`）が全部通る（EXIT 0。WSL の git が worktree を読めないので、MEGADEMO の baseline を `.cache/kasane_megademo_app/proc_megademo_baseline.js` に置いた。MEGADEMO・LCD CATCH・BIG WAVE・DERBY の台本と画素ハッシュ、`run_kobako_proc_qjs.py` の 48 フレーム、`run_kobako_proc_limits_qjs.py` の既存の契約）。さらに、DERBY のコンパイル後の 13 本を `tools/kasane_ir/run_ir.c` で元の VM（806b10b）と新しい VM で走らせ、12,971 ベクトルの出力がバイト単位で同一。
 
 **既存の失敗（この変更と無関係）**: `tools/kasane_ir/check_equivalence.py` は、q27（806b10b）で crowd が市松に描く 64 命令になって以来、凍結した手書き IR（40 命令）との比較で crowd だけ不一致になり `EQUIVALENCE FAIL` で止まる（元の VM でも同じ結果）。そのため、その後ろの JS の関数との比較（`check_js.mjs`）も走っていない。手書き IR 側の crowd を q27 の形にするか、crowd を比較から外すかは別作業。
 
@@ -196,7 +196,7 @@ host のゲーム（m32、LIGHT・MID・HEAVY）の `load()`/`drop()` に記録�
 
 ## 10. 実機の結果（ブランチ `vm/rom-plans`、2026-10-01）
 
-同じ日に焼いた `vm/main` 806b10b と比べた。各 1 回。診断 image（`-DKASANE_MEGADEMO_TRACE=ON -DKASANE_BGCOST_TRACE=ON -DPOCKET_KEYTEST=ON`）を書き込んだ同じコマンドで DERBY を開き（書き込みの約 8 秒後、無線のリンクの前）、キーを押さずにデモで MID 420 秒（6 レース）、パドックで tab を 1 回押して HEAVY 250 秒（4 レース）。評価の余裕は heapprobe image（`derby` 変種、16 B 刻みの二分探索、2 回）。どちらも行番号表 OFF（ビルドごとに `-DSDKCONFIG` を分けて確認）。
+同じ日に焼いた `vm/main` 806b10b と比べた。各 1 回。診断 image（`-DKASANE_MEGADEMO_TRACE=ON -DKASANE_BGCOST_TRACE=ON -DKOBAKO_KEYTEST=ON`）を書き込んだ同じコマンドで DERBY を開き（書き込みの約 8 秒後、無線のリンクの前）、キーを押さずにデモで MID 420 秒（6 レース）、パドックで tab を 1 回押して HEAVY 250 秒（4 レース）。評価の余裕は heapprobe image（`derby` 変種、16 B 刻みの二分探索、2 回）。どちらも行番号表 OFF（ビルドごとに `-DSDKCONFIG` を分けて確認）。
 
 | | 基準 806b10b | `vm/rom-plans` | 差 |
 | --- | ---: | ---: | ---: |
@@ -218,7 +218,7 @@ host のゲーム（m32、LIGHT・MID・HEAVY）の `load()`/`drop()` に記録�
 - **描画が 9〜17% 遅い**: 全場面で `draw_us` が 0.17〜0.40 ms 増えた。begin で命令を flash から写す分と、`rom_matches()` の比較の相手が flash になった分と見られるが、image が違う（命令キャッシュで同じカーネルが 15% 動く）ので切り分けていない。fps への影響は 0〜0.8 fps（HEAD ON の 30.3 → 29.5 が最大）。同じ image で配列と名前を切り替える比較は未実施。
 - 一巡（診断 image）: パドックで `1` → レース → 写真 → 結果 → `R` の再生（`FINISH` の全桁が一致）→ `1` で次のパドック → 放置でデモ → キーで `DEMO END` → Back（`SAVE`）→ 起動し直すと `LOADED`。KEYTEST（`r`）の起動と Back。
 - 回帰（通常 image）: `smoke_device.py --cycles 20`（`SMOKE_OK 20`）、`stress_app.py`（`STRESS_APP_PASS`）、`test_app_resume.py`（`TEST_APP_RESUME_OK`）、MEGADEMO（NEWS・TWIST・ZENITH・LIMIT の全場面）・LCD CATCH・BIG WAVE の起動と Back。
-- host: `run_derby.py` の ASan と `--m32` 全 16 回で、806b10b とヒープの行以外（全画素ハッシュ・着順・完走時刻・種・デモ・R 再生・オッズ）が全行一致、循環コレクタだけのゴミ 0。m32 の評価後 106,640 → 100,944 B、評価のピーク 121,052 → 116,864 B。`tools/kasane_contract/run.sh`（`GAMES_M32=0`）、`run_pocket_proc_rom_qjs.py`（`--mutate` も）、`check_equivalence.py`（`EQUIVALENCE PASS`・`JS REFERENCE PASS`）が通る。
+- host: `run_derby.py` の ASan と `--m32` 全 16 回で、806b10b とヒープの行以外（全画素ハッシュ・着順・完走時刻・種・デモ・R 再生・オッズ）が全行一致、循環コレクタだけのゴミ 0。m32 の評価後 106,640 → 100,944 B、評価のピーク 121,052 → 116,864 B。`tools/kasane_contract/run.sh`（`GAMES_M32=0`）、`run_kobako_proc_rom_qjs.py`（`--mutate` も）、`check_equivalence.py`（`EQUIVALENCE PASS`・`JS REFERENCE PASS`）が通る。
 - flash: 表は `.rodata` に約 6.2 KB（14 本・480 命令）、出荷する `derby_prog.js` は 6.1 KB → 1,584 B。
 
 ## 11. 段階 3（首振り）を載せた実機の結果（q35、ブランチ `vm/pan-stage3`、2026-10-01）
@@ -251,7 +251,7 @@ host のゲーム（m32、LIGHT・MID・HEAVY）の `load()`/`drop()` に記録�
 
 **前（draw 1 回ごと）**: `begin_core` が VM 全体（約 1 KB）を `memset` → 命令を VM へコピー（名前登録は flash から）→ 引数を当てる → `valid_program()` で全命令を検証 → `run` が「VM の命令がこの plan と同じか」を確かめる（配列登録は `memcmp`、名前登録は `rom_matches()` で flash と 1 命令ずつ）。
 
-**後**: `pocket_shiki_frame.c` の `draw_run` は `ksn_proc_sized_plan_draw` / `ksn_proc_rom_plan_draw`（`ksn_proc_plan.c`）を 1 回呼ぶ。begin と run を 1 つの呼び出しにまとめた。
+**後**: `kobako_shiki_frame.c` の `draw_run` は `ksn_proc_sized_plan_draw` / `ksn_proc_rom_plan_draw`（`ksn_proc_plan.c`）を 1 回呼ぶ。begin と run を 1 つの呼び出しにまとめた。
 
 | 処理 | 前 | 後 | 理由 |
 | --- | --- | --- | --- |
@@ -268,7 +268,7 @@ host のゲーム（m32、LIGHT・MID・HEAVY）の `load()`/`drop()` に記録�
 
 **検証（host、`tools/kasane_contract/test_proc_plan_draw.c`、`run.sh` に追加）**: 乱数の命令列 60,000 本（4 本に 1 本は範囲外の欄も混ぜる）で、`ksn_proc_analyze()` と `valid_program()`（`ksn_proc_begin` 経由）の受け入れが 60,000/60,000 一致。受け入れた 44,473 本で、配列登録と名前登録（最大 8 個の欄を引数にした表）のそれぞれについて、draw と begin + run の status・フレーム（線分・ラスタ step・ext）・レジスタ・ペン・steps・pc・depth が 320,343 回の実行すべてで一致（DONE 315,717 回、残りは実行時の INVALID・LIMIT）。draw 側の VM は最初に 0xA5 で埋め、plan をまたいで一度も消さない。ASan/UBSan、`-O2 -fstrict-aliasing`、`-m32 -O2` の 3 通り。試験自体が効くことは、draw の初期化からレジスタの消去・ペンの無効化・`loop_end` の書き込みを 1 つずつ外すと FAIL になることで確かめた。
 
-**検証（host、アプリ全体）**: `tools/kasane_contract/run.sh` の DERBY まで（`run_pocket_proc_rom_qjs.py` の名前登録＝配列登録 14,663 ベクトル、MEGADEMO の全場面、LCD CATCH を含む）、`run_derby.py`、`run_derby.py --m32`、`run_big_wave.py`（と `--m32`）が PASS。DERBY は、変更前（`7ee19cc`）の同じ試験と、全画素ハッシュ（64-bit 14 個・m32 11 個）・着順と時刻・オッズが全行一致した。ゲストの heap の行だけが 44 B ずれたが、変更前を別のディレクトリ（パスが 44 文字長い）で走らせたためで、native の変更とは関係しない。`tools/kasane_ir/check_equivalence.py`（crowd・pt・hl の手書き IR が古い）と `check_lowered.py` は、変更前でも同じく失敗する（この作業の範囲外）。
+**検証（host、アプリ全体）**: `tools/kasane_contract/run.sh` の DERBY まで（`run_kobako_proc_rom_qjs.py` の名前登録＝配列登録 14,663 ベクトル、MEGADEMO の全場面、LCD CATCH を含む）、`run_derby.py`、`run_derby.py --m32`、`run_big_wave.py`（と `--m32`）が PASS。DERBY は、変更前（`7ee19cc`）の同じ試験と、全画素ハッシュ（64-bit 14 個・m32 11 個）・着順と時刻・オッズが全行一致した。ゲストの heap の行だけが 44 B ずれたが、変更前を別のディレクトリ（パスが 44 文字長い）で走らせたためで、native の変更とは関係しない。`tools/kasane_ir/check_equivalence.py`（crowd・pt・hl の手書き IR が古い）と `check_lowered.py` は、変更前でも同じく失敗する（この作業の範囲外）。
 
 ### 13.1 実機で測る手順（未実施）
 

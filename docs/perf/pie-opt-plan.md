@@ -78,7 +78,7 @@ FLOWER（MODE 3）のフレームは、転送の非同期化（`send` 7.77 → 1
 |---|---|---|---|---|
 | **T1** | `bell_hit` の**帯棄却**をベクタ化（`flower.c:1266-1400`） | `bell` 4.41 ms/frame、visits の約73%が外れ | `o[j]=dx*oax[j]+ob[j]` なので `b,c,判別式` は **x の多項式**。8画素分を固定小数点で一括計算し、`d<0` が確定した画素をスカラー経路に入れない。**`flower.c:1287-1291` のコメントがこの案をそのまま書いている** | **やる（第一）** |
 | **T2** | 装飾光線（`rays`）の**厳密な**ベクタカーネル（`garden.c:1504-1569`） | スカラーで −5.0 ms 済（近似）。床 3.9 ms | 8画素ブロック。行の load → dither をレーン化（x ごとのパターンを表から `EE.VLD.128` 1本）→ Q8 の profile/mix を 16bit レーンで → mask 付き store（「書かない」を「選んで書く」へ） | **やる（第二）** |
-| **T3** | MP3 のダウンサンプル前 FIR（`main/pocket/mp3_decode.c:60-72`） | デコード本体 5.9–6.7 ms のうち約 1.36 ms | スカラー 284 命令/サンプル → PIE 見積り **24 命令**（比 11.8×）。レシピも既知: リングバッファを2倍長にして窓を連続にし、`sum>>14` にすると `EE.SRS.ACCX`（floor）と**ビット一致**（`sum/16384` とは負の端数で1LSB違うだけ） | **やる（第三）** |
+| **T3** | MP3 のダウンサンプル前 FIR（`main/kobako/mp3_decode.c:60-72`） | デコード本体 5.9–6.7 ms のうち約 1.36 ms | スカラー 284 命令/サンプル → PIE 見積り **24 命令**（比 11.8×）。レシピも既知: リングバッファを2倍長にして窓を連続にし、`sum>>14` にすると `EE.SRS.ACCX`（floor）と**ビット一致**（`sum/16384` とは負の端数で1LSB違うだけ） | **やる（第三）** |
 | T4 | `sqrtf` を種命令＋Newton-Raphson へ | 4,051–4,113 calls/frame = 2.14–2.23 ms（単価 174–188 cy） | ISA の列を使う必要がある（種の精度は実装定義。反復回数を勘で減らすとビット一致が黙って壊れる）。フレーム全域の除算・平方根の掃引は `tools/test_flower_div.c` の形で書ける | **保留**（T1〜T3 の後。花の1関数にしか効かない） |
 | — | 楕円体の棄却（`d<0` の早期脱出） | 5,741 visit の 61.7% が抜ける | 落ちるのは**最安の画素**（棄却率は時間の節約率ではない、§4.1） | やらない（既存判断を維持） |
 | — | 林冠の追加削減（`wsr.sar` 重複、`dx` 保持、定数31の二重ロード、`f` の `EE.VMUL` 1本化） | 林冠は PIE 済で **0.69 ms/frame**・39命令・ストール0 | 命令数を削るだけ | やらない（このパスで命令数削減のノーゲインが3例。`backlog.md` の P1 はこれで消える） |
@@ -466,7 +466,7 @@ T3 の一式（上の 1〜10 番目のコミット）は `vm/main`（実機が�
 
 | | 基準 `bd0fa43` | `perf/mp3-fir` `3558e7e` | 差 |
 | --- | --- | --- | --- |
-| `cardputer_pocketjs.bin` | 2,142,864 B | 2,143,760 B | **+896 B** |
+| `cardputer_kobako.bin` | 2,142,864 B | 2,143,760 B | **+896 B** |
 | flash（memlog） | 1,557,328 | 1,558,220 | +892 B |
 | DIRAM（memlog） | 123,308 | 123,324 | **+16 B**（リング 32→40 スロット = 64→80 B） |
 | `fir8_pie` の実物（実ビルドの `.obj`） | — | 179 命令 / うち PIE オペコード 105 / call8 0 | スカラーは 1 サンプル 284 命令 |
@@ -499,8 +499,8 @@ T3 の一式（上の 1〜10 番目のコミット）は `vm/main`（実機が�
 
 | 系統 | 入っているもの | 主なファイル | この枝での検証 |
 | --- | --- | --- | --- |
-| vm/main | 実機が走らせているファーム本体（VM の L0〜L2、pocket、UI、scene） | `main/` 全体 | ファームのビルド rc=0（§2）。**実機での確認はこの枝では未** |
-| MP3 FIR の PIE カーネル | `fir8_pie`（8出力をまとめる 174 命令/8出力、0 ストール）と補間の int32 化 | `main/pocket/fir_pie.c`, `fir_pie.h`, `mp3_decode.c` | ホスト: `test_kernels.py` の `FirKernel` 緑、実 MP3 10 本で `block==scalar`（§2） |
+| vm/main | 実機が走らせているファーム本体（VM の L0〜L2、kobako、UI、scene） | `main/` 全体 | ファームのビルド rc=0（§2）。**実機での確認はこの枝では未** |
+| MP3 FIR の PIE カーネル | `fir8_pie`（8出力をまとめる 174 命令/8出力、0 ストール）と補間の int32 化 | `main/kobako/fir_pie.c`, `fir_pie.h`, `mp3_decode.c` | ホスト: `test_kernels.py` の `FirKernel` 緑、実 MP3 10 本で `block==scalar`（§2） |
 | garden の装飾光線 PIE（`perf/pie-opt` の9本） | 8レーン混合 `garden_decor_mix8`、グループ幅の実行時スイッチ（既定8）、行の整列位相グリッド、`SCENE_AB` の腕 | `main/scene/garden_decor_pie.c/h`, `main/scene/garden.c`, `main/ui/shell.c`, `tools/test_garden_decor_pie_ab.c` | ホスト: 契約スイープ緑（§2）。実機の幅4→8の効果は §3 の引用（T2 着地時） |
 | 容量削減（`perf/size-census`） | cref census と削減手順（「我々だけが理由でリンクに入っている」ところから潰す） | `docs/archive/perf/builtins-census.md`, `docs/perf/flash-size-method.md`, `tools/size/` | 手順と計器のみ。**削減そのものは未実施** |
 | システム API の調査（`perf/system-pie`） | システムAPIに PIE の余地があるか／libgcc と 64bit 除算の出所 | `docs/archive/perf/system-pie-survey.md`, `docs/archive/perf/libgcc-64bit-division.md` | 分析のみ（実装なし） |
@@ -528,7 +528,7 @@ T3 の一式（上の 1〜10 番目のコミット）は `vm/main`（実機が�
 **VM の中断・復帰（`codex/vm-improve` の3本、2026-09-16 追加）**: QuickJS VM の中断と遅延復帰
 （L2c stage 3a）＋ `tools/vmtest` の整備（segment growth / tco / async audit / build failures /
 callbench / device runaway / runner retry、`vmrun.c` の再試行）。`main/` は CMakeLists・
-Kconfig.projbuild・app_session・main.c・pocket_app・vmprobe の6ファイル。この枝での検証は
+Kconfig.projbuild・app_session・main.c・kobako_app・vmprobe の6ファイル。この枝での検証は
 ビルド rc=0 と `tools/vmtest/run.sh --variant o2` の **68 passed / 0 failed**（bin +512 B、
 実機は未確認）。設計と実測の記録は `docs/vm/vm-L2-design.md` / `vm-L2-results.md`。
 
@@ -540,7 +540,7 @@ Kconfig.projbuild・app_session・main.c・pocket_app・vmprobe の6ファイル
 . /opt/esp-idf/export.sh && idf.py -B build_all build
 ```
 
-- **rc=0**。`cardputer_pocketjs.bin` = **2,146,272 B**（0x20bfe0、app パーティション 3 MiB の 32% 空き）。
+- **rc=0**。`cardputer_kobako.bin` = **2,146,272 B**（0x20bfe0、app パーティション 3 MiB の 32% 空き）。
 - `memlog`: DIRAM **123,340 B** / flash **1,560,388 B**（`--only-changes` の前回記録は c66f401）。
 - ビルド後に `git checkout -- dependencies.lock`（ビルドが触る）。
 
@@ -634,7 +634,7 @@ ms/フレーム、負が速い。`rays`/`rest` は触っていない対照帯）
   incoming の腕と同じコードではない）。「この枝で同じ問いを聞き直したら +0.87 ms だった」が記録。
 - gate / tweaks / 固定小数点 sqrt はこの場面では**ノイズ床以下**。とくに incoming の
   「tweaks で rays −1.46 ms」はこの枝では出ない（+0.09）。
-- **未計測**: MP3 FIR の `MP3DEC mean_us`（デバイスの pocketfs に MP3 が無い。`.mp3`/`.wav`/`.pok`
+- **未計測**: MP3 FIR の `MP3DEC mean_us`（デバイスの kobakofs に MP3 が無い。`.mp3`/`.wav`/`.pok`
   は storage 2.5 MB に 0 件）、三角関数 LUT のフレーム差（スイッチが無く、予測 0.05 ms は
   この計器の床の下。この変更は `size` の話）、物理の画素（ユーザーの目）。
 
@@ -734,5 +734,5 @@ shell の per-frame `esp_log_level_set`）はこちらには元から無く、in
    パネルに絵が出ることを目で見る。DC ライン（`79ad62f` の主題）もこの部類。
 5. **`tools/capture_home.py`** — 実ピクセルと 30fps。`sq=1` の窓で白い画素が出るか（B=8 の既知の差）、
    decor の幅 8 の近似が帯に見えるか（`SCENE_AB` の幅の腕）。
-6. **`python3 tools/memlog.py --map build_all/cardputer_pocketjs.map --port <port> --check`** —
+6. **`python3 tools/memlog.py --map build_all/cardputer_kobako.map --port <port> --check`** —
    実機の空きヒープも記録して予算検査。

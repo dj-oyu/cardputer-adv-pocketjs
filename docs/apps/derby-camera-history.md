@@ -4,7 +4,7 @@
 
 ## その後どうなったか
 
-- 首振りの列 `ser()` は 2026-10-02 に倍精度の C（`pocket.derby`）へ下ろした（S1b、§6 末尾・[derby-ser-native.md](derby-ser-native.md)）。楕円コーナーの WIDE 2 は MID 15.9 → 24.6 fps。
+- 首振りの列 `ser()` は 2026-10-02 に倍精度の C（`kobako.derby`）へ下ろした（S1b、§6 末尾・[derby-ser-native.md](derby-ser-native.md)）。楕円コーナーの WIDE 2 は MID 15.9 → 24.6 fps。
 - JS の double は 2026-11-02 に整数化で取り除いた（[derby-integer.md](derby-integer.md) §9）。この文書の JS の式・単価・ゲストの KB は、double の JS 時代の値。
 - 現行の描画は Shiki（[../kasane/shiki.md](../kasane/shiki.md)）が受け持つ。CLAUDE.md が引く評価余裕（約 38 → 28 → 22.7 → 30.6 KB）の経過は §5〜§6 の表。
 - 数値の種別は各所に 実測（実機）/ 計数・実測（host）/ 推定 と書いた。**JS の費用は host の比で見積もれない**（host は倍精度が速く、実機では三角関数が効く。曲線 / 直線の JS 比は host 1.9 倍・実機 3.7 倍）。
@@ -178,7 +178,7 @@ host の QuickJS に計装（`tools/vmtest/opprof/`、`patch_quickjs.py` が写�
 | N12 | `draw` の数値引数（配列を作らない） | −0.8 ms（N1 の後は −0.25） | **採用**（S1b で `draw` を数値引数に） |
 
 - シナリオ（非 JS 分 17.9 ms のとき、fps = 1000 /（ターン + 17.9）、推定）: S1a（汎用部品だけ、N12＋N4・N5）17.9〜19.0 fps で 20 fps に届かない／S1b（N2＋N12）**23.4〜25.9 fps**、ゲスト −3〜−6 KB／S2（N1＋N6＋N12）28.3〜29.0 fps／S3（S2＋N4・N5）表示の上限の約 30 fps。**`ser()` に触らない限り 20 fps に届かない。ウォーカーだけでは 27 fps は境目**（非 JS 分が 19.2 ms なら届かない）。
-- API の推奨は「道（path）を登録し 3 つの入口が共有する」形（`path`／`pose`／`project`／`walk`）。実際には DERBY 専用の `pocket.derby`（`course`・`view`・`ser`）で S1b として入った。実機で確かめる項目として挙げたのは、JS からネイティブ 1 回の呼び出し費用、非 JS 分の内訳（17.9 か 19.2 ms か）、残る JS の実時間、w=−3 の JS ターン。
+- API の推奨は「道（path）を登録し 3 つの入口が共有する」形（`path`／`pose`／`project`／`walk`）。実際には DERBY 専用の `kobako.derby`（`course`・`view`・`ser`）で S1b として入った。実機で確かめる項目として挙げたのは、JS からネイティブ 1 回の呼び出し費用、非 JS 分の内訳（17.9 か 19.2 ms か）、残る JS の実時間、w=−3 の JS ターン。
 - 実測値の結果（S1b、§6 に代わる現在の値）: 楕円コーナーの首振り WIDE 2 が MID 15.9 → **24.6 fps**（JS 44.11 → 22.00 ms）、HEAVY 16.0 → 24.4 fps。ゲスト最大 138,432〜138,556 → 133,192〜133,276 B（約 −5.3 KB）、評価の余裕 22,477 → **30,638 B**、ターン内の最小 +7.5 KB、DIRAM +96 B・flash +6,136 B（旧 derby-pan-memory.md §14）。
 
 ## 9. 登録済みコースのキャッシュと一括投影の実験（旧 derby-projection-experiment.md、2026-10-19、既定 OFF）
@@ -187,8 +187,8 @@ PR8 の normal-OFF を基準にした実験で、ここでは**実機の受入�
 
 | スイッチ | 境界 |
 | --- | --- |
-| `POCKET_DERBY_COURSE_CACHE` | コース登録時に固定の弦の端の world x/z と w=0 での接線を前計算し、view はカメラ変換だけにする（曲線 1 端点あたり double 4 個＝32 B。ゲームの 19 端点で +608 B、最大 32 端点で +1,024 B、直線はゼロ。既存の確保の中に置く） |
-| `POCKET_DERBY_PROJECT_BATCH` | PAN の 2 回の呼び出しで終点の標と距離標 6 点＋走者 8 頭を投影し、点ごとの JS の pose/pj を置き換える。`project(progress[], depths[], subtract, Float64Array output)` が 1..32 組を読み、1 点あたり double 4 個（分子・Z・画面 x・1/Z）を書く。倍精度・式の順序は不変（FMA・逆数近似・丸めなし） |
+| `KOBAKO_DERBY_COURSE_CACHE` | コース登録時に固定の弦の端の world x/z と w=0 での接線を前計算し、view はカメラ変換だけにする（曲線 1 端点あたり double 4 個＝32 B。ゲームの 19 端点で +608 B、最大 32 端点で +1,024 B、直線はゼロ。既存の確保の中に置く） |
+| `KOBAKO_DERBY_PROJECT_BATCH` | PAN の 2 回の呼び出しで終点の標と距離標 6 点＋走者 8 頭を投影し、点ごとの JS の pose/pj を置き換える。`project(progress[], depths[], subtract, Float64Array output)` が 1..32 組を読み、1 点あたり double 4 個（分子・Z・画面 x・1/Z）を書く。倍精度・式の順序は不変（FMA・逆数近似・丸めなし） |
 
 どちらもレースの状態・乱数・カメラ選択・除算・sqrt・LOD・クリップ・並べ替え方針・手続き plan を変えない。入力の検証（getter による差し替え、detach、読み取り専用 buffer、非有限値、後ろの無効入力で途中書き込みなし）を事前に行う。
 

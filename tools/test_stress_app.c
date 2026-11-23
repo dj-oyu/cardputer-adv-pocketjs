@@ -1,6 +1,6 @@
-// apps/stress/stress.js against the real QuickJS and the real pocket.kasane,
+// apps/stress/stress.js against the real QuickJS and the real kobako.kasane,
 // the way the firmware runs it: one evaluation, then frame() turns with the
-// job queue drained after each. pocket.fs is a stub here (its reads are JS
+// job queue drained after each. kobako.fs is a stub here (its reads are JS
 // Uint8Arrays, so the native-path check is only meaningful on the device --
 // tools/stress_app.py). What this catches before a flash: a scene the Kasane
 // validator refuses (radius, command budget, cache budget), an exception in a
@@ -8,11 +8,11 @@
 // so L3 really reaches an out-of-memory and has to recover from it.
 //
 //   wsl -e bash -lc "cd <repo> && bash tools/build_stress_app_test.sh && /tmp/test-stress-app"
-#include "pocket_kasane.h"
-#include "pocket_memory.h"
-#include "pocket_av.h"
+#include "kobako_kasane.h"
+#include "kobako_memory.h"
+#include "kobako_av.h"
 #include "shiki_heap.h"
-#include "pocket_shiki_api.h"
+#include "kobako_shiki_api.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_runtime.h"
 #include "ui/kasane/ksn_render.h"
@@ -24,8 +24,8 @@
 #include <string.h>
 
 void host_capabilities_clear(void);
-int32_t pocket_av_ui_current_player(void){return 0;}
-bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out){
+int32_t kobako_av_ui_current_player(void){return 0;}
+bool kobako_av_ui_read(int32_t id,kobako_av_ui_snapshot *out){
     (void)id;(void)out;return false;
 }
 bool sys_device_clock_read(sys_clock_state *out){(void)out;return false;}
@@ -147,7 +147,7 @@ static bool eval(const char *source,size_t len,const char *name) {
     JS_FreeValue(ctx,v);
     JSContext *c;
     while(JS_ExecutePendingJob(rt,&c)>0) {}
-    pocket_kasane_end_turn();
+    kobako_kasane_end_turn();
     return ok;
 }
 
@@ -168,21 +168,21 @@ static ksn_result send_strip(void *o,uint16_t y,uint16_t rows,const uint16_t *pi
     (void)o; memcpy(panel+y*240,pixels,rows*240*sizeof(*pixels)); return KSN_OK;
 }
 static bool present(void) {
-    if(!pocket_kasane_needs_present()) return true;
+    if(!kobako_kasane_needs_present()) return true;
     ksn_display_port port={.strip=get_strip,.present=send_strip,
                            .width=240,.height=135,.strip_rows=strip_rows_arm,.text=&ksn_font_port};
     ksn_render_stats stats;
-    return pocket_kasane_present(&port,&stats)==KSN_OK;
+    return kobako_kasane_present(&port,&stats)==KSN_OK;
 }
 
-// A pocket.fs with the one shape the app uses: open() -> {read(n), close()},
+// A kobako.fs with the one shape the app uses: open() -> {read(n), close()},
 // three 1 KiB chunks then null (end of file). A read that fails (an OOM in
 // the Uint8Array) is finished too: its promise rejects, it does not hang, so
 // it counts in finally -- before, such a read left started one ahead and the
 // run failed on a read that had in fact settled.
 static const char FS_STUB[]=
     "globalThis.console={log:globalThis.__log};"
-    "globalThis.pocket={kasane:globalThis.kasane,fs:{open:async function(){"
+    "globalThis.kobako={kasane:globalThis.kasane,fs:{open:async function(){"
     "if(globalThis.__holdRead){__holdRead=false;return new Promise(()=>{})}let n=0;"
     "return{read:async function(m){"
     "if(globalThis.__holdRead){__holdRead=false;return new Promise(()=>{})}"
@@ -204,7 +204,7 @@ int main(int argc,char **argv) {
     if(hspan_arm)g_ksn_proc_hspan=strcmp(hspan_arm,"0")!=0;
     /* KSN_PROC_RANGES=0: every band walks all of a Shiki frame's entries. */
     const char *ranges_arm=getenv("KSN_PROC_RANGES");
-    {extern int g_pocket_proc_ranges;if(ranges_arm)g_pocket_proc_ranges=strcmp(ranges_arm,"0")!=0;}
+    {extern int g_kobako_proc_ranges;if(ranges_arm)g_kobako_proc_ranges=strcmp(ranges_arm,"0")!=0;}
     const char *strip_arm=getenv("KSN_STRIP_ROWS");
     if(strip_arm)strip_rows_arm=(uint16_t)atoi(strip_arm);
     /* KSN_TEXT_EXTENT=0: text walks its whole declared box (ksn_render.c). */
@@ -216,7 +216,7 @@ int main(int argc,char **argv) {
     if(lut_alpha_arm)g_ksn_blend_lut_alpha=strcmp(lut_alpha_arm,"0")!=0;
     /* KSN_BAND_BITS=0: bands walk every entry of their range, not the bitmap. */
     const char *bits_arm=getenv("KSN_BAND_BITS");
-    {extern int g_pocket_proc_band_bits;if(bits_arm)g_pocket_proc_band_bits=strcmp(bits_arm,"0")!=0;}
+    {extern int g_kobako_proc_band_bits;if(bits_arm)g_kobako_proc_band_bits=strcmp(bits_arm,"0")!=0;}
     const char *runs_arm=getenv("KSN_TEXT_RUNS");
     if(runs_arm)g_ksn_text_runs=strcmp(runs_arm,"0")!=0;
     const bool digest=gradient_arm||rows_arm||cover_arm||hspan_arm||strip_arm||ranges_arm||extent_arm||runs_arm||lut_alpha_arm||bits_arm;
@@ -229,16 +229,16 @@ int main(int argc,char **argv) {
     if(trace_path&&(alloc_trace=fopen(trace_path,"w"))) rt=JS_NewRuntime2(&TRACE_MF,NULL);
     else rt=JS_NewRuntime();
     ctx=JS_NewContext(rt);
-    // As pocketjs_guest_create: apps run hardened (docs/vm/harden.md).
-    // POCKET_NO_HARDEN=1 skips it, for host A/B only.
-    if(!ctx||(!getenv("POCKET_NO_HARDEN")&&JS_PocketHarden(ctx)<0)){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
+    // As kobako_guest_create: apps run hardened (docs/vm/harden.md).
+    // KOBAKO_NO_HARDEN=1 skips it, for host A/B only.
+    if(!ctx||(!getenv("KOBAKO_NO_HARDEN")&&JS_LeanHarden(ctx)<0)){fprintf(stderr,"JS_LeanHarden failed\n");abort();}
     host_capabilities_clear();
     JS_SetHostPromiseRejectionTracker(rt,promise_rejection,NULL);
     /* The manifest names kasane.shiki: the session takes the Shiki heap
      * before the guest (app_session.c), and kasane then has shiki. */
     if(!shiki_heap_begin(0)){printf("FAIL Shiki heap\n");return 1;}
-    pocket_kasane_install(ctx,NULL);
-    pocket_memory_install(ctx,NULL);
+    kobako_kasane_install(ctx,NULL);
+    kobako_memory_install(ctx,NULL);
     JSValue g=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,js_log,"log",1));
     JS_SetPropertyStr(ctx,g,"__readStarted",JS_NewCFunction(ctx,js_read_started,"readStarted",0));
@@ -268,7 +268,7 @@ int main(int argc,char **argv) {
     JS_SetMemoryLimit(rt,640*1024);
     // Profiling knobs (tools/vmtest/prof/stress_prof.sh): STRESS_HEAP_LIMIT
     // sets the device's arrangement instead (the limit, and the collector's
-    // first threshold at half of it, as pocketjs_guest_create does -- right
+    // first threshold at half of it, as kobako_guest_create does -- right
     // for a -m32 build, whose objects are the device's size); STRESS_FRAMES
     // stops early (the verdict then no longer applies).
     const char *heap_env=getenv("STRESS_HEAP_LIMIT"),*frames_env=getenv("STRESS_FRAMES");
@@ -297,11 +297,11 @@ int main(int argc,char **argv) {
         JSOOMCanary canary={0};
         JS_TakeOOMCanary(rt,&canary);
         if(lines_suspect>suspects_before&&!canary.count)bad_suspect++;
-        if(canary.count)pocket_memory_oom(&canary,(uint64_t)t*20000u);
+        if(canary.count)kobako_memory_oom(&canary,(uint64_t)t*20000u);
         size_t used=0,limit=0;
         JS_GetMemoryCounters(rt,&used,&limit);
-        pocket_memory_sample((uint64_t)t*20000u,used,limit,false,0,0);
-        pocket_memory_pump(false);
+        kobako_memory_sample((uint64_t)t*20000u,used,limit,false,0,0);
+        kobako_memory_pump(false);
         if(!present()) bad_present++;
         if(digest)for(size_t i=0;i<240u*135u;i++){
             panel_digest^=panel[i];panel_digest*=16777619u;
@@ -330,14 +330,14 @@ int main(int argc,char **argv) {
            exceptions,lines_fail,lines_oom,lines_suspect,bad_suspect,pressure_events,pressure_trims,lines_stat,lines_ready,bad_present,bad_command_count,bad_native,
            reads_started,reads_finished,reads_at_first_oom,unhandled_rejections,
            dispatch_faults,reads_at_dispatch_fault);
-#ifdef POCKET_PROC_VISIT_STATS
-    {extern unsigned long long pocket_proc_visits[3][2];
+#ifdef KOBAKO_PROC_VISIT_STATS
+    {extern unsigned long long kobako_proc_visits[3][2];
      printf("proc visits 8-row: all=%llu B=%llu A=%llu | 4-row: all=%llu B=%llu A=%llu\n",
-            pocket_proc_visits[0][0],pocket_proc_visits[1][0],pocket_proc_visits[2][0],
-            pocket_proc_visits[0][1],pocket_proc_visits[1][1],pocket_proc_visits[2][1]);
-     extern unsigned pocket_proc_visit_frames,pocket_proc_list_max[2],pocket_proc_entries_max;
-     printf("proc frames=%u entries_max=%u list_max 8-row=%u 4-row=%u\n",pocket_proc_visit_frames,
-            pocket_proc_entries_max,pocket_proc_list_max[0],pocket_proc_list_max[1]);}
+            kobako_proc_visits[0][0],kobako_proc_visits[1][0],kobako_proc_visits[2][0],
+            kobako_proc_visits[0][1],kobako_proc_visits[1][1],kobako_proc_visits[2][1]);
+     extern unsigned kobako_proc_visit_frames,kobako_proc_list_max[2],kobako_proc_entries_max;
+     printf("proc frames=%u entries_max=%u list_max 8-row=%u 4-row=%u\n",kobako_proc_visit_frames,
+            kobako_proc_entries_max,kobako_proc_list_max[0],kobako_proc_list_max[1]);}
 #endif
     if(digest)printf("gradient arm=%d image_rows=%d cover_skip_fill=%d hspan=%d strip_rows=%u panel_digest=%08x\n",
                            g_ksn_vertical_gradient_pie,g_ksn_image_rows,g_ksn_cover_skip_fill,
@@ -349,7 +349,7 @@ int main(int argc,char **argv) {
               !unhandled_rejections&&
               (!inject_dispatch_fault||(dispatch_faults==1&&!bad_fault_reads&&
                                         reads_started>reads_at_dispatch_fault));
-    pocket_memory_reset();pocket_shiki_api_reset();pocket_kasane_reset(); JS_FreeContext(ctx); JS_FreeRuntime(rt);
+    kobako_memory_reset();kobako_shiki_api_reset();kobako_kasane_reset(); JS_FreeContext(ctx); JS_FreeRuntime(rt);
     shiki_heap_end();
     printf("%s\n",pass?"STRESS_HOST PASS":"STRESS_HOST FAIL");
     return pass?0:1;

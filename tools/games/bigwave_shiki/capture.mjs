@@ -1,6 +1,6 @@
 // BIG WAVE's move to Shiki (v2.0 step 3), the capture half: runs the float
 // VM version of apps/bigwave/big_wave.js (git show 885fb18:apps/bigwave/big_wave.js
-// > old.js) under Node with a fake pocket and records every draw: the old
+// > old.js) under Node with a fake kobako and records every draw: the old
 // program's rows, its key, set and tier, and the inputs. Scripted play: title
 // (auto), the load tiers, start, six rounds of a key schedule.
 //
@@ -19,7 +19,7 @@ const P = {
   beginFrame() {}, commit() {}, resource() { return {}; }
 };
 const tx = new Proxy({}, {get: () => () => ({setRect() {}, setText() {}})});
-globalThis.pocket = {
+globalThis.kobako = {
   kasane: {procedural: P, replace(f) { f(tx); }, patch(f) { f(tx); }},
   input: {keys: {pressed: k => pressed.has(k), held: k => heldk.has(k)}},
   capabilities: {get: () => ({supported: false})}, audio: null

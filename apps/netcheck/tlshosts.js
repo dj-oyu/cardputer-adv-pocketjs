@@ -1,8 +1,8 @@
 // One TLS handshake per host, in sequence, so the threshold set from a single
 // server can be judged against chains and key sizes it never saw. README.md
-// reads the output; pocket.net's TLSCOST line reports the memory each one cost.
+// reads the output; kobako.net's TLSCOST line reports the memory each one cost.
 (function(){
-  var N = pocket.net, T = pocket.time;
+  var N = kobako.net, T = kobako.time;
   function say(t){ console.log('TLSH '+t); }
   var HOSTS = [
     'https://example.com/',            // the one the thresholds were set from
@@ -27,7 +27,7 @@
       return T.sleep(600).then(function(){ return one(w, i+1); });
     });
   }
-  pocket.app.start({
+  kobako.app.start({
     start: function(){
       function acquire(left){
         return N.wifi.acquire({profileId:'default'}).then(function(w){

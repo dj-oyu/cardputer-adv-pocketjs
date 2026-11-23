@@ -1,4 +1,4 @@
-#include "../../pocket/derby_detail.h"
+#include "../../kobako/derby_detail.h"
 #include "ksn_render.h"
 #include "ksn_image_transform.h"
 #include "ksn_p0_probe.h"

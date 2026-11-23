@@ -326,12 +326,12 @@ int main(int argc, char **argv)
     js = JS_NewContext(runtime);
     CHECK(js);
     JSValue global = JS_GetGlobalObject(js);
-    /* The firmware keeps the frontend behind pocket.kasane.grid. */
+    /* The firmware keeps the frontend behind kobako.kasane.grid. */
     JSValue frontend = evaluate(argv[1]);
-    JSValue kasane = JS_NewObject(js), pocket = JS_NewObject(js);
+    JSValue kasane = JS_NewObject(js), kobako = JS_NewObject(js);
     CHECK(JS_SetPropertyStr(js, kasane, "grid", frontend) == 1);
-    CHECK(JS_SetPropertyStr(js, pocket, "kasane", kasane) == 1);
-    CHECK(JS_SetPropertyStr(js, global, "pocket", pocket) == 1);
+    CHECK(JS_SetPropertyStr(js, kobako, "kasane", kasane) == 1);
+    CHECK(JS_SetPropertyStr(js, global, "kobako", kobako) == 1);
     JS_FreeValue(js, evaluate(argv[2]));
     JSValue examples = prop(global, "gridFoldExamples");
     uint32_t count = length(examples);

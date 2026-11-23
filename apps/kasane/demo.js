@@ -1,23 +1,23 @@
-// USB diagnostic K: the first end-to-end user of pocket.kasane. It keeps the
+// USB diagnostic K: the first end-to-end user of kobako.kasane. It keeps the
 // scene changing so timing captures include alpha, grouped opacity, cache
 // placement, replace/patch reference turnover, and modal transitions.
 (function () {
-  const rngA = pocket.random.create(123), rngB = pocket.random.create(123);
+  const rngA = kobako.random.create(123), rngB = kobako.random.create(123);
   if (rngA.nextUint32() !== rngB.nextUint32() ||
-      !pocket.capabilities.get('input.action').supported || !pocket.device.info())
+      !kobako.capabilities.get('input.action').supported || !kobako.device.info())
     throw Error('Kasane host services unavailable');
   console.log('KASANE_SERVICES PASS legacy=' + (typeof globalThis.ui !== 'undefined'));
   let powerSeen = 0;
   for (let i = 0; i < 2; i++) {
     let first = true;
-    pocket.power.onChange(function (value) {
+    kobako.power.onChange(function (value) {
       if (value.percent !== null || value.charging !== null) throw Error('power metadata');
       if (!first) return;
       first = false;
       if (++powerSeen === 2) console.log('KASANE_POWER initial=2');
     });
   }
-  const view = pocket.kasane;
+  const view = kobako.kasane;
   const pets = view.resource('pets');
   const tile = view.cache.create([
     {bounds: [0, 0, 42, 24], color: 0x185071ff},
@@ -30,11 +30,11 @@
   // Optional input-service smoke test, independent of the legacy node API.
   // Text composition stays in the host until the SYSTEM textfield migration.
   let textSession;
-  pocket.input.onAction(function (event) {
+  kobako.input.onAction(function (event) {
     console.log('KASANE_ACTION ' + event.action + ' ' + event.phase +
-                ' held=' + pocket.input.held(event.action));
+                ' held=' + kobako.input.held(event.action));
     if (event.action !== 'accept' || event.phase !== 'press' || textSession) return;
-    textSession = pocket.input.text.open({
+    textSession = kobako.input.text.open({
       rect: {x: 8, y: 56, width: 224, height: 20}, maxBytes: 24, ime: 'off',
       onEdit: function (e) { console.log('KASANE_TEXT_EDIT ' + e.text); },
       onSubmit: function (e) {

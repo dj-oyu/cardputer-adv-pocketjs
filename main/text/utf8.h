@@ -32,7 +32,7 @@ static inline uint32_t utf8_decode(const char *s, size_t len, size_t i, size_t *
 // check. Overlong forms, truncated tails, surrogates and anything past
 // U+10FFFF are all rejected.
 //
-// pocket_storage.c and pocket_fs.c each carry a private copy of this predicate,
+// kobako_storage.c and kobako_fs.c each carry a private copy of this predicate,
 // written before there was a shared home for it. New code uses this one.
 static inline bool utf8_valid(const char *s, size_t n) {
     const unsigned char *p=(const unsigned char *)s;

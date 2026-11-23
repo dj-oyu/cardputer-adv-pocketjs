@@ -1,0 +1,151 @@
+# smoke sweep 2026-11-23, firmware 665ad09 (fork b227ff8), broker app_session, 20 s each (derby 60 s), no input
+# per app: APP_ID / RUN / MEM / APP_STOPPED / W lines / MEM_PRESSURE
+
+== kbs-bigwave
+I (1284349) app: MEM free=181956 largest=65536 js=0 frames=1678
+I (1284349) app: APP_STOPPED
+I (1284355) app: APP_ID local.bigwave
+I (1284467) app: MEM free=83820 largest=31744 js=68928 frames=0
+I (1284467) shell: RUN 20302 bytes -> ESP_OK
+I (1304594) app: MEM free=220544 largest=65536 js=0 frames=600
+I (1304594) app: APP_STOPPED
+I (1304598) app: APP_ID local.player
+I (1304622) app: MEM free=177020 largest=65536 js=31164 frames=0
+
+== kbs-companion
+I (412817) app: MEM free=183144 largest=73728 js=0 frames=1297
+I (412817) app: APP_STOPPED
+I (412822) app: APP_ID local.companion
+I (412845) app: MEM free=140848 largest=63488 js=33676 frames=0
+I (412845) shell: RUN 2585 bytes -> ESP_OK
+I (432940) app: MEM free=221388 largest=73728 js=0 frames=592
+I (432940) app: APP_STOPPED
+I (432943) app: APP_ID local.player
+I (432968) app: MEM free=177936 largest=73728 js=31100 frames=0
+
+== kbs-derby
+I (1167692) app: MEM free=182368 largest=65536 js=0 frames=1646
+I (1167692) app: APP_STOPPED
+I (1167697) app: APP_ID local.derby
+I (1167857) app: MEM free=64944 largest=31744 js=91556 frames=0
+I (1167858) shell: RUN 7203 bytes -> ESP_OK
+I (1187176) memory: MEM_PRESSURE mask=0x1 was=0x0 free=47336 largest=31744 guest_free=29076 episode=1
+I (1227115) js: DERBY CAM FINISH
+I (1227956) app: MEM free=220544 largest=65536 js=0 frames=1794
+I (1227956) app: APP_STOPPED
+I (1227959) app: APP_ID local.player
+I (1227984) app: MEM free=177020 largest=65536 js=31164 frames=0
+
+== kbs-gridlab
+I (891632) app: MEM free=173084 largest=49152 js=0 frames=2981
+I (891632) app: APP_STOPPED
+I (891637) app: APP_ID local.gridlab
+I (891757) app: MEM free=89568 largest=47104 js=67296 frames=0
+I (891757) shell: RUN 11238 bytes -> ESP_OK
+I (911849) app: MEM free=220544 largest=65536 js=0 frames=593
+I (911850) app: APP_STOPPED
+I (911853) app: APP_ID local.player
+I (911878) app: MEM free=177020 largest=65536 js=31164 frames=0
+
+== kbs-hello
+3 I (94900) app: MEM free=182508 largest=73728 js=0 frames=2796
+4 I (94900) app: APP_STOPPED
+8 I (94904) app: APP_ID local.hello
+10 I (94911) app: MEM free=141204 largest=63488 js=23092 frames=0
+11 I (94911) shell: RUN 0 bytes -> ESP_OK
+14 I (115022) app: MEM free=221368 largest=73728 js=0 frames=610
+15 I (115022) app: APP_STOPPED
+18 I (115025) app: APP_ID local.player
+19 I (115050) app: MEM free=177852 largest=73728 js=31136 frames=0
+
+== kbs-imucal
+I (215045) app: MEM free=182120 largest=73728 js=0 frames=2956
+I (215045) app: APP_STOPPED
+I (215050) app: APP_ID local.imucal
+I (215084) app: MEM free=140952 largest=63488 js=35116 frames=0
+I (215084) shell: RUN 5785 bytes -> ESP_OK
+I (235198) app: MEM free=221388 largest=73728 js=0 frames=1006
+I (235198) app: APP_STOPPED
+I (235202) app: APP_ID local.player
+I (235227) app: MEM free=177836 largest=73728 js=31136 frames=0
+
+== kbs-lcdcatch
+I (1092436) app: MEM free=184348 largest=65536 js=0 frames=2195
+I (1092436) app: APP_STOPPED
+I (1092441) app: APP_ID local.lcdcatch
+I (1092498) app: MEM free=139900 largest=53248 js=50228 frames=0
+I (1092498) shell: RUN 8436 bytes -> ESP_OK
+I (1112574) app: MEM free=220544 largest=65536 js=0 frames=608
+I (1112575) app: APP_STOPPED
+I (1112578) app: APP_ID local.player
+I (1112603) app: MEM free=177020 largest=65536 js=31164 frames=0
+
+== kbs-megademo
+I (771314) app: MEM free=181236 largest=53248 js=0 frames=2579
+I (771314) app: APP_STOPPED
+I (771318) app: APP_ID local.megademo
+I (771537) app: MEM free=40556 largest=31744 js=104496 frames=0
+I (771537) shell: RUN 870 bytes -> ESP_OK
+I (771537) memory: MEM_PRESSURE mask=0x1 was=0x0 free=0 largest=0 guest_free=25552 episode=1
+I (791655) app: MEM free=220524 largest=65536 js=0 frames=599
+I (791655) app: APP_STOPPED
+I (791659) app: APP_ID local.player
+I (791684) app: MEM free=176888 largest=65536 js=31156 frames=0
+
+== kbs-netcheck
+I (543286) app: MEM free=174372 largest=65536 js=0 frames=1316
+I (543286) app: APP_STOPPED
+I (543290) app: APP_ID local.netcheck
+I (543312) app: MEM free=154136 largest=63488 js=33968 frames=0
+I (543313) shell: RUN 3824 bytes -> ESP_OK
+W (548395) wifi:Password length matches WPA2 standards, authmode threshold changes from OPEN to WPA2
+I (563357) app: MEM free=220312 largest=65536 js=0 frames=603
+I (563358) app: APP_STOPPED
+I (563361) app: APP_ID local.player
+I (563386) app: MEM free=176672 largest=65536 js=31128 frames=0
+
+== kbs-pet
+I (348806) app: MEM free=182116 largest=73728 js=0 frames=3382
+I (348806) app: APP_STOPPED
+I (348811) app: APP_ID local.pet
+I (348853) app: MEM free=140728 largest=63488 js=39896 frames=0
+I (348853) shell: RUN 5140 bytes -> ESP_OK
+W (368978) app: jobs dropped at stop: queue was not empty (yields=0 continuations=0)
+I (368978) app: MEM free=221388 largest=73728 js=0 frames=604
+I (368978) app: APP_STOPPED
+I (368982) app: APP_ID local.player
+I (369006) app: MEM free=177936 largest=73728 js=31100 frames=0
+
+== kbs-stress
+I (478588) app: MEM free=175036 largest=73728 js=0 frames=1359
+I (478588) app: APP_STOPPED
+I (478593) app: APP_ID local.stress
+I (478685) app: MEM free=91724 largest=31744 js=42800 frames=0
+I (478685) shell: RUN 11870 bytes -> ESP_OK
+I (498748) app: MEM free=220808 largest=65536 js=0 frames=598
+I (498748) app: APP_STOPPED
+I (498752) app: APP_ID local.player
+I (498776) app: MEM free=177208 largest=65536 js=31096 frames=0
+
+== kbs-tlscycle
+I (664185) app: MEM free=181044 largest=65536 js=0 frames=2992
+I (664185) app: APP_STOPPED
+I (664189) app: APP_ID local.tlscycle
+I (664202) app: MEM free=153640 largest=53248 js=27948 frames=0
+I (664203) shell: RUN 1693 bytes -> ESP_OK
+W (664212) wifi:Password length matches WPA2 standards, authmode threshold changes from OPEN to WPA2
+I (684278) app: MEM free=186776 largest=65536 js=0 frames=602
+I (684278) app: APP_STOPPED
+I (684281) app: APP_ID local.player
+I (684306) app: MEM free=143296 largest=65536 js=31092 frames=0
+
+== kbs-videolab
+I (998489) app: MEM free=173084 largest=65536 js=0 frames=2566
+I (998489) app: APP_STOPPED
+I (998493) app: APP_ID local.videolab
+I (998512) app: MEM free=124672 largest=53248 js=33056 frames=0
+I (998513) shell: RUN 2994 bytes -> ESP_OK
+I (1018607) app: MEM free=220544 largest=65536 js=0 frames=593
+I (1018608) app: APP_STOPPED
+I (1018611) app: APP_ID local.player
+I (1018636) app: MEM free=177020 largest=65536 js=31164 frames=0

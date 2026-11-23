@@ -28,7 +28,7 @@ typedef struct {
     // still show as one of each. 256 edges of ONE key between two reads would
     // alias to none; the input task drains one event per 5 ms poll, so that is
     // 1.28 s of nothing but that key with no reader, which the readers here
-    // (one per frame, re-based across every gap -- pocket_input.c) never allow.
+    // (one per frame, re-based across every gap -- kobako_input.c) never allow.
     uint8_t  presses[KEYSTATE_KEYS];
     uint8_t  releases[KEYSTATE_KEYS];
     uint32_t edges;                     // every edge applied, all keys

@@ -67,8 +67,8 @@ L2a はフレームを C スタックから **動かないセグメント** へ�
   ネイティブ呼び出し中に中断点が存在しないことで構造的に満たされる。pin は API として
   置くが、L3a では**常に 0 であることを表明する assert** として働く（D51）。
 - **移動の停止時間は中断の停止時間に含まれる。** 新しい「止まる理由」を作らない。
-- **L2c が無ければ L3 は成立しない**という依存が明示される。`CONFIG_POCKET_VM_RELOC` は
-  `CONFIG_POCKET_VM_YIELD` に依存する（D52）。
+- **L2c が無ければ L3 は成立しない**という依存が明示される。`CONFIG_QJS_LEAN_RELOC` は
+  `CONFIG_QJS_LEAN_YIELD` に依存する（D52）。
 
 ### 2.1 中断していても、動かせないことがある
 
@@ -266,11 +266,11 @@ typedef struct JSVMRelocStats {
 
 /* 中断中のセグメントを新しい番地へ写す。テスト用の明示移動 API（仕様 sec.8）。
  * 0 で成功、-1 で失敗（失敗時 VM は移動前と同一）。out は NULL 可。
- * CONFIG_POCKET_VM_RELOC が無効なビルドでは常に -1。 */
+ * CONFIG_QJS_LEAN_RELOC が無効なビルドでは常に -1。 */
 JS_EXTERN int JS_VMStackRelocate(JSRuntime *rt, JSVMRelocStats *out);
 ```
 
-**D52: `CONFIG_POCKET_VM_RELOC`、既定 n、`CONFIG_POCKET_VM_YIELD` に依存する。**
+**D52: `CONFIG_QJS_LEAN_RELOC`、既定 n、`CONFIG_QJS_LEAN_YIELD` に依存する。**
 出荷ビルドは L3a を持たない。仕様 §12 の「新しい経路はビルド時選択で既定を従来経路に」。
 
 `JS_VMStackTrim` と同じ置き場（`quickjs.h:541` の隣）に並べる。ホストの受け口は
@@ -288,7 +288,7 @@ JS_EXTERN int JS_VMStackRelocate(JSRuntime *rt, JSVMRelocStats *out);
 | G9 | 旧番地への touch が検出される | asan 変種 + `--reloc-keep-old` | 未実施 |
 | G10 | 4種の失敗が安全 | §6 の表 | 未実施 |
 | G11 | Test262 退行 0 | `--force-reloc` 変種で固定リビジョン | 未実施 |
-| G12 | **実機の断片化計測**（§1.1 の関所） | 確保失敗フックでヒープを歩き、セグメントを退かせば足りたかを判定（`CONFIG_POCKET_VM_OOMPROBE`） | **実施（2026-09-25、results §15）**: 出荷アプリの失敗 0、セグメントで救えた失敗 0、負の対照は全件検出 → L3/L4 を閉じた |
+| G12 | **実機の断片化計測**（§1.1 の関所） | 確保失敗フックでヒープを歩き、セグメントを退かせば足りたかを判定（`CONFIG_QJS_LEAN_OOMPROBE`） | **実施（2026-09-25、results §15）**: 出荷アプリの失敗 0、セグメントで救えた失敗 0、負の対照は全件検出 → L3/L4 を閉じた |
 
 **G7 が「期待出力は既存のものと同一」であることが要点**で、L3 は観測可能な挙動を
 1バイトも変えてはならない。新しい `expected-reloc/` を作る必要があるなら、それは
@@ -334,7 +334,7 @@ S3 は遅く、写すバイト数も違う。**D6 は推定ではなく実測で
 | D49 | 開いた var_ref の判定は `is_detached` | 決定済み | §4.2 |
 | D50 | 毒化は3層（充填・ASan・保持） | 決定済み。充填値は未確定 | §5 |
 | D51 | 世代カウンタは置くが L3a では VM が使わない。pin は assert のみ | 決定済み | §6 |
-| D52 | `CONFIG_POCKET_VM_RELOC`、既定 n、YIELD に依存 | 決定済み | §7 |
+| D52 | `CONFIG_QJS_LEAN_RELOC`、既定 n、YIELD に依存 | 決定済み | §7 |
 | D53 | 動かさなかったセグメントを指すポインタは表に当たらず放置 | 決定済み | §3.1 |
 | D54 | L3b（誰がいつ動かすか）は L4 の入口として先送り | 保留 | §1 |
 | D55 | 床の下に外側の JS 活性が在るときは移動を拒む（`current_stack_frame != NULL`） | 決定済み | §2.1 |
@@ -349,7 +349,7 @@ S3 は遅く、写すバイト数も違う。**D6 は推定ではなく実測で
 
 ### 10.1 何を作ったか
 
-`JS_VMStackCompact()`（`CONFIG_POCKET_VM_RELOC` の下、既定 n）。駐機中の鎖を、セグメントごとの
+`JS_VMStackCompact()`（`CONFIG_QJS_LEAN_RELOC` の下、既定 n）。駐機中の鎖を、セグメントごとの
 同サイズのブロックではなく**1つのブロック**へ、下のセグメントから順に生きている部分だけ写す。
 fix-up は L3a と同じ関数で、変わるのは表の差分だけ（各旧セグメントが新ブロックの自分の区間を指す）。
 D46 の「差分はセグメントごと」は最初からこの形を許していた。新ブロックは位置による大きさの系列に

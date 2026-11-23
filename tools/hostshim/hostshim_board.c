@@ -1,7 +1,7 @@
 // The two lines of board.c a surface test needs, without the panel, the
 // keyboard or the fonts that tools/hostshim/hostshim.c brings with it.
 //
-// tools/test_pocket_capture.c draws the recording indicator into an array and
+// tools/test_kobako_capture.c draws the recording indicator into an array and
 // checks it is there, which needs a colour and nothing else; hostshim.c would
 // have dragged in the font atlas, the source store and the IME behind it.
 #include "board.h"

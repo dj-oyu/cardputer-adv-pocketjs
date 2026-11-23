@@ -1,4 +1,4 @@
-// Host test of the "join" mark on native functions (quickjs.c, Pocket;
+// Host test of the "join" mark on native functions (quickjs.c, Kobako;
 // docs/perf/two-core-pipeline.md P2a). The firmware will hang "wait for the
 // display task" on the join hook, so what this checks is completeness and
 // precision: every native function the firmware creates calls the hook before
@@ -130,24 +130,24 @@ int main(void)
     set_fn(ctx, g, "early", early);
 
     JS_MarkCFunctions(rt, true);
-    JSValue pocket = JS_NewObject(ctx);
-    set_fn(ctx, pocket, "plain", JS_NewCFunction(ctx, fn_plain, "plain", 0));
+    JSValue kobako = JS_NewObject(ctx);
+    set_fn(ctx, kobako, "plain", JS_NewCFunction(ctx, fn_plain, "plain", 0));
     JSValue d = JS_NewInt32(ctx, 5);
-    set_fn(ctx, pocket, "data", JS_NewCFunctionData(ctx, fn_data, 0, 0, 1, &d));
-    set_fn(ctx, pocket, "maker", JS_NewCFunction(ctx, fn_maker, "maker", 0));
-    set_fn(ctx, pocket, "thrower", JS_NewCFunction(ctx, fn_throw, "thrower", 0));
-    set_fn(ctx, pocket, "callIt", JS_NewCFunction(ctx, fn_call, "callIt", 1));
+    set_fn(ctx, kobako, "data", JS_NewCFunctionData(ctx, fn_data, 0, 0, 1, &d));
+    set_fn(ctx, kobako, "maker", JS_NewCFunction(ctx, fn_maker, "maker", 0));
+    set_fn(ctx, kobako, "thrower", JS_NewCFunction(ctx, fn_throw, "thrower", 0));
+    set_fn(ctx, kobako, "callIt", JS_NewCFunction(ctx, fn_call, "callIt", 1));
     JSValue optout = JS_NewCFunction(ctx, fn_plain, "optout", 0);
     CHECK(JS_SetCFunctionJoin(optout, false), "opt-out refused");
-    set_fn(ctx, pocket, "optout", optout);
-    JS_SetPropertyFunctionList(ctx, pocket, list, 3);
+    set_fn(ctx, kobako, "optout", optout);
+    JS_SetPropertyFunctionList(ctx, kobako, list, 3);
     // A span with the count zeroed inside a marked one: unmarked, list too.
     JSCFunctionMark saved = JS_SetCFunctionMark(rt, false);
-    set_fn(ctx, pocket, "span", JS_NewCFunction(ctx, fn_plain, "span", 0));
+    set_fn(ctx, kobako, "span", JS_NewCFunction(ctx, fn_plain, "span", 0));
     static const JSCFunctionListEntry span_list[] = {
         JS_CFUNC_DEF("spanListed", 0, fn_plain),
     };
-    JS_SetPropertyFunctionList(ctx, pocket, span_list, 1);
+    JS_SetPropertyFunctionList(ctx, kobako, span_list, 1);
     CHECK(JS_GetCFunctionMark(rt) == 0, "span not off");
     JS_RestoreCFunctionMark(rt, saved);
     CHECK(JS_GetCFunctionMark(rt) == 1, "span restore");
@@ -158,7 +158,7 @@ int main(void)
     CHECK(JS_IsException(big), "data_len 128 accepted");
     JS_FreeValue(ctx, JS_GetException(ctx));
     JS_MarkCFunctions(rt, false);
-    set_fn(ctx, g, "pocket", pocket);
+    set_fn(ctx, g, "kobako", kobako);
     JSValue engine = JS_NewObject(ctx);
     JS_SetPropertyFunctionList(ctx, engine, engine_list, 2);
     set_fn(ctx, g, "engine", engine);
@@ -168,27 +168,27 @@ int main(void)
     struct { const char *src; int want_result; int want_hooks; } cases[] = {
         // Builtins first touched, and engine functions made, by guest JS that
         // a marked call runs: unmarked. callIt + its product = 2 hooks.
-        { "pocket.callIt(() => { 'a'.padStart(3); [1].findLast(x => x);"
+        { "kobako.callIt(() => { 'a'.padStart(3); [1].findLast(x => x);"
           " Promise.resolve(1).finally(() => 0); new Map(); })()", 9, 2 },
         { "'a'.padStart(3).length + [1].findLast(x => x) + new Map().size", 4, 0 },
         { "early()", 1, 0 },
-        { "pocket.plain()", 1, 1 },
-        { "pocket.data()", 5, 1 },
-        { "pocket.listed()", 1, 1 },
-        { "pocket.prop", 3, 1 },
-        { "pocket.optout()", 1, 0 },
-        { "pocket.nested.deep()", 1, 1 },
-        { "pocket.span() + pocket.spanListed()", 2, 0 },
-        { "Object.keys(pocket).length", 7, 0 },
+        { "kobako.plain()", 1, 1 },
+        { "kobako.data()", 5, 1 },
+        { "kobako.listed()", 1, 1 },
+        { "kobako.prop", 3, 1 },
+        { "kobako.optout()", 1, 0 },
+        { "kobako.nested.deep()", 1, 1 },
+        { "kobako.span() + kobako.spanListed()", 2, 0 },
+        { "Object.keys(kobako).length", 7, 0 },
         { "engine.listed() + engine.prop", 4, 0 },
         // a function made by a marked call is marked: maker + its product
-        { "pocket.maker()()", 7, 2 },
+        { "kobako.maker()()", 7, 2 },
         // an exception still lowers the mark (checked below)
-        { "try { pocket.thrower() } catch (e) {} 0", 0, 1 },
+        { "try { kobako.thrower() } catch (e) {} 0", 0, 1 },
         // through call/apply/bind and as a callback of a builtin
-        { "pocket.plain.call(null)", 1, 1 },
-        { "pocket.plain.bind(null)()", 1, 1 },
-        { "[1,2].map(pocket.plain).length", 2, 2 },
+        { "kobako.plain.call(null)", 1, 1 },
+        { "kobako.plain.bind(null)()", 1, 1 },
+        { "[1,2].map(kobako.plain).length", 2, 2 },
         // the engine's own natives, also ones it makes at run time
         { "Math.max(1, 2) + [3].push(4) + JSON.stringify({a:1}).length", 11, 0 },
         { "Promise.resolve(1).finally(() => 0); Promise.all([1, 2]); 0", 0, 0 },

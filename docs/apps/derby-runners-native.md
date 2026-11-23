@@ -1,12 +1,12 @@
-# DERBY WATCH: 走者の描画を `pocket.derby.runners` に下ろす（api-reorg P4b）
+# DERBY WATCH: 走者の描画を `kobako.derby.runners` に下ろす（api-reorg P4b）
 
 2026-11-13、ブランチ `p4b-derby`（`claude/eager-fermi-9ax7h8` の `2ef6480` から）。[api-reorg.md](../kasane/api-reorg.md) §5 の 7・§6 P4b（§7.3 で実施が決まった）と、P4 の DERBY の項（flush ごとの `subarray` をやめる）をまとめて行った。
 
-**結論:** 走者（`legs`・`run`）と HEAD ON の正面の馬（`frl`・`frb`）の 1 フレーム分の仕事 — 投影・間引き・奥から手前の並べ替え・入力の組み立て・`drawMany` — を、`pocket.derby` の 1 関数 `runners()` に移した。**Shiki の状態の領域と `drawList`（shiki-v2.md §4・§5）は使わなかった**（§4 の比較）。r5sim の DERBY のレースの場面で 1 ターン −8.8〜−18.3%（WIDE −19.4k、VISION −26.1k カウント）、確保 78 → 66 回/ターン、ゲストの `heap_used` −3.4 KB（いずれも r5sim の実測）。host の全検査で画素は全フレーム一致（CSV のフレームのハッシュ、§6）。実機は未計測で、同じバイナリの中の A/B（§7）で親が測る。
+**結論:** 走者（`legs`・`run`）と HEAD ON の正面の馬（`frl`・`frb`）の 1 フレーム分の仕事 — 投影・間引き・奥から手前の並べ替え・入力の組み立て・`drawMany` — を、`kobako.derby` の 1 関数 `runners()` に移した。**Shiki の状態の領域と `drawList`（shiki-v2.md §4・§5）は使わなかった**（§4 の比較）。r5sim の DERBY のレースの場面で 1 ターン −8.8〜−18.3%（WIDE −19.4k、VISION −26.1k カウント）、確保 78 → 66 回/ターン、ゲストの `heap_used` −3.4 KB（いずれも r5sim の実測）。host の全検査で画素は全フレーム一致（CSV のフレームのハッシュ、§6）。実機は未計測で、同じバイナリの中の A/B（§7）で親が測る。
 
 ## 1. 何に時間を使っていたか（r5sim、実測）
 
-[api-reorg-perf.md](../kasane/logs/api-reorg-perf.md) の `derby` 負荷（デモのレース 1 本、`R5SIM_ICOUNT=shift=2,sleep=off`、同じチェックアウトで前後を比べる）。場面ごとの行に、ターンの内訳を足した（`tools/r5sim/main/r5sim.c`: `js` は `frame()` 全体（中の native 呼び出しを含む）、`shiki` はその中の Shiki の draw の native の全部（`pocket_shiki_turn` の `total_cy`）、`end` は `pocket_kasane_end_turn`、`draws` は Shiki の draw の数）。
+[api-reorg-perf.md](../kasane/logs/api-reorg-perf.md) の `derby` 負荷（デモのレース 1 本、`R5SIM_ICOUNT=shift=2,sleep=off`、同じチェックアウトで前後を比べる）。場面ごとの行に、ターンの内訳を足した（`tools/r5sim/main/r5sim.c`: `js` は `frame()` 全体（中の native 呼び出しを含む）、`shiki` はその中の Shiki の draw の native の全部（`kobako_shiki_turn` の `total_cy`）、`end` は `kobako_kasane_end_turn`、`draws` は Shiki の draw の数）。
 
 走者の経路を落とした 2 つの変種で、経路の重さを測った（カウント/ターン、`2ef6480`）:
 
@@ -19,7 +19,7 @@
 | headon | 94,343 | 84,328 | —（HEAD ON は `rin()` を通らない） | `drawMany` の呼び出しだけで約 2.8k（元 − E2 − Shiki の差）。`bput` 16 回の JS は E1・E2 では消えない |
 
 - 走者 1 頭は Shiki の draw 2 本で、16 本の Shiki の native は約 8.7k カウント（`shiki` の差）。**それ以外の約 18k（`rin`・`bput` の JS 約 11k、`drawMany` の呼び出しと `subarray` 約 7k）は、絵に関係のない JS と境目の仕事だった。** WIDE で 1 ターンの 8%、FIELD・FINISH で 15%、VISION で 19%。
-- WIDE のほかの約 166k（Shiki の 36k を除く）は、首振りの列（`pocket.derby.ser`、C）・HUD の文字列・`at()`・監督で、P4b の範囲外（§8）。パドック（走者 1 頭）でも 1 ターン 45k ある。
+- WIDE のほかの約 166k（Shiki の 36k を除く）は、首振りの列（`kobako.derby.ser`、C）・HUD の文字列・`at()`・監督で、P4b の範囲外（§8）。パドック（走者 1 頭）でも 1 ターン 45k ある。
 
 ## 2. 設計
 
@@ -34,7 +34,7 @@ S.runners(xs, lz, order, CO, hA, hB, mode, close, mask, from)  // -1 か、大�
 | 1 首振り（`pan()`） | `aim()` のカメラ（`pose()`・`pj()`） | カメラの前で X が −160〜400 px | 奥行きの降順に**安定な挿入で並べ、`zo` に書き戻す**（JS の `zo.sort` と同じ結果。次のフレームの `at()` の sort がこの順から始まるので、書き戻さないと同点の順が変わる） | 同上 |
 | 2 HEAD ON（`paint()`） | 決勝線の先の固定カメラ | しない | `order`（= `ro`）を後ろから | `frl`、`frb`（x, y, s, d, 毛色, 勝負服） |
 
-- **入力は整数のまま**（`drawMany` の `Int32Array` と同じ。§2.4 の変換が無い）。`pocket_shiki_frame.c` に `pocket_proc_draw_fixed()` を足した（`pocket_proc_shiki_draw_inputs()` の薄い入口。`DRAW_INDEX` には呼び出しの中の draw の番号を渡す。今の 4 本の式は読まない）。
+- **入力は整数のまま**（`drawMany` の `Int32Array` と同じ。§2.4 の変換が無い）。`kobako_shiki_frame.c` に `kobako_proc_draw_fixed()` を足した（`kobako_proc_shiki_draw_inputs()` の薄い入口。`DRAW_INDEX` には呼び出しの中の draw の番号を渡す。今の 4 本の式は読まない）。
 - **大写しの馬（CLOSE）は JS に残した。** `g0`〜`g5` の点列と `silk` の 2 本で、レーンの順の途中に入る。`runners()` は大写しのレーンに来たら描かずにその位置を返し、JS が 2 本を描いて次の位置から呼び直す（1 フレーム 2 回まで）。順序（奥の走者 → 大写し → 手前の走者）は前と同じ。
 - **投影は 1 か所。** `lanes()` の中身を `lane()`、`head()` の中身を `head()`（C の static 関数）に出し、`lanes()`・`head()`（A/B の旧経路と host が使う）と `runners()` が同じ関数を通る。
 - `plan` のハンドルが 0（未登録）なら描かない（旧 `rin()` の `!live.run || !live.legs`）。描画の失敗は `drawMany` と同じく例外で止まり、`FRAMEFAIL` になる。
@@ -62,7 +62,7 @@ function runners(xs, pan, close, K) {
 | D. 走者の draw だけを C に（投影・間引き・並べ替えは JS） | `drawRunner(l, X, S, Y, d)` のような 1 頭 1 呼び出し | 呼び出しが O(頭数) のまま（api-reorg §2 の G1）。境目の 1 回が約 1,100〜1,400 サイクルなので 8 頭で約 1.5k カウント残り、JS のループと `PO` の読み出しも残る |
 | E. `at()` の `zo.sort` も native に | 毎フレームの比較関数の呼び出しが消える | 走者の描画の経路の外（`photo()` が `zo` を写す）。効果は測っていない。次の候補（§8） |
 
-B を選んだのは、[derby-ser-native.md](derby-ser-native.md) と同じ理由: DERBY の走者の投影はもともと `pocket.derby`（C）にあり、JS は C の出力を読み直して C の入力に詰め直していただけだったから。境目を「1 フレーム 1〜2 回」にすると、JS に残るのは呼び出しと大写しの 2 本になる。
+B を選んだのは、[derby-ser-native.md](derby-ser-native.md) と同じ理由: DERBY の走者の投影はもともと `kobako.derby`（C）にあり、JS は C の出力を読み直して C の入力に詰め直していただけだったから。境目を「1 フレーム 1〜2 回」にすると、JS に残るのは呼び出しと大写しの 2 本になる。
 
 ## 5. 結果（r5sim、実測）
 
@@ -91,8 +91,8 @@ B を選んだのは、[derby-ser-native.md](derby-ser-native.md) と同じ理�
 ## 6. 正しさとメモリ（host）
 
 - **画素:** `python3 tools/games/run_derby.py`（64 bit、ASan/UBSan）の全部の実行で `DERBY_HOST PASS` が前後とも 19 回、14 本の実行のフレームごとの CSV（`frames_*.csv`。各フレームの画素のハッシュ `fh`、draw・線分・ステップの数）が**前後でバイト単位で同じ**（MID 14,519 フレーム、LIGHT/HEAVY・director だけ・首振りだけ・画面の移動・ser の oracle を含む。楕円のデモのレースも入る）。着順・時計・オッズの検査も同じ。
-- **A/B の旧経路も同じ画素:** 新しいバイナリで `DERBY_JS="pocket.app.load('ab');AB=1"` の MID の CSV が、前の CSV とバイト単位で同じ。
-- host の検査は `pocket.derby` の新しい draw を `pocket_proc_draw_fixed_hook`（`tools/games/test_derby_host.c`）で受けて、`drawMany` の `Int32Array` と同じく再生する。
+- **A/B の旧経路も同じ画素:** 新しいバイナリで `DERBY_JS="kobako.app.load('ab');AB=1"` の MID の CSV が、前の CSV とバイト単位で同じ。
+- host の検査は `kobako.derby` の新しい draw を `kobako_proc_draw_fixed_hook`（`tools/games/test_derby_host.c`）で受けて、`drawMany` の `Int32Array` と同じく再生する。
 - **ゲストヒープ（`run_derby.py --m32 --heap-limit 163840`、実機と同じ 8 B の JSValue と 4 B のポインタ、TLSF の数え方、MID の 1 本）:**
 
 | | 前（`2ef6480`） | 後 | 差 | 後、旧経路を読み込んだ（`ab`） |
@@ -106,7 +106,7 @@ B を選んだのは、[derby-ser-native.md](derby-ser-native.md) と同じ理�
   評価の前の +216 B はチャンクの表の 1 行（`ab`）など。評価のピークが下がるので、実機の評価の余裕（基準 約 28.9 KB）は広がる側、ゲスト最大（基準 134.1〜134.8 KB）は下がる側と見る（推定。実機で確かめる）。**A/B で旧経路を読み込むと、GC 後の最大は前より +2.1 KB（host m32）になる**。実機のゲスト最大に足すと約 137 KB（推定）で、140,000 B の線の内側だが余裕は減る。
 
 - **Shiki の heap:** 全実行で「used max 31,140、largest free min 17,556（of 49,152）」が前後で同じ（64 bit host。m32 は 30,516 / 18,204 で同じ）。`runners()` は Shiki の heap から何も取らない（案 A の領域・リストが要らない）ので、実機の HEAD ON・FINISH の窓の最大の空き塊（基準 2,492 B）も変わらない見込み（推定。`SHIKI_TURN` の `shk=` で確かめる）。
-- **ファーム（`idf.py size`、別のビルドディレクトリと `-DSDKCONFIG=`）:** Flash Code 1,694,808 → 1,696,196（+1,388 B、`runners()`・`lane()`・`head()`・`pocket_proc_draw_fixed()`）、`.rodata` 783,444 → 785,092（+1,648 B、主に埋め込みの `derby_ab.js` 2,014 B の分と、JS の短くなった分の差）、DIRAM 181,316 → 181,316（`.bss`・`.data`・`.iram0.text` とも同じ）。IRAM には何も置いていない。
+- **ファーム（`idf.py size`、別のビルドディレクトリと `-DSDKCONFIG=`）:** Flash Code 1,694,808 → 1,696,196（+1,388 B、`runners()`・`lane()`・`head()`・`kobako_proc_draw_fixed()`）、`.rodata` 783,444 → 785,092（+1,648 B、主に埋め込みの `derby_ab.js` 2,014 B の分と、JS の短くなった分の差）、DIRAM 181,316 → 181,316（`.bss`・`.data`・`.iram0.text` とも同じ）。IRAM には何も置いていない。
 
 ## 7. 実機の A/B（同じバイナリ）
 

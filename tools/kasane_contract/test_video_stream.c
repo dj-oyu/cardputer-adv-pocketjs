@@ -1,4 +1,4 @@
-#include "pocket/pocket_video_stream.h"
+#include "kobako/kobako_video_stream.h"
 #include "ui/kasane/ksn_video_frames.h"
 #include <assert.h>
 #include <stdio.h>
@@ -38,45 +38,45 @@ static void make(memory *m){
 }
 int main(void){
     memory m;make(&m);
-    pocket_video_stream s;
-    assert(pocket_video_stream_open(&s,read_memory,&m,m.size));
+    kobako_video_stream s;
+    assert(kobako_video_stream_open(&s,read_memory,&m,m.size));
     assert(s.width==2&&s.height==2&&s.frame_bytes==8);
     uint8_t pixels[8]={0};uint64_t pts=0;
-    assert(pocket_video_stream_next(&s,99,pixels,sizeof pixels,&pts)==
-           POCKET_VIDEO_STREAM_FUTURE);
+    assert(kobako_video_stream_next(&s,99,pixels,sizeof pixels,&pts)==
+           KOBAKO_VIDEO_STREAM_FUTURE);
     uint32_t reads=m.reads;
-    assert(pocket_video_stream_next(&s,99,pixels,sizeof pixels,&pts)==
-           POCKET_VIDEO_STREAM_FUTURE&&m.reads==reads);
-    assert(pocket_video_stream_next(&s,125,pixels,sizeof pixels,&pts)==
-           POCKET_VIDEO_STREAM_FRAME&&pts==100&&pixels[0]==1);
-    assert(pocket_video_stream_next(&s,125,pixels,sizeof pixels,&pts)==
-           POCKET_VIDEO_STREAM_FRAME&&pts==110&&pixels[0]==2);
-    assert(pocket_video_stream_next(&s,125,pixels,sizeof pixels,&pts)==
-           POCKET_VIDEO_STREAM_FRAME&&pts==120&&pixels[0]==3);
-    assert(pocket_video_stream_next(&s,125,pixels,sizeof pixels,&pts)==
-           POCKET_VIDEO_STREAM_END);
-    assert(pocket_video_stream_next(&s,125,pixels,sizeof pixels,&pts)==
-           POCKET_VIDEO_STREAM_END);
+    assert(kobako_video_stream_next(&s,99,pixels,sizeof pixels,&pts)==
+           KOBAKO_VIDEO_STREAM_FUTURE&&m.reads==reads);
+    assert(kobako_video_stream_next(&s,125,pixels,sizeof pixels,&pts)==
+           KOBAKO_VIDEO_STREAM_FRAME&&pts==100&&pixels[0]==1);
+    assert(kobako_video_stream_next(&s,125,pixels,sizeof pixels,&pts)==
+           KOBAKO_VIDEO_STREAM_FRAME&&pts==110&&pixels[0]==2);
+    assert(kobako_video_stream_next(&s,125,pixels,sizeof pixels,&pts)==
+           KOBAKO_VIDEO_STREAM_FRAME&&pts==120&&pixels[0]==3);
+    assert(kobako_video_stream_next(&s,125,pixels,sizeof pixels,&pts)==
+           KOBAKO_VIDEO_STREAM_END);
+    assert(kobako_video_stream_next(&s,125,pixels,sizeof pixels,&pts)==
+           KOBAKO_VIDEO_STREAM_END);
     make(&m);m.size=75;
-    assert(pocket_video_stream_open(&s,read_memory,&m,m.size));
-    assert(pocket_video_stream_next(&s,200,pixels,sizeof pixels,&pts)==
-           POCKET_VIDEO_STREAM_FRAME);
-    assert(pocket_video_stream_next(&s,200,pixels,sizeof pixels,&pts)==
-           POCKET_VIDEO_STREAM_FRAME);
-    assert(pocket_video_stream_next(&s,200,pixels,sizeof pixels,&pts)==
-           POCKET_VIDEO_STREAM_INVALID);
+    assert(kobako_video_stream_open(&s,read_memory,&m,m.size));
+    assert(kobako_video_stream_next(&s,200,pixels,sizeof pixels,&pts)==
+           KOBAKO_VIDEO_STREAM_FRAME);
+    assert(kobako_video_stream_next(&s,200,pixels,sizeof pixels,&pts)==
+           KOBAKO_VIDEO_STREAM_FRAME);
+    assert(kobako_video_stream_next(&s,200,pixels,sizeof pixels,&pts)==
+           KOBAKO_VIDEO_STREAM_INVALID);
     make(&m);u64(m.data+36,100);
-    assert(pocket_video_stream_open(&s,read_memory,&m,m.size));
-    assert(pocket_video_stream_next(&s,200,pixels,sizeof pixels,&pts)==
-           POCKET_VIDEO_STREAM_FRAME);
-    assert(pocket_video_stream_next(&s,200,pixels,sizeof pixels,&pts)==
-           POCKET_VIDEO_STREAM_INVALID);
+    assert(kobako_video_stream_open(&s,read_memory,&m,m.size));
+    assert(kobako_video_stream_next(&s,200,pixels,sizeof pixels,&pts)==
+           KOBAKO_VIDEO_STREAM_FRAME);
+    assert(kobako_video_stream_next(&s,200,pixels,sizeof pixels,&pts)==
+           KOBAKO_VIDEO_STREAM_INVALID);
     make(&m);u16(m.data+4,240);u16(m.data+6,135);
-    assert(!pocket_video_stream_open(&s,read_memory,&m,m.size));
+    assert(!kobako_video_stream_open(&s,read_memory,&m,m.size));
     make(&m);u32(m.data+8,10);
-    assert(!pocket_video_stream_open(&s,read_memory,&m,m.size));
+    assert(!kobako_video_stream_open(&s,read_memory,&m,m.size));
     make(&m);m.fail=true;
-    assert(!pocket_video_stream_open(&s,read_memory,&m,m.size));
+    assert(!kobako_video_stream_open(&s,read_memory,&m,m.size));
 
     make(&m);
     for(unsigned i=0;i<10;i++){
@@ -85,39 +85,39 @@ int main(void){
         memset(m.data+at+12,(int)(i+1),8);
     }
     m.size=216;
-    assert(pocket_video_stream_open(&s,read_memory,&m,m.size));
+    assert(kobako_video_stream_open(&s,read_memory,&m,m.size));
     uint32_t before=m.bytes;
-    assert(pocket_video_stream_latest(&s,1000,pixels,sizeof pixels,&pts,4)==
-           POCKET_VIDEO_STREAM_SCANNING);
+    assert(kobako_video_stream_latest(&s,1000,pixels,sizeof pixels,&pts,4)==
+           KOBAKO_VIDEO_STREAM_SCANNING);
     assert(m.bytes-before==4*12); /* stale payloads were skipped */
     before=m.bytes;
-    assert(pocket_video_stream_latest(&s,1000,pixels,sizeof pixels,&pts,4)==
-           POCKET_VIDEO_STREAM_SCANNING);
+    assert(kobako_video_stream_latest(&s,1000,pixels,sizeof pixels,&pts,4)==
+           KOBAKO_VIDEO_STREAM_SCANNING);
     assert(m.bytes-before==4*12);
     before=m.bytes;
-    assert(pocket_video_stream_latest(&s,1000,pixels,sizeof pixels,&pts,4)==
-           POCKET_VIDEO_STREAM_FRAME&&pts==190&&pixels[0]==10);
+    assert(kobako_video_stream_latest(&s,1000,pixels,sizeof pixels,&pts,4)==
+           KOBAKO_VIDEO_STREAM_FRAME&&pts==190&&pixels[0]==10);
     assert(m.bytes-before==2*12+8); /* only final payload read */
-    assert(pocket_video_stream_latest(&s,1000,pixels,sizeof pixels,&pts,4)==
-           POCKET_VIDEO_STREAM_END);
+    assert(kobako_video_stream_latest(&s,1000,pixels,sizeof pixels,&pts,4)==
+           KOBAKO_VIDEO_STREAM_END);
     make(&m);m.size=75;
-    assert(pocket_video_stream_open(&s,read_memory,&m,m.size));
-    assert(pocket_video_stream_latest(&s,200,pixels,sizeof pixels,&pts,8)==
-           POCKET_VIDEO_STREAM_INVALID);
+    assert(kobako_video_stream_open(&s,read_memory,&m,m.size));
+    assert(kobako_video_stream_latest(&s,200,pixels,sizeof pixels,&pts,8)==
+           KOBAKO_VIDEO_STREAM_INVALID);
     make(&m);m.short_at=48; /* second RGB565 payload */
-    assert(pocket_video_stream_open(&s,read_memory,&m,m.size));
-    assert(pocket_video_stream_latest(&s,100,pixels,sizeof pixels,&pts,8)==
-           POCKET_VIDEO_STREAM_FRAME&&pts==100);
+    assert(kobako_video_stream_open(&s,read_memory,&m,m.size));
+    assert(kobako_video_stream_latest(&s,100,pixels,sizeof pixels,&pts,8)==
+           KOBAKO_VIDEO_STREAM_FRAME&&pts==100);
     assert(pixels[0]==1&&pixels[7]==1);
-    assert(pocket_video_stream_latest(&s,110,pixels,sizeof pixels,&pts,8)==
-           POCKET_VIDEO_STREAM_IO);
+    assert(kobako_video_stream_latest(&s,110,pixels,sizeof pixels,&pts,8)==
+           KOBAKO_VIDEO_STREAM_IO);
     assert(pixels[0]==2&&pixels[2]==2&&pixels[3]==1);
     /* A short payload read modified the output buffer without producing a
      * frame. The worker must mark this staging slot EMPTY, never READY. */
     make(&m);u64(m.data+36,100);
-    assert(pocket_video_stream_open(&s,read_memory,&m,m.size));
-    assert(pocket_video_stream_latest(&s,200,pixels,sizeof pixels,&pts,8)==
-           POCKET_VIDEO_STREAM_INVALID);
+    assert(kobako_video_stream_open(&s,read_memory,&m,m.size));
+    assert(kobako_video_stream_latest(&s,200,pixels,sizeof pixels,&pts,8)==
+           KOBAKO_VIDEO_STREAM_INVALID);
 
     /* A selected candidate survives producer data reuse until ACK; failed
      * transfer keeps it pending, explicit discard requires old-image repair. */

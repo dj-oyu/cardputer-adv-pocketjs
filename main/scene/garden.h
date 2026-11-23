@@ -1,7 +1,7 @@
 #pragma once
 // The decor loop's group width in pixels; see the note at its definition in garden.c.
 extern int g_garden_decor_group;
-#include "../pocket/random_stream.h"
+#include "../kobako/random_stream.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -398,7 +398,7 @@ typedef struct {
     int sun,phase,breath;
     int spread,slant; // slowly changing main-light geometry
     unsigned seed;
-    pocket_random_t decor_rng; // zero keeps direct/preview rendering deterministic
+    kobako_random_t decor_rng; // zero keeps direct/preview rendering deterministic
     unsigned decor_seed[4];
     uint8_t decor_cycle[4];
     bool decor_ready;

@@ -88,7 +88,7 @@ static uint16_t *half_lent, *half_from;
 // and MISO is unwired, so the only test is the glass: BOARD_ENDIAN_PROBE
 // alternates the two every 2 s and the owner looks for a change.
 static bool lcd_le;
-#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+#ifdef CONFIG_KOBAKO_FRAME_BREAKDOWN
 // FRAME_BD: strips queued to the SPI driver, one completion ISR each.
 static _Atomic uint32_t lcd_tx_n;
 uint32_t board_lcd_tx_take(void) { return atomic_exchange(&lcd_tx_n, 0u); }
@@ -393,7 +393,7 @@ static esp_err_t kread(uint8_t reg, uint8_t *value) {
     return i2c_master_transmit_receive(keyboard, &reg, 1, value, 1, 30);
 }
 static bool key_decode(uint8_t event, board_keyevent_t *out);
-#ifdef CONFIG_POCKET_KEY_INT_PROBE
+#ifdef CONFIG_KOBAKO_KEY_INT_PROBE
 #define KEY_INT_PROBE 1
 #else
 #define KEY_INT_PROBE 0
@@ -576,16 +576,16 @@ esp_err_t board_init(void) {
         .quadwp_io_num=-1, .quadhd_io_num=-1, .max_transfer_sz=sizeof(shared)
 #ifdef KASANE_P1_LCD_ISR_CORE1
         ,.isr_cpu_id=ESP_INTR_CPU_AFFINITY_1
-#elif CONFIG_POCKET_LCD_ISR_CORE >= 0
+#elif CONFIG_KOBAKO_LCD_ISR_CORE >= 0
         // Every strip completes in this ISR, which then wakes whoever reaps it
-        // (~30 a frame): its core pays for that (POCKET_LCD_ISR_CORE help).
-        ,.isr_cpu_id=CONFIG_POCKET_LCD_ISR_CORE ? ESP_INTR_CPU_AFFINITY_1 : ESP_INTR_CPU_AFFINITY_0
+        // (~30 a frame): its core pays for that (KOBAKO_LCD_ISR_CORE help).
+        ,.isr_cpu_id=CONFIG_KOBAKO_LCD_ISR_CORE ? ESP_INTR_CPU_AFFINITY_1 : ESP_INTR_CPU_AFFINITY_0
 #endif
     };
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO));
 #ifdef KASANE_P1_LCD_ISR_CORE1
     ESP_LOGI("board","P1 LCD ISR affinity requested core 1, UI core %d",
-             CONFIG_POCKET_UI_TASK_CORE);
+             CONFIG_KOBAKO_UI_TASK_CORE);
 #endif
     // 80MHz, not the 40MHz M5Stack ships. The panel's flex is short and the
     // ST7789 tolerates it: send went from 15.5ms to 9.1ms measured, and the
@@ -647,13 +647,13 @@ esp_err_t board_init(void) {
     ESP_ERROR_CHECK(kwrite(0x01, 0x01));
     for (int i=0;i<10;i++) { uint8_t value; kread(0x04, &value); }
     ESP_ERROR_CHECK(kwrite(0x02, 0x1f));
-#if CONFIG_POCKET_KEY_INT_GPIO >= 0
+#if CONFIG_KOBAKO_KEY_INT_GPIO >= 0
     // Open-drain, active low: the pull-up is what makes "no event" read 1.
-    gpio_config_t key_int = {.pin_bit_mask=1ULL<<CONFIG_POCKET_KEY_INT_GPIO,
+    gpio_config_t key_int = {.pin_bit_mask=1ULL<<CONFIG_KOBAKO_KEY_INT_GPIO,
         .mode=GPIO_MODE_INPUT, .pull_up_en=GPIO_PULLUP_ENABLE};
     ESP_ERROR_CHECK(gpio_config(&key_int));
-    ESP_LOGI("board", "KEY_INT gpio=%d level=%d%s", CONFIG_POCKET_KEY_INT_GPIO,
-             gpio_get_level(CONFIG_POCKET_KEY_INT_GPIO), KEY_INT_PROBE ? " probe" : "");
+    ESP_LOGI("board", "KEY_INT gpio=%d level=%d%s", CONFIG_KOBAKO_KEY_INT_GPIO,
+             gpio_get_level(CONFIG_KOBAKO_KEY_INT_GPIO), KEY_INT_PROBE ? " probe" : "");
 #endif
     ESP_LOGI("board", "ADV keyboard detected; LCD 240x135 RGB565; no PSRAM");
     battery_init();
@@ -674,8 +674,8 @@ esp_err_t board_init(void) {
 // 0x01) is a datasheet reading not yet confirmed on this board
 // (docs/platform/keystate.md). If it stays silent, a lost release leaves that
 // key reading as down until it is next pressed and released (keystate.h), and
-// an app started meanwhile does not see it (pocket_input.c) -- not forever.
-#if CONFIG_POCKET_KEY_INT_GPIO < 0
+// an app started meanwhile does not see it (kobako_input.c) -- not forever.
+#if CONFIG_KOBAKO_KEY_INT_GPIO < 0
 bool board_key_event(board_keyevent_t *out) {
     uint8_t count=0, event=0, status=0;
     if (kread(0x03, &count) != ESP_OK || !(count & 15)) return false;
@@ -685,7 +685,7 @@ bool board_key_event(board_keyevent_t *out) {
     return key_decode(event, out);
 }
 #else
-// With INT wired (CONFIG_POCKET_KEY_INT_GPIO), a poll that finds the pin high
+// With INT wired (CONFIG_KOBAKO_KEY_INT_GPIO), a poll that finds the pin high
 // and nothing left over from the last count does no I2C at all: that empty
 // read was ~0.3 ms of CPU 0 every 5 ms (frame-breakdown.md sec.11).
 //
@@ -713,7 +713,7 @@ static int64_t probe_last;
 #endif
 bool board_key_event(board_keyevent_t *out) {
     uint8_t count=0, event=0, status=0;
-    const bool low = gpio_get_level(CONFIG_POCKET_KEY_INT_GPIO) == 0;
+    const bool low = gpio_get_level(CONFIG_KOBAKO_KEY_INT_GPIO) == 0;
 #if KEY_INT_PROBE
     probe_polls++; probe_low += low;
     const int64_t now = esp_timer_get_time();
@@ -732,7 +732,7 @@ bool board_key_event(board_keyevent_t *out) {
         // (late). Only one with the pin still high would have been lost (miss).
         probe_skipped++;
         if (kread(0x03, &count) != ESP_OK || !(count & 15)) return false;
-        const bool late = gpio_get_level(CONFIG_POCKET_KEY_INT_GPIO) == 0;
+        const bool late = gpio_get_level(CONFIG_KOBAKO_KEY_INT_GPIO) == 0;
         if (late) probe_late++; else probe_miss++;
         ESP_LOGW("board", "KEY_INT_%s count=%u", late ? "LATE" : "MISS", (unsigned)(count & 15));
 #else
@@ -774,7 +774,7 @@ static bool key_decode(uint8_t event, board_keyevent_t *out) {
 // before every present, so consuming the buffer costs nothing and saves a
 // second one.
 #include "pet_hub.h"
-#include "pocket_capture.h"
+#include "kobako_capture.h"
 // board.h: the host's overlays on every strip, unless a present on the
 // display task (which may not read their state) turned them off.
 bool board_host_overlays = true;
@@ -793,7 +793,7 @@ esp_err_t board_present(int y, int rows, uint16_t *pixels) {
     // host's obligation, so it is drawn here, at the one transfer to the
     // panel, rather than by whichever screen happens to be up: an app can
     // paint the corner it occupies, but not after this.
-    if (board_host_overlays) pocket_capture_overlay(pixels,y,rows);
+    if (board_host_overlays) kobako_capture_overlay(pixels,y,rows);
     if(capture) {
         static char line[LCD_W*4+1];
         const char *hex="0123456789abcdef";
@@ -1001,7 +1001,7 @@ static esp_err_t present_rect(int x, int y, int cols, int rows, uint16_t *pixels
 #endif
     if (!packed && board_host_overlays) {
         pet_hub_overlay(pixels,y,rows);
-        pocket_capture_overlay(pixels,y,rows);
+        kobako_capture_overlay(pixels,y,rows);
     }
     // No capture arm: board_capture dumps whole rows and the columns outside
     // the window hold the previous band, so a caller that is capturing must not

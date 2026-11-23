@@ -7,7 +7,7 @@
 // drawing is apps/hello/main.js's, cut down to one piece of text.
 static const char PRELUDE_T[] =
     "let t\n"
-    "pocket.kasane.replace(tx => {\n"
+    "kobako.kasane.replace(tx => {\n"
     "  tx.background(0x2050a0ff)\n"
     "  t = tx.text({bounds: [40, 60, 240, 78], color: 0xffffffff,\n"
     "    text: 'COUNT 0', capacity: 32})\n"
@@ -70,7 +70,7 @@ static const lesson_t LESSONS[] = {
            "続ける係。0x000000ff",
            "を 0x2050a0ff に変えて実行"},
     .hint="Escで戻る。色は 0xRRGGBBff",
-    .code="pocket.kasane.replace(tx => {\n"
+    .code="kobako.kasane.replace(tx => {\n"
           "  tx.background(0x000000ff)\n"
           "})\n"
           "globalThis.frame = () => {}\n",
@@ -85,7 +85,7 @@ static const lesson_t LESSONS[] = {
            "まず実行、次に HELLO を",
            "好きな英字に変えて実行。"},
     .hint="日本語は9章で。まず英字で",
-    .code="pocket.kasane.replace(tx => {\n"
+    .code="kobako.kasane.replace(tx => {\n"
           "  tx.background(0x2050a0ff)\n"
           "  tx.text({bounds: [40, 60, 240, 78],\n"
           "    color: 0xffffffff, text: 'HELLO'})\n"
@@ -102,7 +102,7 @@ static const lesson_t LESSONS[] = {
            "の色。数字を変えて、文字",
            "を右下の赤にしてみよう。"},
     .hint="赤は 0xff4040ff。下は135まで",
-    .code="pocket.kasane.replace(tx => {\n"
+    .code="kobako.kasane.replace(tx => {\n"
           "  tx.background(0x2050a0ff)\n"
           "  tx.text({bounds: [40, 60, 240, 78],\n"
           "    color: 0xffffffff, text: 'HELLO'})\n"
@@ -123,7 +123,7 @@ static const lesson_t LESSONS[] = {
           "globalThis.frame = (b) => {\n"
           "  if (b & 0x4000) {\n"
           "    n = n + 1\n"
-          "    pocket.kasane.patch(tx => t.setText(tx, 'COUNT ' + n))\n"
+          "    kobako.kasane.patch(tx => t.setText(tx, 'COUNT ' + n))\n"
           "    print('ENTER ' + n) } }\n",
     .preload=true, .prelude=PRELUDE_T,
     .check=CHECK_PRINTS_PREFIX, .want="ENTER ",
@@ -136,7 +136,7 @@ static const lesson_t LESSONS[] = {
            "かな入力（もう一度で戻る）",
            "'こんにちは' を名前に。"},
     .hint="そのまま実行でも合格",
-    .code="pocket.kasane.replace(tx => {\n"
+    .code="kobako.kasane.replace(tx => {\n"
           "  tx.background(0x2050a0ff)\n"
           "  tx.text({bounds: [40, 60, 240, 78], font: 'body',\n"
           "    color: 0xffffffff, text: 'こんにちは'})\n"
@@ -158,7 +158,7 @@ const lesson_t *lesson_at(unsigned index) {
 // The calls and numbers stay opaque however carefully a chapter explains them,
 // so they are also gathered where Tab can reach them from any chapter.
 static const char *const REFERENCE[LESSON_REF_ROWS] = {
-    "pocket.kasane の書き方",
+    "kobako.kasane の書き方",
     "replace(tx=>{}) 描き直す",
     "patch(tx=>{}) 一部だけ",
     "tx.background(色) 背景",

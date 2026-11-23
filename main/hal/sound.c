@@ -211,7 +211,7 @@ static void play_tone(const request_t *req,int16_t *pcm) {
 
 // ----------------------------------------------------------------- streams
 //
-// The consumer half of sound.h's ring. The producer -- pocket_av.c's player,
+// The consumer half of sound.h's ring. The producer -- kobako_av.c's player,
 // running on the JS/ui task -- reads the source and publishes slots; this task
 // takes them in order, decodes, and writes the same 128-frame block the clicks
 // and tones write. No second I2S channel and no second task: the ring is the
@@ -1085,7 +1085,7 @@ void sound_capture_probe(void) {
         ESP_LOGW("sound","CAPTURE PROBE already running");
         return;
     }
-    // While it runs, the codec is taken and pocket.audio.capture answers BUSY,
+    // While it runs, the codec is taken and kobako.audio.capture answers BUSY,
     // which is the same answer an app gets when another recording is live. That
     // is honest rather than special-cased: a recording IS live.
     if(xTaskCreate(probe_task,"micprobe",4096,NULL,4,NULL)!=pdPASS) {

@@ -22,27 +22,27 @@
 #include "jpfont.h"
 #include "skk_session.h"
 #include "app_session.h"
-#include "pocket_kasane.h"
+#include "kobako_kasane.h"
 #include "vm_wake.h"
-#include "pocket_workspace.h"
+#include "kobako_workspace.h"
 #include "sd_picker.h"
 #include "file_picker.h"
 #include "overlay.h"
 #include "app_registry.h"
 #include "pet_hub.h"
-#include "pocket_capture.h"
-#include "pocket_av.h"
-#include "pocket_video_sd_stream.h"
+#include "kobako_capture.h"
+#include "kobako_av.h"
+#include "kobako_video_sd_stream.h"
 #ifdef KASANE_P0_PROBE
 #include "apps/apps.h"
-#include "pocket_mutex_arena.h"
+#include "kobako_mutex_arena.h"
 #include "ui/kasane/ksn_schema_session.h"
 #endif
 #include "ui/kasane/ksn_p0_probe.h"
 #ifdef KASANE_TEXT_PIE_DEVICE_PROBE
 #include "ui/kasane/ksn_render.h"
 #endif
-#include "pocket_bridge.h"
+#include "kobako_bridge.h"
 #include "app_control.h"
 #include "esp_app_desc.h"
 #include "ayatsuri/ayatsuri_pose_dma_probe.h"
@@ -53,9 +53,9 @@
 #include "ayatsuri/ayatsuri_stream_device_probe.h"
 #endif
 #include "esp_random.h"
-#include "pocket_text.h"
+#include "kobako_text.h"
 #include "jsconsole.h"
-#include "pocket_input.h"
+#include "kobako_input.h"
 #include "system/sys_device.h"
 #include "scene_mem.h"
 #include "vmprobe.h"
@@ -81,7 +81,7 @@ void ksn_proc_device_probe_run(void);
 static atomic_int p5_notice_probe_requested;
 #define P5_NOTICE_OWNER (UINT32_MAX-1u)
 #endif
-#ifdef CONFIG_POCKET_VM_RELOC
+#ifdef CONFIG_QJS_LEAN_RELOC
 // Sticky across app starts: one arming can be followed by several runs, which
 // is what a lifecycle sweep needs. Set-only, not a toggle -- a script that
 // sends '&' twice to be sure must not end up disarming it.
@@ -124,7 +124,7 @@ static void system_probe(int command){
         have,queued,snoozed,count,blocked,(unsigned long)(have?active.id:0),
         (unsigned long)heap_caps_get_free_size(MALLOC_CAP_8BIT),
         (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
-        ksn_runtime_stats(KSN_SYSTEM).displayed.commands,pocket_kasane_notice_composited());
+        ksn_runtime_stats(KSN_SYSTEM).displayed.commands,kobako_kasane_notice_composited());
 }
 #endif
 
@@ -137,14 +137,14 @@ static atomic_int diagnostic;
 // so the PIX rows are exactly the damage the ordinary path sent.
 static atomic_int raw_capture;
 #endif
-#ifdef CONFIG_POCKET_VM_SELFTEST
+#ifdef CONFIG_KOBAKO_VM_SELFTEST
 extern void vmtest_lifecycle_device(void);
 #endif
 // Whether the screen on show consumes typed bytes. Only the USB reading needs
 // it: the same byte is a menu direction on the home screen and a character
 // everywhere else.
 static atomic_bool text_screen;
-#ifdef POCKET_HEAPPROBE
+#ifdef KOBAKO_HEAPPROBE
 // The argument of the last USB 'Q' (usb_stroke), read when it is dispatched.
 static char heapprobe_arg[24];
 #endif
@@ -174,9 +174,9 @@ static bool usb_stroke(char c, keystroke_t *k) {
     }
     if(c=='?') { atomic_store(&diagnostic,c); return false; }
 #endif
-    if(pocket_bridge_usb((uint8_t)c))return false;
+    if(kobako_bridge_usb((uint8_t)c))return false;
     if(pet_hub_usb((uint8_t)c))return false;
-#ifdef POCKET_KEYTEST
+#ifdef KOBAKO_KEYTEST
     // US-framed key presses and releases (keymap.c), ahead of the text and
     // menu readings so a frame means the same thing on every screen.
     if(keymap_inject_usb((uint8_t)c))return false;
@@ -184,7 +184,7 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // tools/test_settings.py and capture_home.py count presses down the menu.
     if(c=='r'&&!atomic_load(&text_screen)) { atomic_store(&diagnostic,c); return false; }
 #endif
-#ifdef POCKET_HEAPPROBE
+#ifdef KOBAKO_HEAPPROBE
     // 'Q<index>[,<limit>]\n' starts an apps/heapprobe variant (app_session.c).
     // The bytes after 'Q' are swallowed up to the newline, because digits are
     // diagnostics of their own below. Home screen only, like 'r'.
@@ -270,8 +270,8 @@ static bool usb_stroke(char c, keystroke_t *k) {
     // the Cardputer's own '9' key goes to the shell and does nothing here.
     if((c>='1'&&c<='6')||c=='8'||c=='9') { atomic_store(&diagnostic,c); return false; }
 #ifdef KASANE_P0_PROBE
-    if(c==';') { (void)pocket_mutex_arena_device_race_probe(); return false; }
-    if(c==':') { (void)pocket_mutex_arena_device_oom_probe(); return false; }
+    if(c==';') { (void)kobako_mutex_arena_device_race_probe(); return false; }
+    if(c==':') { (void)kobako_mutex_arena_device_oom_probe(); return false; }
     if(c=='g') {
         bool fullscan=ksn_schema_session_toggle_fullscan_probe();
         ESP_LOGI("KSN_P2","FULLSCAN %u",(unsigned)fullscan);
@@ -286,19 +286,19 @@ static bool usb_stroke(char c, keystroke_t *k) {
 #endif
       ) { atomic_store(&diagnostic,c); return false; }
 #endif
-#ifdef CONFIG_POCKET_VM_SELFTEST
+#ifdef CONFIG_KOBAKO_VM_SELFTEST
     if(c=='J'||c=='L'||c=='M'||c=='Y'||c=='Z'||c=='S') { atomic_store(&diagnostic,c); return false; }
     if(c=='['||c=='\\'||c==']') { atomic_store(&diagnostic,c); return false; }
 #endif
-#ifdef CONFIG_POCKET_VM_PROBE
+#ifdef CONFIG_QJS_LEAN_PROBE
     // VM probe workload triggers (docs/vm/quickjs-freertos-vm-spec.md sec.5),
-    // USB-only and gated by CONFIG_POCKET_VM_PROBE so a normal build's key
+    // USB-only and gated by CONFIG_QJS_LEAN_PROBE so a normal build's key
     // table is byte-for-byte unchanged. 'A'..'F' select one of apps/vmprobe/'s
     // six workloads the same way '1'..'6' select the lifecycle diagnostics
     // above -- tools/vm_l0_capture.py drives these.
     if(c>='A'&&c<='F') { atomic_store(&diagnostic,c); return false; }
     if(c=='X') { atomic_store(&diagnostic,c); return false; }
-    // '<' and '>' are POCKET PET and PET COMPANION, the two shipped apps whose
+    // '<' and '>' are KOBAKO PET and PET COMPANION, the two shipped apps whose
     // frames are the heaviest measured (docs/vm/vm-L2-results.md sec.8.1) and
     // which the menu is the only other way to start. Through here they take the
     // contention conditions, which is what sec.8.7 needs them for. Note they
@@ -331,19 +331,19 @@ static bool usb_stroke(char c, keystroke_t *k) {
     //
     // Taken on the HOME SCREEN only, which is why it arms the next app instead
     // of the running one: a byte arriving while an app is up is offered to
-    // pocket_bridge_usb() and pet_hub_usb() first, and an app that claimed '&'
+    // kobako_bridge_usb() and pet_hub_usb() first, and an app that claimed '&'
     // would take this silently. Placed after the probe block for the reason
     // the two keys above it record -- 'F' was taken here while it was also the
     // probe's sixth workload, and that workload became unreachable without
     // anyone noticing for as long as it took to find.
-#ifdef CONFIG_POCKET_VM_RELOC
+#ifdef CONFIG_QJS_LEAN_RELOC
     if(c=='&') { atomic_store(&reloc_requested,true); return false; }
     // '%' is the deep-parking workload the move needs in order to be measured
     // on anything but a one-frame chain (app_session.c). A diagnostic letter
     // like '1'-'6', not an app.
     if(c=='%') { atomic_store(&diagnostic,c); return false; }
 #endif
-#ifdef CONFIG_POCKET_VM_OOMPROBE
+#ifdef CONFIG_QJS_LEAN_OOMPROBE
     // G12's OOM workloads (app_session.c). Shifted digits, which nothing else
     // on the home screen reads.
     if(c=='!'||c=='@'||c=='#'||c=='$'||c=='^') { atomic_store(&diagnostic,c); return false; }
@@ -351,7 +351,7 @@ static bool usb_stroke(char c, keystroke_t *k) {
     if(c=='F') { atomic_store(&fpu_probe_requested,true); return false; }
     // The Kasane demo trigger ('K', app_session.c's kasane_demo_start). PLACED
     // AFTER the probe block on purpose: 'G'..'K' is the probe's segment range, so
-    // with CONFIG_POCKET_VM_PROBE on a 'K' still selects probe segment 4, and
+    // with CONFIG_QJS_LEAN_PROBE on a 'K' still selects probe segment 4, and
     // with it off (every shipping build, and the KSN ones) 'K' reaches the demo.
     if(c=='K') { atomic_store(&diagnostic,c); return false; }
     // The volume pair and '?', as TEXT rather than as nav, because that is what
@@ -379,12 +379,12 @@ static void input_task(void *arg) {
         if(++polls==2000)
             ESP_LOGI("boot","INPUT_STACK_HWM free=%u",(unsigned)uxTaskGetStackHighWaterMark(NULL));
         keystroke_t k;
-#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+#ifdef CONFIG_KOBAKO_FRAME_BREAKDOWN
         const int64_t poll_t0=esp_timer_get_time();
 #endif
         bool have=keymap_poll(&k);
         motion_poll();
-#ifdef CONFIG_POCKET_FRAME_BREAKDOWN
+#ifdef CONFIG_KOBAKO_FRAME_BREAKDOWN
         frame_bd_input((uint32_t)(esp_timer_get_time()-poll_t0));
 #endif
         char c;
@@ -437,7 +437,7 @@ typedef struct {
     bool (*wants_run)(const char **source, size_t *len);
     // What has to be evaluated before that source, in the same realm, or NULL.
     // Only a source the screen asked to run carries it: an app started from the
-    // home screen or by pocket.workspace.run() is a whole program of its own,
+    // home screen or by kobako.workspace.run() is a whole program of its own,
     // and those call sites pass NULL rather than reading this.
     const char *(*prelude)(size_t *len);
     // How the run ended, for the screen that asked for it.
@@ -489,7 +489,7 @@ extern const char companion_end[] asm("_binary_companion_js_end");
 #endif
 // Heap churn + drawing load (apps/stress/README.md), a test app kept on the menu.
 extern const char stress_start[] asm("_binary_stress_js_start");
-#ifdef CONFIG_POCKET_SHIKI_DEBUG
+#ifdef CONFIG_KOBAKO_SHIKI_DEBUG
 // Shiki's on-device differential test (apps/shikitest): launched only by the
 // USB broker (native_apps below), never from the menu.
 extern const char shiki_test_start[] asm("_binary_shiki_test_js_start");
@@ -497,7 +497,7 @@ extern const char shiki_test_end[] asm("_binary_shiki_test_js_end");
 // Its data-region half (apps/shikitest/shiki_data_test.js), the same way.
 extern const char shiki_data_test_start[] asm("_binary_shiki_data_test_js_start");
 extern const char shiki_data_test_end[] asm("_binary_shiki_data_test_js_end");
-// The pocket.kasane.shiki self-check (apps/shikitest/shiki_api_test.js), the same way.
+// The kobako.kasane.shiki self-check (apps/shikitest/shiki_api_test.js), the same way.
 extern const char shiki_api_test_start[] asm("_binary_shiki_api_test_js_start");
 extern const char shiki_api_test_end[] asm("_binary_shiki_api_test_js_end");
 // The integer instruction latency probe (apps/shikitest/cycle_bench.js), the same way.
@@ -522,7 +522,7 @@ extern const char derby_watch_start[] asm("_binary_derby_watch_js_start");
 extern const char derby_watch_end[] asm("_binary_derby_watch_js_end");
 extern const char big_wave_start[] asm("_binary_big_wave_js_start");
 extern const char big_wave_end[] asm("_binary_big_wave_js_end");
-// pocket.net's self-check and the HTTPS cycle (apps/netcheck/README.md): not on
+// kobako.net's self-check and the HTTPS cycle (apps/netcheck/README.md): not on
 // the menu, started by the USB broker so the network can be measured without
 // hands on the device (docs/platform/lwip-resource-review.md).
 extern const char netcheck_start[] asm("_binary_netcheck_js_start");
@@ -595,7 +595,7 @@ static bool volume_key(const keystroke_t *k) {
 // picker means "I decline", and spending it on standing the overlay down would
 // leave the picker up with its promise unsettled and no way to answer it.
 static bool home_modal(void) {
-    return pocket_workspace_modal()||sd_picker_modal()||file_picker_modal();
+    return kobako_workspace_modal()||sd_picker_modal()||file_picker_modal();
 }
 
 static bool home_key(const keystroke_t *k) {
@@ -614,8 +614,8 @@ static bool home_key(const keystroke_t *k) {
     // Back at the root of the home screen stops the background music (S5 in
     // docs/vm/app-suspend-design.md): with no overlay up there is no other
     // control for it. Back with a value list open closes the list.
-    if(nav==KEY_BACK && !shell_choices_open() && pocket_av_background_active())
-        pocket_av_background_stop("back");
+    if(nav==KEY_BACK && !shell_choices_open() && kobako_av_background_active())
+        kobako_av_background_stop("back");
     bool launch=shell_key(nav);
     take_pending_screen();
     if(!launch) return true;
@@ -683,14 +683,14 @@ typedef struct {
 static const native_app_t native_apps[]={
     NATIVE_APP("local.hello","HELLO WORLD",NULL,NULL,5),
     NATIVE_APP("local.imucal","IMU CALIBRATION",imucal_start,imucal_end,7),
-    NATIVE_APP("local.pet","POCKET PET",pet_start,pet_end,7),
+    NATIVE_APP("local.pet","KOBAKO PET",pet_start,pet_end,7),
 #ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
     NATIVE_APP("local.companion","PET COMPANION",NULL,NULL,5),
 #else
     NATIVE_APP("local.companion","PET COMPANION",companion_start,companion_end,7),
 #endif
     NATIVE_APP("local.stress","STRESS TEST",stress_start,stress_end,5),
-#ifdef CONFIG_POCKET_SHIKI_DEBUG
+#ifdef CONFIG_KOBAKO_SHIKI_DEBUG
     NATIVE_APP("local.shikitest","SHIKI TEST",shiki_test_start,shiki_test_end,5),
     NATIVE_APP("local.shikidata","SHIKI DATA",shiki_data_test_start,shiki_data_test_end,5),
     NATIVE_APP("local.shikiapi","SHIKI API",shiki_api_test_start,shiki_api_test_end,5),
@@ -728,7 +728,7 @@ static uint8_t native_start(const char *id,bool resume) {
         if(!strcmp(native_apps[i].info.id,id)) { d=&native_apps[i];break; }
     if(!d || !app_registry_find(id))return AC_UNKNOWN_APP;
     if(!(d->info.flags&1))return AC_UNSUPPORTED;
-    if(running || screen!=SCREEN_HOME || home_modal() || pocket_text_active())return AC_BUSY;
+    if(running || screen!=SCREEN_HOME || home_modal() || kobako_text_active())return AC_BUSY;
     if(resume) {
         if(strcmp(app_dormant_id(),id))return AC_STALE_RUN;
     } else if(app_dormant_id()[0]&&!app_stop())return AC_BUSY;
@@ -889,7 +889,7 @@ static void end_run(esp_err_t tick_err) {
         sound_play(2);
         ESP_LOGI("shell","HOME_READY");
     }
-    // A session that ended because it called pocket.workspace.run() hands the
+    // A session that ended because it called kobako.workspace.run() hands the
     // screen straight to the work it named: section 7 has the current session
     // end and the target take over, with no second program running at any
     // moment. The screen the run belongs to is unchanged, so Back still leaves
@@ -910,10 +910,10 @@ static void suspend_run(void) {
 static void take_pending_run(void) {
     const char *source=NULL;
     size_t      length=0;
-    if(!pocket_workspace_run_take(&source,&length)) return;
+    if(!kobako_workspace_run_take(&source,&length)) return;
     begin_run(APP_ID_WORK,NULL,0,source,length);
     // app_start_source() borrows the bytes only for the length of the start.
-    pocket_workspace_run_done();
+    kobako_workspace_run_done();
 }
 
 // Which app is starting, by name. Section 3 gives the host the identity, and
@@ -945,9 +945,9 @@ static void begin_run(const char *app_id, const char *prelude, size_t prelude_le
     // S5: the background music gives way to an app that starts short of room.
     // 128 KiB covers the shipped apps' 38-107 KB with the Kasane arena on top;
     // below it the app's heap wins over the song.
-    if(pocket_av_background_active() &&
+    if(kobako_av_background_active() &&
        heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)<128*1024)
-        pocket_av_background_stop("memory");
+        kobako_av_background_stop("memory");
     const char *kept=app_dormant_id();
     if(kept[0]) {
         if(!strcmp(kept,app_id) && app_resume()==ESP_OK) {
@@ -1025,8 +1025,8 @@ static void tick_run(bool have, const keystroke_t *stroke) {
     if(transition_pending())return;
     // The three pickers below keep the guest from being ticked, so its
     // input.keys cannot see that the keys pressed meanwhile were theirs.
-    if(pocket_workspace_modal() || sd_picker_modal() || file_picker_modal()) {
-        pocket_input_keys_withhold();
+    if(kobako_workspace_modal() || sd_picker_modal() || file_picker_modal()) {
+        kobako_input_keys_withhold();
         // A modal draws through the board directly (two-core-pipeline.md
         // sec.2.3 D): no present may be in flight.
         disp_join();
@@ -1034,10 +1034,10 @@ static void tick_run(bool have, const keystroke_t *stroke) {
     // The works picker is a host screen over a live guest: while it is up the
     // guest is not ticked and the keys are the picker's. Its promise settles on
     // the turn after it closes, which is the first turn the guest runs again.
-    if(pocket_workspace_modal()) {
-        if(have) pocket_workspace_modal_key(stroke);
-        if(pocket_workspace_modal_dirty()) pocket_workspace_modal_draw();
-        if(!pocket_workspace_modal()) app_force_redraw();
+    if(kobako_workspace_modal()) {
+        if(have) kobako_workspace_modal_key(stroke);
+        if(kobako_workspace_modal_dirty()) kobako_workspace_modal_draw();
+        if(!kobako_workspace_modal()) app_force_redraw();
         return;
     }
     // fs.requestFolder puts up the same kind of screen for the same kind of
@@ -1066,13 +1066,13 @@ static void tick_run(bool have, const keystroke_t *stroke) {
     // A text session takes the keyboard from the guest for as long as it is
     // open: section 6 gives the HOST the field, so the app receives neither the
     // keystrokes nor the Back that would otherwise end it -- Escape there means
-    // "cancel the conversion, or the field", and both are pocket_text's.
-    if(have && pocket_text_active()) {
-        pocket_text_key(stroke);
+    // "cancel the conversion, or the field", and both are kobako_text's.
+    if(have && kobako_text_active()) {
+        kobako_text_key(stroke);
         have=false;
         // The guest's renderer presents only when IT has damage, so a field
         // that moved on a frame the app did not would not be sent at all.
-        app_force_redraw_bands(pocket_text_take_dirty());
+        app_force_redraw_bands(kobako_text_take_dirty());
     }
     board_key_t key=have?stroke->nav:KEY_NONE;
     bool leave = have && key==KEY_BACK;
@@ -1133,15 +1133,15 @@ static void tick_run(bool have, const keystroke_t *stroke) {
     // no damage of the guest's own. The repaint lands on the next frame, which
     // is 33 ms and is why the check above exists as well -- a keystroke has to
     // be seen in the frame it was typed in.
-    app_force_redraw_bands(pocket_text_take_dirty());
+    app_force_redraw_bands(kobako_text_take_dirty());
     // The recording indicator is composited into every strip that is sent, so
     // it needs a strip to be sent: an app that has stopped drawing would
     // otherwise leave the screen it last drew, with no dot on it.
-    if(pocket_capture_take_dirty()) app_force_redraw();
+    if(kobako_capture_take_dirty()) app_force_redraw();
 
     // Accepted this turn, so no further input reaches the app: the session ends
     // here and end_run() starts what it asked for.
-    if(!leave && e==ESP_OK && pocket_workspace_run_requested()) { end_run(ESP_OK); return; }
+    if(!leave && e==ESP_OK && kobako_workspace_run_requested()) { end_run(ESP_OK); return; }
     // A source without frame() ends itself once its last promise settled and
     // its last job ran -- the end it used to reach straight after evaluation.
     if(!leave && e==ESP_OK && app_frameless_done()) { end_run(ESP_OK); return; }
@@ -1190,8 +1190,8 @@ static volatile int64_t ui_idle_last_us;
 static bool ui_idle_hook(void) { ui_idle_last_us=esp_timer_get_time(); return true; }
 static void ui_idle_watch(void) {
     ui_idle_last_us=esp_timer_get_time();
-#if CONFIG_POCKET_UI_TASK_CORE>=0
-    if(esp_register_freertos_idle_hook_for_cpu(ui_idle_hook,CONFIG_POCKET_UI_TASK_CORE)!=ESP_OK)
+#if CONFIG_KOBAKO_UI_TASK_CORE>=0
+    if(esp_register_freertos_idle_hook_for_cpu(ui_idle_hook,CONFIG_KOBAKO_UI_TASK_CORE)!=ESP_OK)
 #endif
         ui_idle_last_us=INT64_MIN/2;  // no hook: always yield, the old rule
 }
@@ -1220,8 +1220,8 @@ static void native_observe(void) {
 }
 static uint8_t native_tap(uint8_t action) {
     if(transition_pending())return AC_BUSY;
-    if(!running || app_run_generation()!=native_generation || home_modal() || pocket_text_active() ||
-       pocket_kasane_input_scope(false)==KSN_INPUT_BLOCKED)return AC_BLOCKED;
+    if(!running || app_run_generation()!=native_generation || home_modal() || kobako_text_active() ||
+       kobako_kasane_input_scope(false)==KSN_INPUT_BLOCKED)return AC_BLOCKED;
     static const board_key_t nav[]={KEY_NONE,KEY_ENTER,KEY_BACK,KEY_UP,KEY_RIGHT,KEY_DOWN,KEY_LEFT};
     if(action<1 || action>6)return AC_UNSUPPORTED;
     keystroke_t stroke={.nav=nav[action]};
@@ -1234,7 +1234,7 @@ static uint8_t native_tap(uint8_t action) {
 static bool native_stop(void);
 static uint8_t native_suspend(void) {
     if(transition_pending())return AC_BUSY;
-    if(!running || home_modal() || pocket_text_active())return AC_BLOCKED;
+    if(!running || home_modal() || kobako_text_active())return AC_BLOCKED;
 #ifdef CONFIG_AYATSURI_POSE_DMA_PROBE
     if(pose_companion_active())return AC_UNSUPPORTED;
 #endif
@@ -1275,7 +1275,7 @@ static bool retry_transitions(void) {
     return !transition_pending();
 }
 static bool native_emit(const uint8_t *body,size_t size) {
-    return pocket_bridge_emit_namespace('C',body,size)==ESP_OK;
+    return kobako_bridge_emit_namespace('C',body,size)==ESP_OK;
 }
 static uint64_t native_clock_ms(void) { return (uint64_t)esp_timer_get_time()/1000; }
 static void native_fingerprint(uint8_t hash[32],char version[48]) {
@@ -1313,7 +1313,7 @@ static void ui_task(void *arg) {
         if(transition_pending()) { vTaskDelay(1);continue; }
         /* App teardown can time out while an SD read is in progress. Reap its
          * acknowledged lease even when HOME has no guest turns to pump. */
-        pocket_video_sd_stream_reap();
+        kobako_video_sd_stream_reap();
 #ifdef KASANE_PROC_DEVICE_PROBE
         if(!running&&screen==SCREEN_HOME&&atomic_exchange(&proc_probe_requested,false)){
             ksn_proc_device_probe_run();
@@ -1330,7 +1330,7 @@ static void ui_task(void *arg) {
             fpu_latency_run();
             ESP_LOGI("shell","HOME_READY");
         }
-#ifdef CONFIG_POCKET_VM_RELOC
+#ifdef CONFIG_QJS_LEAN_RELOC
         // Acknowledged on the home screen with a marker of its own, so a host
         // script knows the arming landed before it starts an app -- otherwise
         // a VM_RELOC line that never appears is ambiguous between "the key was
@@ -1386,7 +1386,7 @@ static void ui_task(void *arg) {
 #ifdef KASANE_P0_PROBE
         int64_t av_service_started=esp_timer_get_time();
 #endif
-        pocket_av_service_stream();
+        kobako_av_service_stream();
 #ifdef KASANE_P0_PROBE
         if(overlay_running())
             ksn_p0_probe_sample(KSN_P0_AV_SERVICE,
@@ -1435,11 +1435,11 @@ static void ui_task(void *arg) {
             // nothing behind it. The order is tick_run()'s, for the reason
             // given there.
             if(!running && screen==SCREEN_HOME && overlay_running()) {
-                if(pocket_workspace_modal() || sd_picker_modal() || file_picker_modal())
+                if(kobako_workspace_modal() || sd_picker_modal() || file_picker_modal())
                     disp_join();   // sec.2.3 D, as in tick_run
-                if(pocket_workspace_modal()) {
-                    if(have) pocket_workspace_modal_key(&stroke);
-                    if(pocket_workspace_modal_dirty()) pocket_workspace_modal_draw();
+                if(kobako_workspace_modal()) {
+                    if(have) kobako_workspace_modal_key(&stroke);
+                    if(kobako_workspace_modal_dirty()) kobako_workspace_modal_draw();
                     goto framed;
                 }
                 if(sd_picker_modal()) {
@@ -1535,7 +1535,7 @@ static void ui_task(void *arg) {
 #ifdef KASANE_P0_PROBE
             if(test=='R'){
                 ksn_p0_probe_reset();
-                pocket_app_music_view_probe_reset_counters();
+                kobako_app_music_view_probe_reset_counters();
                 ESP_LOGI("KSN_P0","RESET requested");
                 test=0;
             }
@@ -1547,7 +1547,7 @@ static void ui_task(void *arg) {
             // Every diagnostic below builds a guest or measures the heap, and
             // neither wants a radio in the middle of it.
             if(test && !running && screen==SCREEN_HOME) net_autosync_yield("diagnostic");
-#ifdef CONFIG_POCKET_VM_SELFTEST
+#ifdef CONFIG_KOBAKO_VM_SELFTEST
             if((test=='L'||test=='M') && !running && screen==SCREEN_HOME) {
                 if(!overlay_release()) { deferred_diagnostic=test;continue; }
                 scene_mem_release();
@@ -1567,7 +1567,7 @@ static void ui_task(void *arg) {
             // frame reaching the panel. Started from here anyway, so it cannot
             // begin while a guest owns the display.
             if(test=='9') { sound_capture_probe(); test=0; }
-#ifdef POCKET_HEAPPROBE
+#ifdef KOBAKO_HEAPPROBE
             // Through begin_run, the path a menu app takes (identity, Kasane
             // arena, eval_user_source), so a variant is evaluated exactly as
             // an app would be.
@@ -1590,7 +1590,7 @@ static void ui_task(void *arg) {
                 // state, and running pet under hello's identity would give it
                 // neither.
                 const char *diag_id=APP_ID_DEFAULT;
-#ifdef CONFIG_POCKET_VM_PROBE
+#ifdef CONFIG_QJS_LEAN_PROBE
                 if(test=='<') diag_id="local.pet";
                 else if(test=='>') diag_id="local.companion";
 #endif
@@ -1610,7 +1610,7 @@ static void ui_task(void *arg) {
         // long as it is up -- otherwise a host script driving this over USB
         // could not type into the field it just opened.
         atomic_store(&text_screen,
-                     SCREENS[screen].takes_text || pocket_text_active());
+                     SCREENS[screen].takes_text || kobako_text_active());
 
         // Once a frame, on every screen: a frame away from home is what resets
         // the idle clock. Eligible means the menu (or an overlay that is up) is
@@ -1624,7 +1624,7 @@ static void ui_task(void *arg) {
         net_service_pump();
         net_autosync_poll(!running && screen==SCREEN_HOME && !home_modal() &&
                           !home_error && !overlay_starting() &&
-                          !pocket_av_background_active(),
+                          !kobako_av_background_active(),
                           key_seen);
 
         last_frame_us=(uint32_t)(esp_timer_get_time()-frame_start);
@@ -1654,7 +1654,7 @@ static void ui_task(void *arg) {
                     if(remaining>VM_MIN_PERIOD_MS*1000)remaining=VM_MIN_PERIOD_MS*1000;
                     uint32_t ticks=(uint32_t)((remaining*configTICK_RATE_HZ+999999)/1000000);
                     ticks=sys_device_wait_ticks(now,ticks,configTICK_RATE_HZ);
-                    vm_wake_wait(pocket_kasane_source_wait_ticks(now,ticks,configTICK_RATE_HZ));
+                    vm_wake_wait(kobako_kasane_source_wait_ticks(now,ticks,configTICK_RATE_HZ));
                 } else vTaskDelay(1);
                 period_began=esp_timer_get_time();
                 continue;
@@ -1728,7 +1728,7 @@ static void ui_task(void *arg) {
                     uint64_t wait_now=(uint64_t)esp_timer_get_time();
                     uint32_t ticks=sys_device_wait_ticks(wait_now,pdMS_TO_TICKS(rest),
                                                          configTICK_RATE_HZ);
-                    vm_wake_wait(pocket_kasane_source_wait_ticks(
+                    vm_wake_wait(kobako_kasane_source_wait_ticks(
                         wait_now,ticks,configTICK_RATE_HZ));
                 } else if(!floor_ms) {
                     // A frame that ran past the whole period waited nowhere
@@ -1761,7 +1761,7 @@ static void ui_task(void *arg) {
         uint64_t wait_now=(uint64_t)esp_timer_get_time();
         uint32_t ticks=sys_device_wait_ticks(wait_now,pdMS_TO_TICKS(rest),
                                              configTICK_RATE_HZ);
-        vm_wake_wait(pocket_kasane_source_wait_ticks(
+        vm_wake_wait(kobako_kasane_source_wait_ticks(
             wait_now,ticks,configTICK_RATE_HZ));
     }
 }
@@ -1785,14 +1785,14 @@ static void nvs_init(void) {
 }
 
 void app_main(void) {
-#ifdef CONFIG_POCKET_HEAP_ORIGIN
+#ifdef CONFIG_KOBAKO_HEAP_ORIGIN
     { extern void heap_origin_start(void); heap_origin_start(); }
 #endif
     usb_serial_jtag_driver_config_t usb={.tx_buffer_size=1024,.rx_buffer_size=256};
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb));
     ESP_ERROR_CHECK(usb_console_init());
-    ESP_LOGI("boot","Cardputer ADV PocketJS M1; app=3MiB skk=2MiB fonts=512KiB");
-#if POCKET_PROBES
+    ESP_LOGI("boot","Cardputer ADV kobako M1; app=3MiB skk=2MiB fonts=512KiB");
+#if KOBAKO_PROBES
     { extern void ble_probe(void); ble_probe(); }
 #endif
     ESP_ERROR_CHECK(board_init());
@@ -1803,7 +1803,7 @@ void app_main(void) {
     pet_hub_init();
     shell_init();
     // Whenever a network is stored (auto sync, a manual sync, a scan or an
-    // app's pocket.net may start the radio later): lwIP's permanent blocks go
+    // app's kobako.net may start the radio later): lwIP's permanent blocks go
     // beside the other boot residents instead of between the holes a later
     // start would find (docs/vm/lv3-heap-exhaustion.md sec.6.7). No stored
     // network, no radio, and nothing is made.
@@ -1817,10 +1817,10 @@ void app_main(void) {
     // and the editors show which one is missing.
     jpfont_init();
     skk_session_init();
-#if POCKET_PROBES
+#if KOBAKO_PROBES
     { extern void opus_probe(void); opus_probe(); }
 #endif
-#if POCKET_PROBES
+#if KOBAKO_PROBES
     { extern void sd_probe(void); sd_probe(); }
 #endif
     // Not configASSERT: a non-debug build (NDEBUG) compiles that away, and
@@ -1842,11 +1842,11 @@ void app_main(void) {
      * input 2 KB here, wifi 3 KB and timesync 2 KB in their own inits. */
     if(!rtc_task_create(input_task,"input",2048,6))abort();
     // Pinned or not, ONE call site (xTaskCreate is itself a wrapper for this
-    // with tskNO_AFFINITY), so CONFIG_POCKET_UI_TASK_CORE changes an immediate
+    // with tskNO_AFFINITY), so CONFIG_KOBAKO_UI_TASK_CORE changes an immediate
     // and nothing else -- the three settings are one binary family, which is
     // what makes a measurement across them mean anything. Why it exists:
     // CCOUNT is per core, so a budget that reads it needs a task that cannot
     // migrate between two reads (docs/vm/vm-L1-report.md sec.8).
     if(xTaskCreatePinnedToCore(ui_task,"ui",32768,NULL,5,NULL,
-        CONFIG_POCKET_UI_TASK_CORE<0?tskNO_AFFINITY:CONFIG_POCKET_UI_TASK_CORE)!=pdPASS)abort();
+        CONFIG_KOBAKO_UI_TASK_CORE<0?tskNO_AFFINITY:CONFIG_KOBAKO_UI_TASK_CORE)!=pdPASS)abort();
 }

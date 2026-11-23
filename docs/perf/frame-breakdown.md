@@ -13,7 +13,7 @@
 
 ## 1. 測り方
 
-- 計測: `CONFIG_POCKET_FRAME_BREAKDOWN`（`main/hal/frame_bd.c`、既定 n）。`frame()` の周期 1 回ごとに、JS の turn（続きのターンも含む）、描画、転送の待ち（`present_frame()` のすべての提示）、`app_tick` 全体、UI ループ 1 周の仕事、周期全体を足し、60 周期ごとに `FRAME_BD` を 1 行出す。
+- 計測: `CONFIG_KOBAKO_FRAME_BREAKDOWN`（`main/hal/frame_bd.c`、既定 n）。`frame()` の周期 1 回ごとに、JS の turn（続きのターンも含む）、描画、転送の待ち（`present_frame()` のすべての提示）、`app_tick` 全体、UI ループ 1 周の仕事、周期全体を足し、60 周期ごとに `FRAME_BD` を 1 行出す。
   - `tick_other` = `app_tick` − JS − 描画 − 転送。`loop_other` = UI ループの仕事 − `app_tick`。`wait` = 周期 − UI ループの仕事。
   - `late16` / `late33` は 16.7 / 33.4 ms を超えた周期の数。周期は 1 ms の tick で刻まれるので、平均 16.5 ms でも 17 ms の周期が多く数えられる。`late16` は「遅れた」ではなく刻みの粗さを含む。
 - ビルド: bce1737（計測、既定 n）＋ 074c058（測定専用: 計測を有効にし、`VM_DISPLAY_PERIOD_MS` を 33 → 16）。測定後に 490ae82 で revert した。
@@ -64,7 +64,7 @@
 
 ## 6. 待ち方の A/B とメモリ逼迫（2026-11-10、実測）
 
-Fable（コード読解のみ）が出した方針の 1〜4 番を 1 つのビルドで確かめた。`CONFIG_POCKET_FRAME_BD_PACE_AB` が 60 フレームの窓ごとに待ち方を巡回させる。
+Fable（コード読解のみ）が出した方針の 1〜4 番を 1 つのビルドで確かめた。`CONFIG_KOBAKO_FRAME_BD_PACE_AB` が 60 フレームの窓ごとに待ち方を巡回させる。
 
 - `old`: 出荷の規則（周期 16 ms、周期を超えたフレームは必ず `vTaskDelay(1)`）。
 - `noyield`: 周期は同じ。超えたフレームの 1 tick は、UI のコア（CPU 1）の idle が 500 ms 走れていないときだけ。
@@ -88,7 +88,7 @@ Fable（コード読解のみ）が出した方針の 1〜4 番を 1 つのビ�
 
 **DERBY レース**: 場面が窓ごとに変わる（WIDE・FIELD・CLOSE・WIDE 2）ので、待ち方の比較は同じ場面の隣の窓どうしでしか言えない。FIELD（仕事約 14.9 ms）で `deadline` 16.667 対 `old` 16.983、WIDE 2（JS 13 ms 台）で `noyield` 19.83 / `deadline` 19.69〜20.15 対 `old` 22.21〜22.72。今回の WIDE 2 は JS 12〜13.4 ms で、60fps-roadmap.md の 13〜14.5 ms の場面にあたる。
 
-**メモリ逼迫（新しい発見）**: `press` は**パドックで 0、レースの最初の窓で 39/60、以後のレースのすべての窓で 60/60**。レースの間ずっとネイティブヒープの逼迫フラグ（`FREE` か `LARGEST`）が立ち、`sample_memory_pressure()`（`main/app_session.c`）がゲストの block cache を切っている。入る条件は空き < 24,576 B か最大ブロック < 16,384 B、出る条件は 36,864 B / 24,576 B が 500 ms 続くこと（`main/pocket/pocket_memory.c:18-21`）。block cache が切れたことでレースの JS がどれだけ遅くなるかは、まだ測っていない（同じ場面で逼迫フラグを窓ごとに強制する A/B が要る）。§2 の「レース後のパドックで JS +14%」と同じ原因かも未確認（今回のジョブはレース後のパドックまで届かなかった）。
+**メモリ逼迫（新しい発見）**: `press` は**パドックで 0、レースの最初の窓で 39/60、以後のレースのすべての窓で 60/60**。レースの間ずっとネイティブヒープの逼迫フラグ（`FREE` か `LARGEST`）が立ち、`sample_memory_pressure()`（`main/app_session.c`）がゲストの block cache を切っている。入る条件は空き < 24,576 B か最大ブロック < 16,384 B、出る条件は 36,864 B / 24,576 B が 500 ms 続くこと（`main/kobako/kobako_memory.c:18-21`）。block cache が切れたことでレースの JS がどれだけ遅くなるかは、まだ測っていない（同じ場面で逼迫フラグを窓ごとに強制する A/B が要る）。§2 の「レース後のパドックで JS +14%」と同じ原因かも未確認（今回のジョブはレース後のパドックまで届かなかった）。
 
 **まとめ（実測）**: 待ち方の直し（1 tick を条件つきに、µs の期限）で STRESS は 53 → 57 fps、DERBY のパドックは 60.0 fps に合う。STRESS は仕事そのもの（17.2〜17.5 ms）が 16.67 ms を超えるので、待ち方だけでは 60 fps に届かない。
 
@@ -99,7 +99,7 @@ Fable（コード読解のみ）が出した方針の 1〜4 番を 1 つのビ�
 - **周期を超えたフレームの 1 tick を、UI のコア（CPU 1）の idle が 500 ms 走れていないときだけにした**（`main/main.c` の `ui_idle_starved()`、idle hook）。§6 の `noyield` を出荷の規則にしたもの。
 - **`ESP_LOG` の 1 行を 384 B のバッファに組んでから 1 回で送る**（`main/hal/usb_console.c` の `log_vprintf`）。行が収まらないときと、他のタスクが同時に書いているときは、元の経路に落とす。静的 DRAM は +384 B と mutex 1 つ。
 
-計測は 48d3491 / 6d04053 の探針に、5b9c3e7（測定専用、周期 16 ms、`POCKET_FRAME_BD_PRESS_AB` と `POCKET_FRAME_BD_LOG_AB` を有効にした版。48070f4 で revert）を重ねたビルドで行った。ジョブは `press-derby-1`（起動直後の DERBY）、`press-stress-1`、`press-derby-2`（STRESS の後の DERBY）。
+計測は 48d3491 / 6d04053 の探針に、5b9c3e7（測定専用、周期 16 ms、`KOBAKO_FRAME_BD_PRESS_AB` と `KOBAKO_FRAME_BD_LOG_AB` を有効にした版。48070f4 で revert）を重ねたビルドで行った。ジョブは `press-derby-1`（起動直後の DERBY）、`press-stress-1`、`press-derby-2`（STRESS の後の DERBY）。
 
 **ログ（同一バイナリ、窓ごとに切り替え）**
 
@@ -119,11 +119,11 @@ Fable（コード読解のみ）が出した方針の 1〜4 番を 1 つのビ�
 
 - **block cache を切ると JS は STRESS で約 +0.9 ms（+13%）、DERBY の FIELD で約 +0.5 ms（+7%）遅くなる。**
 - 今回の 3 つのジョブでは、逼迫フラグは自然には一度も立たなかった（`press=0`）。§6（`pace-derby-1`）ではレースの間ずっと立っていた。違いは分かっていない。どちらも同じ起動の中で STRESS の後に DERBY を動かしている。ビルド（ヒープの配置）、レースの抽選、Wi-Fi の状態が候補。フラグが立った回には、レースの JS がこの分だけ遅れていたはず（推定）。
-- 逼迫の閾値（`main/pocket/pocket_memory.c:18-21`）を変えるかどうかはメモリの方針なので、持ち主が判断する。判断の材料は、立った回の頻度と、そのときの空き・最大ブロックの値。
+- 逼迫の閾値（`main/kobako/kobako_memory.c:18-21`）を変えるかどうかはメモリの方針なので、持ち主が判断する。判断の材料は、立った回の頻度と、そのときの空き・最大ブロックの値。
 
 ## 8. 逼迫判定の記録と、2 コア化の P0（2026-11-10、実測）
 
-**逼迫判定のログ。** b25ddd1 から、出荷版でも判定のビットが変わるたびに `MEM_PRESSURE mask=… was=… free=… largest=… guest_free=… episode=…` を 1 行出す（`main/pocket/pocket_memory.c`）。0064e75 の探針（`FRAME_P0`）は、窓ごとのネイティブヒープの空きの最小と最大ブロックの最小も出す。
+**逼迫判定のログ。** b25ddd1 から、出荷版でも判定のビットが変わるたびに `MEM_PRESSURE mask=… was=… free=… largest=… guest_free=… episode=…` を 1 行出す（`main/kobako/kobako_memory.c`）。0064e75 の探針（`FRAME_P0`）は、窓ごとのネイティブヒープの空きの最小と最大ブロックの最小も出す。
 
 | アプリ・場面 | 判定が立った瞬間（`MEM_PRESSURE`） | 以後の窓の空き最小 / 最大ブロック最小 | 解除 |
 | --- | --- | --- | --- |
@@ -193,9 +193,9 @@ Fable（コード読解のみ）が出した方針の 1〜4 番を 1 つのビ�
 
 ## 10. 判定中も block cache を深さ 4 で残す、DERBY のレース中の常駐を削る（2026-11-10、実測）
 
-**block cache。** a58fe4d で、逼迫の判定中は block cache を止めるのではなく、クラスごとの深さを 16 → 4 に絞るようにした（`BLOCK_CACHE_PRESSURE_DEPTH`、`block_cache_set_depth()`、`pocketjs_guest_block_cache_set_pressure()`）。抱えるのは最大約 1.1 KB（出荷のクラスで 4 × 276 B）。host: `tools/test_block_cache.c`（`PRESSURE_DEPTH`）と `tools/test_guest_cache_pressure.py` が通る。
+**block cache。** a58fe4d で、逼迫の判定中は block cache を止めるのではなく、クラスごとの深さを 16 → 4 に絞るようにした（`BLOCK_CACHE_PRESSURE_DEPTH`、`block_cache_set_depth()`、`kobako_guest_block_cache_set_pressure()`）。抱えるのは最大約 1.1 KB（出荷のクラスで 4 × 276 B）。host: `tools/test_block_cache.c`（`PRESSURE_DEPTH`）と `tools/test_guest_cache_pressure.py` が通る。
 
-実機（同一バイナリ、`POCKET_FRAME_BD_PRESS_AB` で窓ごとに「測ったまま／強制 ON／強制 OFF」、周期 16 ms、ジョブ `d4-stress-1`・`dm-derby-1`）:
+実機（同一バイナリ、`KOBAKO_FRAME_BD_PRESS_AB` で窓ごとに「測ったまま／強制 ON／強制 OFF」、周期 16 ms、ジョブ `d4-stress-1`・`dm-derby-1`）:
 
 | 場面 | 強制 ON（深さ 4） | 測ったまま・強制 OFF（深さ 16） | 差 | 以前（§7、cache を止めた） |
 | --- | --- | --- | --- | --- |
@@ -217,7 +217,7 @@ host の再生からの見積もり（§9、STRESS +2.3%）と合う。
 
 ## 11. 2 コア化の P1: 表示タスクを足して、すぐ join する（2026-11-10、実測）
 
-d3f7582 で `main/hal/disp.c` を足した（`CONFIG_POCKET_DISP_TASK`、既定 n）。`present_frame()` の中身を表示タスクで回し、UI タスクはその間 semaphore で待つ。重ねるものはまだ無いので、測るのは「別のタスクで回すだけで、描画＋転送がいくら延びるか」。どれも同一バイナリの中で、60 フレームの窓ごとに表示経路を巡回させた A/B（`POCKET_FRAME_BD_DISP_AB`、周期 16 ms、STRESS LV1）。数値は窓の `rn + sd` の平均（ms）。
+d3f7582 で `main/hal/disp.c` を足した（`CONFIG_KOBAKO_DISP_TASK`、既定 n）。`present_frame()` の中身を表示タスクで回し、UI タスクはその間 semaphore で待つ。重ねるものはまだ無いので、測るのは「別のタスクで回すだけで、描画＋転送がいくら延びるか」。どれも同一バイナリの中で、60 フレームの窓ごとに表示経路を巡回させた A/B（`KOBAKO_FRAME_BD_DISP_AB`、周期 16 ms、STRESS LV1）。数値は窓の `rn + sd` の平均（ms）。
 
 | 変種（ジョブ） | inline | 表示タスク | 差 |
 | --- | --- | --- | --- |
@@ -233,7 +233,7 @@ d3f7582 で `main/hal/disp.c` を足した（`CONFIG_POCKET_DISP_TASK`、既定 
 - 合格条件のうち、音の途切れ（音を鳴らすアプリでの確認）、10 分の WDT、影の再描画は、まだ試していない。P1a（レンダラから core の変更を抜く整理）も未着手で、P1 ではすぐ join するので要らない。
 - 測定用のコミット（158eb84、fd4382c、2399b8b）は戻した。探針（9f1b07c: 優先度の巡回と `inp_ms`）は残した。
 
-**IMU を読み手がいるときだけ読む（追記、実測）。** 上の `inp_max` 1.8〜1.9 ms は IMU の 1 回分だった。IMU を使うのはホームの壁紙と `pocket.sensors` を読むアプリだけなので、それ以外では読まないようにした（`main/hal/motion.c`。壁紙は `motion_get()` が 250 ms の期限を延ばし、アプリは `pocket.sensors` を作った時点から reset・suspend まで。host: `tools/test_motion_demand.c`）。同じ探針のビルドで STRESS を測った（`imu-stress-1`、測定用のコミットは戻した）:
+**IMU を読み手がいるときだけ読む（追記、実測）。** 上の `inp_max` 1.8〜1.9 ms は IMU の 1 回分だった。IMU を使うのはホームの壁紙と `kobako.sensors` を読むアプリだけなので、それ以外では読まないようにした（`main/hal/motion.c`。壁紙は `motion_get()` が 250 ms の期限を延ばし、アプリは `kobako.sensors` を作った時点から reset・suspend まで。host: `tools/test_motion_demand.c`）。同じ探針のビルドで STRESS を測った（`imu-stress-1`、測定用のコミットは戻した）:
 
 | | IMU を常に読む（`p1pr-stress-1`） | 読み手がいるときだけ（`imu-stress-1`） |
 | --- | --- | --- |
@@ -246,7 +246,7 @@ d3f7582 で `main/hal/disp.c` を足した（`CONFIG_POCKET_DISP_TASK`、既定 
 - 残りは約 +0.6 ms。キーボードのポーリングだけでも 1 回約 0.3 ms（壁時計）かかっている（`inp_ms / inp_n`）。
 - `apps/imucal` で、アプリが読んでいる間は 50 Hz で標本が届き、gyro が点いて消え、終わると読み取りが止まり、ホームに戻ると再開することを実機のログで確かめた（`imu-imucal-1`）。
 
-**キーボードの INT ピンの門（追記、実測）。** 残っていた入力の時間は、5 ms ごとにキーボードの FIFO の件数を I2C で読む分だった（1 回約 0.3 ms、壁時計）。TCA8418 の INT は GPIO 11 に配線されていた（実機で確認: キーの辺 122 件で Low）ので、INT が High の周は I2C を読まないようにした（46d1f4e、`CONFIG_POCKET_KEY_INT_GPIO` 既定 11、20 周に 1 回は安全網で件数を読む。docs/platform/keystate.md）。同じ探針のビルドで STRESS を測った（`keyint-stress-1`、測定用のコミットは戻した）:
+**キーボードの INT ピンの門（追記、実測）。** 残っていた入力の時間は、5 ms ごとにキーボードの FIFO の件数を I2C で読む分だった（1 回約 0.3 ms、壁時計）。TCA8418 の INT は GPIO 11 に配線されていた（実機で確認: キーの辺 122 件で Low）ので、INT が High の周は I2C を読まないようにした（46d1f4e、`CONFIG_KOBAKO_KEY_INT_GPIO` 既定 11、20 周に 1 回は安全網で件数を読む。docs/platform/keystate.md）。同じ探針のビルドで STRESS を測った（`keyint-stress-1`、測定用のコミットは戻した）:
 
 | | IMU を読み手がいるときだけ（`imu-stress-1`） | ＋ INT の門（`keyint-stress-1`） |
 | --- | --- | --- |
@@ -258,7 +258,7 @@ d3f7582 で `main/hal/disp.c` を足した（`CONFIG_POCKET_DISP_TASK`、既定 
 - CPU 0 での上乗せは、+0.90（最初）→ +0.59（IMU）→ +0.41 ms（INT の門）。優先度 5 と 6 の差はほぼ無くなった。合格の線（+0.15 ms）にはまだ届かない。残りの約 0.4 ms の正体は未特定（CPU 0 の割り込み、tick、ほかのタスク）。
 - ビルドが違う（node・gcc の版も 2026-11-10 と違う）ので、比べられるのはそれぞれのビルドの中の A/B どうし。
 
-**残りの +0.4 ms は LCD の SPI 割り込み（追記、実測）。** 1 フレームに約 29 本の帯（4 行・1,920 B）を `spi_device_queue_trans` で送り、1 本ごとに SPI2 の完了割り込みが入って、回収するタスクを起こす（`lcd_tx` ≈ 1,750 / 窓）。この割り込みは `spi_bus_initialize()` を呼んだコア（`app_main`、CPU 0）に置かれている。inline のときは空いている CPU 0 で処理されて描画の時間に入らず、表示タスクが CPU 0 にいると表示タスクの時間に入る。`CONFIG_POCKET_LCD_ISR_CORE`（ba34161 で追加、既定 -1 = 今のまま）で CPU 1 に移した同じ条件の A/B（`isr1-stress-1`）:
+**残りの +0.4 ms は LCD の SPI 割り込み（追記、実測）。** 1 フレームに約 29 本の帯（4 行・1,920 B）を `spi_device_queue_trans` で送り、1 本ごとに SPI2 の完了割り込みが入って、回収するタスクを起こす（`lcd_tx` ≈ 1,750 / 窓）。この割り込みは `spi_bus_initialize()` を呼んだコア（`app_main`、CPU 0）に置かれている。inline のときは空いている CPU 0 で処理されて描画の時間に入らず、表示タスクが CPU 0 にいると表示タスクの時間に入る。`CONFIG_KOBAKO_LCD_ISR_CORE`（ba34161 で追加、既定 -1 = 今のまま）で CPU 1 に移した同じ条件の A/B（`isr1-stress-1`）:
 
 | | 割り込み CPU 0（`keyint-stress-1`） | 割り込み CPU 1（`isr1-stress-1`） |
 | --- | --- | --- |

@@ -1,19 +1,19 @@
 # apicheck / pickcheck
 
 共通APIの新しい面が実機で本当に立つかを確かめる2本。表示は持たず、`console.log` の
-行が結果そのもの。`tools/pocket_bridge.py demo --source apps/apicheck/<name>.js` で
+行が結果そのもの。`tools/kobako_bridge.py demo --source apps/apicheck/<name>.js` で
 Playground に打ち込んで走らせる。
 
 ## apicheck.js
 
 一度に3つの面を検査する。
 
-- `pocket.ble` が **存在すること**。`ble.central` は `supported=false` だが、名前空間が
+- `kobako.ble` が **存在すること**。`ble.central` は `supported=false` だが、名前空間が
   無いと feature-test を飛ばしたアプリが `UNSUPPORTED` ではなく `TypeError` を食う。
   これは §2 が防ぐために書かれている失敗そのものなので、`typeof` と「呼べば Promise が
   返る」を別々に見る。
 - `audio.playback` と `workspace` の capability が立つこと。
-- `pocket.app.info()` がアプリ同一性を返すこと。以前は「ソースのポインタが pet と同じか」
+- `kobako.app.info()` がアプリ同一性を返すこと。以前は「ソースのポインタが pet と同じか」
   で判定していた。
 - `workspace.create` → `read` の往復。
 
@@ -25,7 +25,7 @@ CAP audio.playback true/true null
 CAP workspace true/true null
 TYPEOF ble=object ws=object player=object
 REACH ble.scan promise
-APP local.playground pocket-app works=pick
+APP local.playground kobako-app works=pick
 LAUNCH state=null result=null
 WS created / WS read rev=1 title=APICHK n=9
 ```
@@ -34,7 +34,7 @@ WS created / WS read rev=1 title=APICHK n=9
 
 ## pickcheck.js
 
-`pocket.workspace.pick()` だけを見る。これは**生きているゲストの上にホスト画面を描き、
+`kobako.workspace.pick()` だけを見る。これは**生きているゲストの上にホスト画面を描き、
 キーをゲストから取り上げる**ので、他のどの呼び出しとも壊れ方が違う。
 
 ```

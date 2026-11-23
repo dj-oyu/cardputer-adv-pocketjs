@@ -4,7 +4,7 @@
 
 本書は実装者が従う文書で、調査ではなく**決定**を書く。各決定には理由と、それを検査する項目（§7）を付ける。数値は **実測**（L0 §2.1、device / build / host を区別）か **推定** かを毎回明記する。
 
-行番号の基準: `main/` と `components/` は本ブランチの HEAD `edc21ed`。`quickjs.c` は台帳 03 の基準版（`015fc62`）の行番号を台帳の事実番号とともに引く。`ui_qjs.c` は本作業ツリーにはまだ無く、読み取り専用の `.cache/pocketjs/hosts/esp-idf/components/pocketjs_ui_qjs/src/ui_qjs.c` を読んだ（§2.4 で取り込む）。
+行番号の基準: `main/` と `components/` は本ブランチの HEAD `edc21ed`。`quickjs.c` は台帳 03 の基準版（`015fc62`）の行番号を台帳の事実番号とともに引く。`ui_qjs.c` は本作業ツリーにはまだ無く、読み取り専用の `.cache/kobako/hosts/esp-idf/components/kobako_ui_qjs/src/ui_qjs.c` を読んだ（§2.4 で取り込む）。
 
 ## 0. 要約（決めたこと）
 
@@ -17,7 +17,7 @@
 | 5 | 暴走は「1 本の論理 drain が drain の中で使った時間」で検出し、ジョブ境界でセッションを終える。例外は投げない | `VM_RUNAWAY_US=250000` / `VM_RUNAWAY_JOBS=100000`（時計が死んだときの受け皿）| §5.2 の改訂。ターン数で数えた初版は正直な長い連鎖を殺した |
 | 6 | 不変条件は `tools/vmtest/` で件数モード（決定的）の予算を掛けて既存コーパスとバイト一致で検査する | §7 の点検表 | 期待値の書き換えは新規ファイルだけ（README の規則）|
 
-VM 本体（`quickjs.c`）は変更しない（§6 完了条件）。変更するのは `components/pocketjs_guest/src/guest.c`、新設の `components/pocketjs_guest/src/vm_sched.c` / `vm_clock.c`、取り込む `pocketjs_ui_qjs`、`main/app_session.c`、`main/main.c`、`main/pocket/pocket_app.c` の 1 行、`tools/vmtest/vmrun.c`。
+VM 本体（`quickjs.c`）は変更しない（§6 完了条件）。変更するのは `components/kobako_guest/src/guest.c`、新設の `components/kobako_guest/src/vm_sched.c` / `vm_clock.c`、取り込む `kobako_ui_qjs`、`main/app_session.c`、`main/main.c`、`main/kobako/kobako_app.c` の 1 行、`tools/vmtest/vmrun.c`。
 
 ## 1. 予算: どこで・何を・尽きたらどうするか
 
@@ -90,7 +90,7 @@ void    vm_clock_install(vm_clock_fn fn);      /* tests and clock-bench swap it 
 - clock-bench が `esp_cpu_get_cycle_count()` を選ぶ場合、32 bit で 240 MHz なら約 17.9 s で巻く（**計算値**）。予算はターン内の差分にしか使わないので巻きは無害だが、`start_us` を保持する `vm_budget_t` はその時計の単位で持つ。差分だけを扱う契約を `vm_budget_t` のコメントに書く。
 - ホスト（vmtest）は `clock_gettime(CLOCK_MONOTONIC)` か、件数モード（§7）では「常に 0 を返す時計」を入れる。`limit_us=0` なら時計を読まずに stride/floor/backstop だけで動く。**期待値と比較するテストは全部この件数モードで走らせる**。時間モードはホストでは決定的でない。
 
-`vm_budget_t` は 1 ターンに 1 個、`app_tick()` / `app_overlay_tick()` の冒頭で `vm_budget_begin(&b, VM_TURN_BUDGET_US)` が時計を 1 回読んで作る。guest.c はそれを `pocketjs_guest_budget(guest, &b)` で受け取り、同じターンの `frame()` 後の drain と、次ターンの継続 drain（§2）が同じ構造体を見る。
+`vm_budget_t` は 1 ターンに 1 個、`app_tick()` / `app_overlay_tick()` の冒頭で `vm_budget_begin(&b, VM_TURN_BUDGET_US)` が時計を 1 回読んで作る。guest.c はそれを `kobako_guest_budget(guest, &b)` で受け取り、同じターンの `frame()` 後の drain と、次ターンの継続 drain（§2）が同じ構造体を見る。
 
 **実装は `arm_turn()` で `deadline`（暴走ガード用の壁時計デッドライン）とは別に時計を読む。** 「1 回の読みで共有できる」という上の理由づけは、`vm_clock` が使う時計の選び方（clock-bench の決定）から独立ではない — `esp_timer` 単位の値をそのまま渡すと、後で CCOUNT に切り替えた日に黙って壊れる。1 ターンあたり時計 1 回の追加コストは実測 25 ns（CCOUNT）〜833 ns（esp_timer）で、無視できる。
 
@@ -99,7 +99,7 @@ void    vm_clock_install(vm_clock_fn fn);      /* tests and clock-bench swap it 
 - `vm_sched_drain` が `VM_DRAIN_YIELDED` を返す。`drain_jobs()` は **`ESP_OK`** を返す（失敗ではない）。guest に `jobs_pending=true`、`yields++`。
 - 例外を投げない。ジョブを捨てない。rejection の報告は行わない（§3）。
 - ターンはそのまま UI コアの tick と draw（ui_qjs.c:861-862）へ進み、描画と転送（app_session.c:539 以降）が走る。§6「未完了の drain の間にネイティブな描画・I/O 処理を許す」。
-- 統計は `pocketjs_guest_stats_t` に `yields` / `continuations` / `jobs_pending` / `jobs_dropped` を足す（`struct_size` 付きなので ABI は保てる）。**既存のログ標識（`PERF …` など）の書式は 1 バイトも変えない。** 追加の観測は `CONFIG_POCKET_VM_PROBE` 時の `VMSCHED` 行だけ。
+- 統計は `kobako_guest_stats_t` に `yields` / `continuations` / `jobs_pending` / `jobs_dropped` を足す（`struct_size` 付きなので ABI は保てる）。**既存のログ標識（`PERF …` など）の書式は 1 バイトも変えない。** 追加の観測は `CONFIG_QJS_LEAN_PROBE` 時の `VMSCHED` 行だけ。
 - **継続ターンも `PERF` の `turn_ms` の母数（`turn_sum`/`ticks`）に数える。** 入れないと安いターン（drain が空か 1 件）だけの平均になり、`turn_ms` が「JS が走ったターンの平均」という意味を保てない。
 
 ## 2. 継続の保証と互換モード
@@ -116,17 +116,17 @@ void    vm_clock_install(vm_clock_fn fn);      /* tests and clock-bench swap it 
 esp_err_t app_tick(uint32_t buttons) {
     deadline = esp_timer_get_time() + 250000;          /* app_session.c:492, kept */
     vm_budget_begin(&budget, VM_TURN_BUDGET_US);       /* one clock read; see sec.1.3 */
-    pocketjs_guest_budget(guest, &budget);
-    /* NOTE (2026-09-12): the first implementation read pocket_app_exit_requested()
+    kobako_guest_budget(guest, &budget);
+    /* NOTE (2026-09-12): the first implementation read kobako_app_exit_requested()
      * HERE, and that was wrong (found in review, fixed the same day). The stop it asks for reaches the
      * guest as an uncatchable interrupt, so honouring it at the top of a
      * continuation turn kills job k+1 of a drain that pre-L1 ran to its end.
      * The flag is read below, on a turn that begins with an empty queue, which
-     * is where pocket_app_pump() read it pre-L1. */
-    if (pocketjs_guest_jobs_pending(guest)) {
-        esp_err_t e = pocketjs_ui_turn_continue(binding, &frame);   /* sec.2.4 */
+     * is where kobako_app_pump() read it pre-L1. */
+    if (kobako_guest_jobs_pending(guest)) {
+        esp_err_t e = kobako_ui_turn_continue(binding, &frame);   /* sec.2.4 */
         if (e) return e;
-        if (pocketjs_guest_jobs_pending(guest)) {
+        if (kobako_guest_jobs_pending(guest)) {
             /* Still not empty: nothing new reaches JS this turn. Keys are not
              * lost -- they are held for the first turn that runs the pumps. */
             deferred_buttons |= buttons;
@@ -135,18 +135,18 @@ esp_err_t app_tick(uint32_t buttons) {
         }
     }
     continuation_turns = 0;
-    if (pocket_app_exit_requested()) app_request_stop();   /* see the NOTE above */
+    if (kobako_app_exit_requested()) app_request_stop();   /* see the NOTE above */
     buttons |= deferred_buttons; deferred_buttons = 0;
-    pocket_app_pump();          /* app_session.c:497-523, unchanged from here on */
-    pocket_text_pump();         /* the key path's JS half (onEdit/onSubmit/onCancel), deferred to here */
+    kobako_app_pump();          /* app_session.c:497-523, unchanged from here on */
+    kobako_text_pump();         /* the key path's JS half (onEdit/onSubmit/onCancel), deferred to here */
     ...
-    e = pocketjs_ui_turn(binding, &input, &frame);
+    e = kobako_ui_turn(binding, &input, &frame);
 present:
     /* app_session.c:539-: damage plan, strips, board_present */
 }
 ```
 
-`app_overlay_tick()`（app_session.c:439-475）も同じ骨格。オーバーレイには UI コアが無いので継続は `pocketjs_guest_continue(guest)` を直接呼ぶ。オーバーレイ側の費用制御（`budget_us` 8,000 / 12,000 µs と `over_limit` 60 ターン、ui/overlay.c:50,63,323）は別機構のまま。L1 の予算をそれ以下にしてあるので、JS の drain が原因で費用制御が発火することはない（**推定**: floor の 3.9 ms を足しても 12 ms を超えない。ただし `frame()` の長さは制御外）。
+`app_overlay_tick()`（app_session.c:439-475）も同じ骨格。オーバーレイには UI コアが無いので継続は `kobako_guest_continue(guest)` を直接呼ぶ。オーバーレイ側の費用制御（`budget_us` 8,000 / 12,000 µs と `over_limit` 60 ターン、ui/overlay.c:50,63,323）は別機構のまま。L1 の予算をそれ以下にしてあるので、JS の drain が原因で費用制御が発火することはない（**推定**: floor の 3.9 ms を足しても 12 ms を超えない。ただし `frame()` の長さは制御外）。
 
 ### 2.3 「配送」の定義 — pump ごと
 
@@ -154,33 +154,33 @@ L1 での「JS への配送」= ホストが `JS_Call` でゲストのコード�
 
 | pump | ネイティブな取り込み | JS への配送 | 継続ターンで止まると |
 | --- | --- | --- | --- |
-| `pocket_app_pump` (pocket_app.c:729-757) | sleep の期限を `pocket_api_complete` に転記（734-742）。**exit の転記（733）は §2.2 のとおり冒頭へ持ち出す** | start hook の `JS_Call`（749 経由 `run_hook`）| sleep の完了記録が 1 ターン遅れる。resolve 自体が保留なので観測差なし。`lat` の値にはこの遅れが乗る（正直な数字）|
-| `pocket_imu_pump` (pocket_imu.c:140) | — | `watch` 購読へ `pocket_api_sub_deliver`（pocket_api.c:294-320 の `JS_Call`）| 次の通常ターンでまとめて 1 回。IMU は状態通知なので取りこぼしではない |
-| `pocket_io_pump` (pocket_io.c:1445) | UART 受信を `pocket_api_complete` | — | ドライバのリングバッファが保持。完了記録が遅れるだけ |
-| `pocket_bridge_pump` (pocket_bridge.c:351) | — | イベント購読へ `sub_deliver` | 遅れる。ブリッジ側は ACK 待ちで保持 |
-| `pocket_net_pump` (pocket_net.c:1279) | リンク／スキャンの完了記録 | lease 購読へ `sub_deliver` | 遅れる |
-| `pocket_capture_pump` (pocket_capture.c:435) | 録音の完了記録 | — | 遅れる |
-| `pocket_api_pump` (pocket_api.c:490-516) | — | **resolve / reject の `JS_Call`（475）**。これ自体は reaction を末尾に積むだけ（事実 53）| §6 が名指しで保留を求めるもの。resolve を先にしても FIFO は壊れない（reaction は残りの後ろに積まれる）が、「旧 drain の完了前に resolve が起きた」順序になる。**互換モードは保留する。** 保留しない「公平モード」は L1 の範囲外（§8）|
-| `pocket_fs_pump` (pocket_fs.c:1880) | — | volume 購読へ `sub_deliver` | 遅れる |
-| `pocket_av_pump` (pocket_av.c:1629) | — | player / power 購読へ `sub_deliver` | 遅れる |
-| `pocket_ui_pump(buttons)` (pocket_ui.c:1130-1155) | `held_mask` の更新 | action 購読（press / release / repeat）へ `sub_deliver` | **押下は落とさない**: `deferred_buttons` に OR して、最初の通常ターンに `buttons | deferred_buttons` を渡す。エッジ検出は `held_mask`（pump 内でしか更新されない）との差なので、押下→通常ターンで press、次の `app_tick(0)`（main.c:500 の release フレーム、または次周の無キー）で release が出る。`input.held()` はジョブから読むと継続中は古い値を返す（文書化のみ）|
-| `pocket_text_pump`（pocket_text.c、新設）| `pocket_text_key()` が main.c:499 で（= `app_tick()` の**外**で）行う IME・バッファ・キャレット・再描画。ホスト側のこの半分は打鍵の瞬間に走る。ゲスト側のコールバックだけをキューに積み、ここで配送する（打鍵の瞬間に `app_tick()` の外から `JS_Call` していた初期実装の欠陥を、レビューで見つけて直した形） | onEdit / onSubmit / onCancel の `JS_Call` | 遅れる。打鍵は落とさない（イベントはキューに積まれ、空になったターンの pump で順番どおり配送される）|
-| `frame()`（`pocketjs_ui_turn` → `pocketjs_guest_frame`、ui_qjs.c:858）| — | `JS_Call`（guest.c:420）と、その中の `onFrame` 配送（pocket_app.c:567）| 呼ばない。UI コアの tick/draw は呼ぶ（§2.4）|
+| `kobako_app_pump` (kobako_app.c:729-757) | sleep の期限を `kobako_api_complete` に転記（734-742）。**exit の転記（733）は §2.2 のとおり冒頭へ持ち出す** | start hook の `JS_Call`（749 経由 `run_hook`）| sleep の完了記録が 1 ターン遅れる。resolve 自体が保留なので観測差なし。`lat` の値にはこの遅れが乗る（正直な数字）|
+| `kobako_imu_pump` (kobako_imu.c:140) | — | `watch` 購読へ `kobako_api_sub_deliver`（kobako_api.c:294-320 の `JS_Call`）| 次の通常ターンでまとめて 1 回。IMU は状態通知なので取りこぼしではない |
+| `kobako_io_pump` (kobako_io.c:1445) | UART 受信を `kobako_api_complete` | — | ドライバのリングバッファが保持。完了記録が遅れるだけ |
+| `kobako_bridge_pump` (kobako_bridge.c:351) | — | イベント購読へ `sub_deliver` | 遅れる。ブリッジ側は ACK 待ちで保持 |
+| `kobako_net_pump` (kobako_net.c:1279) | リンク／スキャンの完了記録 | lease 購読へ `sub_deliver` | 遅れる |
+| `kobako_capture_pump` (kobako_capture.c:435) | 録音の完了記録 | — | 遅れる |
+| `kobako_api_pump` (kobako_api.c:490-516) | — | **resolve / reject の `JS_Call`（475）**。これ自体は reaction を末尾に積むだけ（事実 53）| §6 が名指しで保留を求めるもの。resolve を先にしても FIFO は壊れない（reaction は残りの後ろに積まれる）が、「旧 drain の完了前に resolve が起きた」順序になる。**互換モードは保留する。** 保留しない「公平モード」は L1 の範囲外（§8）|
+| `kobako_fs_pump` (kobako_fs.c:1880) | — | volume 購読へ `sub_deliver` | 遅れる |
+| `kobako_av_pump` (kobako_av.c:1629) | — | player / power 購読へ `sub_deliver` | 遅れる |
+| `kobako_ui_pump(buttons)` (kobako_ui.c:1130-1155) | `held_mask` の更新 | action 購読（press / release / repeat）へ `sub_deliver` | **押下は落とさない**: `deferred_buttons` に OR して、最初の通常ターンに `buttons | deferred_buttons` を渡す。エッジ検出は `held_mask`（pump 内でしか更新されない）との差なので、押下→通常ターンで press、次の `app_tick(0)`（main.c:500 の release フレーム、または次周の無キー）で release が出る。`input.held()` はジョブから読むと継続中は古い値を返す（文書化のみ）|
+| `kobako_text_pump`（kobako_text.c、新設）| `kobako_text_key()` が main.c:499 で（= `app_tick()` の**外**で）行う IME・バッファ・キャレット・再描画。ホスト側のこの半分は打鍵の瞬間に走る。ゲスト側のコールバックだけをキューに積み、ここで配送する（打鍵の瞬間に `app_tick()` の外から `JS_Call` していた初期実装の欠陥を、レビューで見つけて直した形） | onEdit / onSubmit / onCancel の `JS_Call` | 遅れる。打鍵は落とさない（イベントはキューに積まれ、空になったターンの pump で順番どおり配送される）|
+| `frame()`（`kobako_ui_turn` → `kobako_guest_frame`、ui_qjs.c:858）| — | `JS_Call`（guest.c:420）と、その中の `onFrame` 配送（kobako_app.c:567）| 呼ばない。UI コアの tick/draw は呼ぶ（§2.4）|
 
 **離脱ターンの例外**: `tick_run()` は Back で `app_tick(0x2000)` を 1 回呼んでから `app_request_stop()` する（main.c:490。ゲストに最後の保存機会を与える）。このターンが継続だけで終わるとアプリは保存フレームを失う。決定: `buttons` に `0x2000` を含むターンは継続の予算を `VM_LEAVE_BUDGET_US=50000` / backstop 256 に広げ、それでも残れば残したまま `frame(0x2000)` を呼ぶ。セッションはこの直後に終わる（§3.2）ので、順序の乱れが観測される機会は無い。50 ms は旧ガード 250 ms の 1/5 で、F の単価なら約 100 件（**推定**）。
 
-### 2.4 `pocketjs_ui_qjs` の取り込みと継続の入口
+### 2.4 `kobako_ui_qjs` の取り込みと継続の入口
 
-`frame()` → UI tick → UI draw の順序を決めているのは `pocketjs_ui_turn`（ui_qjs.c:818-863）で、本作業ツリーには無い（L0 §6-4）。L1 はこれを `components/pocketjs_ui_qjs/` に**取り込む**（quickjs-ng と同じ規則: 最初のコミットは無改変のバイト列、改変は別コミット）。加える関数は 1 つ。
+`frame()` → UI tick → UI draw の順序を決めているのは `kobako_ui_turn`（ui_qjs.c:818-863）で、本作業ツリーには無い（L0 §6-4）。L1 はこれを `components/kobako_ui_qjs/` に**取り込む**（quickjs-ng と同じ規則: 最初のコミットは無改変のバイト列、改変は別コミット）。加える関数は 1 つ。
 
 ```c
 /* Runs the continuation drain in place of frame(), then the core's tick and
- * draw exactly as pocketjs_ui_turn() does -- the display keeps animating while
+ * draw exactly as kobako_ui_turn() does -- the display keeps animating while
  * the queue is worked off, which sec.6 allows and a frozen frame would not. */
-esp_err_t pocketjs_ui_turn_continue(pocketjs_ui_qjs_t *binding, pocketjs_ui_frame_view_t *out_frame);
+esp_err_t kobako_ui_turn_continue(kobako_ui_qjs_t *binding, kobako_ui_frame_view_t *out_frame);
 ```
 
-`pocketjs_guest_continue(guest)` は guest.c 側の新 API で、`vm_sched_drain` を回し、`VM_DRAIN_EMPTY` のときだけ rejection を報告する（§3.1）。`pocketjs_guest_frame` の drain（guest.c:439）も同じ関数を使う。
+`kobako_guest_continue(guest)` は guest.c 側の新 API で、`vm_sched_drain` を回し、`VM_DRAIN_EMPTY` のときだけ rejection を報告する（§3.1）。`kobako_guest_frame` の drain（guest.c:439）も同じ関数を使う。
 
 ## 3. 未処理 rejection の報告時点
 
@@ -197,13 +197,13 @@ esp_err_t pocketjs_ui_turn_continue(pocketjs_ui_qjs_t *binding, pocketjs_ui_fram
 
 ### 3.2 ジョブを残したままセッションが終わるとき
 
-経路: `end_run` → `app_stop()`（app_session.c:200-241）→ 各 `*_reset()` → `pocket_api_reset()`（pocket_api.c:534-546、armed の Promise を settle せず解放）→ `pocketjs_guest_destroy` → `JS_FreeRuntime` がジョブを**実行せずに**解放（quickjs.c:2294-2309、事実 9）。
+経路: `end_run` → `app_stop()`（app_session.c:200-241）→ 各 `*_reset()` → `kobako_api_reset()`（kobako_api.c:534-546、armed の Promise を settle せず解放）→ `kobako_guest_destroy` → `JS_FreeRuntime` がジョブを**実行せずに**解放（quickjs.c:2294-2309、事実 9）。
 
-決定: **この「実行せずに捨てる」を維持する。** 理由は §3-7（解放は所有規則に従う）と、既に `pocket_api_reset` が同じ選択をしている整合性。加えて:
+決定: **この「実行せずに捨てる」を維持する。** 理由は §3-7（解放は所有規則に従う）と、既に `kobako_api_reset` が同じ選択をしている整合性。加えて:
 
-- 捨てた件数を数えて `jobs_dropped` に入れ、`app_report()`（app_session.c:192）が `ESP_LOGW("app","jobs dropped at stop: %u")` を出す。新しい行であり、契約済み標識の書式には触れない。**実装は `pocketjs_guest_stats()` が毎回 `JS_IsJobPending()` を読むだけなので、件数ではなく「キューが空でなかったか」の 1 bit である。** また `app_stop()` は `pocketjs_guest_destroy()` を呼んで `guest=NULL` にした**後**に `app_report()` を呼ぶため、素朴な実装では `if(guest)` の分岐が常に false になり、この警告は一度も出力されない（レビューで見つかった欠陥）。正しい実装は、guest がまだ生きている destroy 直前（stop hook が使い切った後、捨てるものが確定した地点）で `final_stats` に latch し、`app_report()` は guest が無いときそれを読む。
-- 残っていた `rejections` エントリは**報告しない**で解放する。捨てたジョブの中に catch があったかもしれず、報告は推測になる。これは今日の `pocketjs_guest_destroy` が既にしていること（guest.c の destroy 内、`while (guest->rejections)` で `JS_FreeValue` して `free` するだけ）で、L1 はそれを規則として書き留める。今日の `VMPROBE` 条件スクリプトが踏んだ「未処理 rejection 1 件でセッション終了」（L0 §2.1.1-2）とは別の話で、こちらは終了が先に決まっている場合。
-- stop hook（pocket_app.c:772-797）は独自に `JS_ExecutePendingJob` を 200 ms 回す（793-796）。これは残ったジョブも hook のジョブも FIFO で走らせる。予算は掛けない: セッション終了中で、`APP_STOP_MS` と `stop_interrupt`（767-770）が既に上限。ただし §5.3 のとおりハンドラの登録経路は 1 本化する。
+- 捨てた件数を数えて `jobs_dropped` に入れ、`app_report()`（app_session.c:192）が `ESP_LOGW("app","jobs dropped at stop: %u")` を出す。新しい行であり、契約済み標識の書式には触れない。**実装は `kobako_guest_stats()` が毎回 `JS_IsJobPending()` を読むだけなので、件数ではなく「キューが空でなかったか」の 1 bit である。** また `app_stop()` は `kobako_guest_destroy()` を呼んで `guest=NULL` にした**後**に `app_report()` を呼ぶため、素朴な実装では `if(guest)` の分岐が常に false になり、この警告は一度も出力されない（レビューで見つかった欠陥）。正しい実装は、guest がまだ生きている destroy 直前（stop hook が使い切った後、捨てるものが確定した地点）で `final_stats` に latch し、`app_report()` は guest が無いときそれを読む。
+- 残っていた `rejections` エントリは**報告しない**で解放する。捨てたジョブの中に catch があったかもしれず、報告は推測になる。これは今日の `kobako_guest_destroy` が既にしていること（guest.c の destroy 内、`while (guest->rejections)` で `JS_FreeValue` して `free` するだけ）で、L1 はそれを規則として書き留める。今日の `VMPROBE` 条件スクリプトが踏んだ「未処理 rejection 1 件でセッション終了」（L0 §2.1.1-2）とは別の話で、こちらは終了が先に決まっている場合。
+- stop hook（kobako_app.c:772-797）は独自に `JS_ExecutePendingJob` を 200 ms 回す（793-796）。これは残ったジョブも hook のジョブも FIFO で走らせる。予算は掛けない: セッション終了中で、`APP_STOP_MS` と `stop_interrupt`（767-770）が既に上限。ただし §5.3 のとおりハンドラの登録経路は 1 本化する。
 
 ## 4. 起床と待機
 
@@ -211,7 +211,7 @@ esp_err_t pocketjs_ui_turn_continue(pocketjs_ui_qjs_t *binding, pocketjs_ui_fram
 
 `ui_task`（main.c:537-700）は 30 fps のフレームループで、キー待ちはタイムアウト 0 の `xQueueReceive`（544）、フレーム末尾は `vTaskDelay(cap-held)`（698）。ホームの pet / FLOWER シーン、オーバーレイ、各画面の再描画がこのループに乗っており、JS が無くても止められない。ランタイムの所有者もこのタスク（`app_session.c` の static 群と全 pump がここから呼ばれる）。
 
-「未処理ジョブもイベントも無いときだけ待つ」を文字どおり実現するには、JS の所有を専用タスクへ移し、`pocketjs_ui_turn` が返すフレームビューと `pocketjs_rgb565_prepare/render_strip`（app_session.c:540-558）が読む UI コアの状態を受け渡す構造が要る（§6 第 1 項）。その費用は専用タスクのスタック: ui タスクは 32 KiB（main.c:739）で、深い再帰時の残りが 8,252 B（実測(device)、`stack_hw`）= 約 24 KiB を JS が使う。同等の専用タスクは **静的 DIRAM +24〜32 KiB（推定）** で、L0 §2.2 の上限 +8 KiB を超える。無線を上げた状態の空きヒープ最小 14,768 B（実測）に対しても無理。**L1 では専用タスクを作らない。**
+「未処理ジョブもイベントも無いときだけ待つ」を文字どおり実現するには、JS の所有を専用タスクへ移し、`kobako_ui_turn` が返すフレームビューと `kobako_rgb565_prepare/render_strip`（app_session.c:540-558）が読む UI コアの状態を受け渡す構造が要る（§6 第 1 項）。その費用は専用タスクのスタック: ui タスクは 32 KiB（main.c:739）で、深い再帰時の残りが 8,252 B（実測(device)、`stack_hw`）= 約 24 KiB を JS が使う。同等の専用タスクは **静的 DIRAM +24〜32 KiB（推定）** で、L0 §2.2 の上限 +8 KiB を超える。無線を上げた状態の空きヒープ最小 14,768 B（実測）に対しても無理。**L1 では専用タスクを作らない。**
 
 ### 4.2 L1 が代わりに届けるもの
 
@@ -227,11 +227,11 @@ void vm_wake_post_from_isr(BaseType_t *hpw);   /* ISR: vTaskNotifyGiveFromISR */
 uint32_t vm_wake_wait(TickType_t max);   /* owner only: ulTaskNotifyTake(pdTRUE, max) */
 ```
 
-- `pocket_api_complete()`（pocket_api.c:455-467）が `done` を書いた**後**に `vm_wake_post()` を呼ぶ。完了記録の公開が先、起床が後（§7 の「通知側は完了記録を公開した後に起床要求を送る」）。
-- **所有タスク自身が投稿した完了では起床しない**（`vm_wake_post()` が `xTaskGetCurrentTaskHandle()==owner` を捨てる。レビューで見つけた抜け: これを入れないと自タスクの完了投稿でカウントが残り、フレームキャップが毎回すぐ返って周期が下限 8 ms に潰れる）。完了の大半は ui タスク自身が記録するもの（`pocket_app_pump` の sleep 期限、`pocket_io_pump` の UART、`pocket_net_pump` のリンク／スキャン、`tick_run` のピッカー結果）で、それらは**同じターンの** `pocket_api_pump()` が settle する。カウント型通知はそのまま残るので、除外しないとフレームキャップが毎回すぐ返り、周期が 33 ms ではなく下限の 8 ms に落ちる。縮めるべき待ちは「このタスクが予期できない完了」=別タスクと ISR のものだけ。
+- `kobako_api_complete()`（kobako_api.c:455-467）が `done` を書いた**後**に `vm_wake_post()` を呼ぶ。完了記録の公開が先、起床が後（§7 の「通知側は完了記録を公開した後に起床要求を送る」）。
+- **所有タスク自身が投稿した完了では起床しない**（`vm_wake_post()` が `xTaskGetCurrentTaskHandle()==owner` を捨てる。レビューで見つけた抜け: これを入れないと自タスクの完了投稿でカウントが残り、フレームキャップが毎回すぐ返って周期が下限 8 ms に潰れる）。完了の大半は ui タスク自身が記録するもの（`kobako_app_pump` の sleep 期限、`kobako_io_pump` の UART、`kobako_net_pump` のリンク／スキャン、`tick_run` のピッカー結果）で、それらは**同じターンの** `kobako_api_pump()` が settle する。カウント型通知はそのまま残るので、除外しないとフレームキャップが毎回すぐ返り、周期が 33 ms ではなく下限の 8 ms に落ちる。縮めるべき待ちは「このタスクが予期できない完了」=別タスクと ISR のものだけ。
 - `main.c:698` の `vTaskDelay(pdMS_TO_TICKS(rest))` を、ゲスト実行中（`running`）に限り `vm_wake_wait(pdMS_TO_TICKS(rest))` に置き換える。非実行時は今までどおり `vTaskDelay`（通知は誰も送らないので、送られても次周で消費されるだけ）。
 - 早く起きたターンは `app_tick()` を普通に回す（pump → `frame()` → drain）。**`frame()` を飛ばした「完了専用ターン」は作らない。** 作ると「resolve → drain → `frame()`」の順になり、`.then` が次の `frame()` より前に走るという観測可能な変化がアプリに入る。互換モードを既定とする §6 の趣旨に反するので、L1 では入れない（§8）。
-- 副作用: 完了が連続して届くアプリ（UART、10 ms の sleep ループ）は `frame()` が 30 fps より速く呼ばれる。`onFrame` の `dt`（pocket_app.c:557、実測時刻から計算）は正しい値を運ぶが、`frame()` の回数を時計代わりにするアプリは速くなる。**フレーム周期の下限 `VM_MIN_PERIOD_MS=8`** を置く: 早起きしても前回のターン開始から 8 ms 経つまでは `vTaskDelay` で埋める。8 ms は予算と同じで、これより短い周期で回しても転送（7.7 ms、実測）が追いつかない。
+- 副作用: 完了が連続して届くアプリ（UART、10 ms の sleep ループ）は `frame()` が 30 fps より速く呼ばれる。`onFrame` の `dt`（kobako_app.c:557、実測時刻から計算）は正しい値を運ぶが、`frame()` の回数を時計代わりにするアプリは速くなる。**フレーム周期の下限 `VM_MIN_PERIOD_MS=8`** を置く: 早起きしても前回のターン開始から 8 ms 経つまでは `vTaskDelay` で埋める。8 ms は予算と同じで、これより短い周期で回しても転送（7.7 ms、実測）が追いつかない。
 
 ### 4.3 待機直前の競合で起床を失わない理由
 
@@ -242,9 +242,9 @@ owner:    check(no job pending && no completion)  ....  ulTaskNotifyTake()
 poster:                                  complete(); Give()
 ```
 
-check と Take の間に Give が入っても、Take は値 1 を見て**ブロックせずに戻る**。Give が check より前なら、check が完了記録（`done`、pocket_api.c:466）を見る。`done` の公開が Give より前なので（順序の契約）、「記録は無いのに通知だけある」は起きず、「記録はあるのに通知が無い」は check が拾う。したがってどの交錯でも、次の Take は起きるか、check が仕事を見つけるかのどちらか。**失う経路が無い。**
+check と Take の間に Give が入っても、Take は値 1 を見て**ブロックせずに戻る**。Give が check より前なら、check が完了記録（`done`、kobako_api.c:466）を見る。`done` の公開が Give より前なので（順序の契約）、「記録は無いのに通知だけある」は起きず、「記録はあるのに通知が無い」は check が拾う。したがってどの交錯でも、次の Take は起きるか、check が仕事を見つけるかのどちらか。**失う経路が無い。**
 
-なぜキューやセマフォでないか: 完了記録の置き場は既に `promises[]`（pocket_api.c:362、確保無し、ISR 安全）にあり、キューは同じものの複製になる。バイナリセマフォは通知と同じ意味を持つが、ヒープ上のオブジェクトを 1 つ増やす。FreeRTOS の文書は通知の方が軽いと述べているが、**本書はそれを測っていない**。選ぶ理由は「複製が無く、カウンタなので競合の証明が上のとおり短い」こと。
+なぜキューやセマフォでないか: 完了記録の置き場は既に `promises[]`（kobako_api.c:362、確保無し、ISR 安全）にあり、キューは同じものの複製になる。バイナリセマフォは通知と同じ意味を持つが、ヒープ上のオブジェクトを 1 つ増やす。FreeRTOS の文書は通知の方が軽いと述べているが、**本書はそれを測っていない**。選ぶ理由は「複製が無く、カウンタなので競合の証明が上のとおり短い」こと。
 
 `configTASK_NOTIFICATION_ARRAY_ENTRIES` は IDF 既定 1。ui タスクで index 0 を他に使う箇所が無いことを `grep -rn "xTaskNotify\|ulTaskNotify\|vTaskNotify" main/` で確認してから使う（本書の時点で 0 件、grep で確認。IDF のコンポーネント側が ui タスクの通知を使うことは無いが、`components/` も同じ grep で見ること）。
 
@@ -265,7 +265,7 @@ ui タスクは優先度 5、input 6、デコーダ 6、音声 7（main.c:738-73
 
 ### 5.2 検出と処置（2026-09-12 改訂）
 
-決定: **1 本の論理 drain（予算で切られた drain + その継続群、§2.1）が `vm_sched_drain` の中で使った時間**で検出する。`VM_RUNAWAY_US = 250,000 µs`。時計が働かない環境（ホストの件数モード、壊れたタイマ）のための受け皿として、同じ論理 drain のジョブ総数 `VM_RUNAWAY_JOBS = 100,000` も見る。どちらも `pocketjs_guest_drain_total()` が持ち、キューが空になった時点で 0 に戻る。
+決定: **1 本の論理 drain（予算で切られた drain + その継続群、§2.1）が `vm_sched_drain` の中で使った時間**で検出する。`VM_RUNAWAY_US = 250,000 µs`。時計が働かない環境（ホストの件数モード、壊れたタイマ）のための受け皿として、同じ論理 drain のジョブ総数 `VM_RUNAWAY_JOBS = 100,000` も見る。どちらも `kobako_guest_drain_total()` が持ち、キューが空になった時点で 0 に戻る。
 
 **初版（`VM_RUNAWAY_TURNS = 30`）を捨てた理由。** ターンは「ゲストがどれだけ仕事を頼んだか」の単位ではない。ターンが終わるのは (a) 壁時計が 8 ms を告げたとき — 混んだ機械ではその大半は他タスクの時間である — か、(b) 64 件の backstop が告げたときで、後者は**ジョブがどれだけ安くても**効く。したがって「30 ターン」は安いジョブなら「1,920 件」を意味し、実測 0.07 ms/件（L0 のワークロード D）では JS 時間 134 ms、置き換えたはずの旧 250 ms ガードのおよそ 2 倍厳しい。初版のこの設計を実装した直後の独立レビューで、実際に 2,500 段の正直な連鎖が終了コード 5 になることが分かった（再現は `tools/vmtest/corpus/budget_honest_long_chain.js`）。**予算が壁時計であること自体はここでの欠陥ではない**が、「プリエンプトされた時間はゲストに課金されない」という `vm_sched.h` の旧コメントは誤りだった（壁時計の予算を通してターン数に変換され、課金されていた）。修正済み。
 
@@ -281,31 +281,31 @@ ui タスクは優先度 5、input 6、デコーダ 6、音声 7（main.c:738-73
 
 ### 5.3 割り込みハンドラの 1 本化
 
-`JS_SetInterruptHandler` は単一スロットで（事実 22）、今は 3 箇所が上書き合戦をしている: guest.c:253（epoch 方式、常に負けて死んでいる、事実 46-47）、app_session.c:90（deadline）、pocket_app.c:781（stop hook 用）。決定: 登録は guest.c:253 の 1 箇所だけにし、ホストは述語を差し替える。
+`JS_SetInterruptHandler` は単一スロットで（事実 22）、今は 3 箇所が上書き合戦をしている: guest.c:253（epoch 方式、常に負けて死んでいる、事実 46-47）、app_session.c:90（deadline）、kobako_app.c:781（stop hook 用）。決定: 登録は guest.c:253 の 1 箇所だけにし、ホストは述語を差し替える。
 
 ```c
 /* guest.c keeps the one JS_SetInterruptHandler call; the host supplies the
  * predicate. NULL restores the guest's own epoch-based one. */
-void pocketjs_guest_set_watchdog(pocketjs_guest_t *g, int (*fn)(void *), void *opaque);
+void kobako_guest_set_watchdog(kobako_guest_t *g, int (*fn)(void *), void *opaque);
 ```
 
-`install_limits`（app_session.c:88-92）と `pocket_app_reset`（781）はこれを呼ぶ。挙動は同じ、登録の経路が 1 本になるだけ。`pocketjs_guest_interrupt()`（guest.c:449-454）は `pocketjs_ui_qjs_interrupt` から呼べるが呼び出し元が無い（事実 47）。L1 では削らず、述語が NULL のときだけ生きる形にする。
+`install_limits`（app_session.c:88-92）と `kobako_app_reset`（781）はこれを呼ぶ。挙動は同じ、登録の経路が 1 本になるだけ。`kobako_guest_interrupt()`（guest.c:449-454）は `kobako_ui_qjs_interrupt` から呼べるが呼び出し元が無い（事実 47）。L1 では削らず、述語が NULL のときだけ生きる形にする。
 
 ## 6. 変更点の一覧（実装済み、最終形）
 
-1. `components/pocketjs_guest/include/pocketjs/vm_clock.h` / `src/vm_clock.c` — §1.3。既定は device が `esp_timer_get_time()`、host が `clock_gettime(CLOCK_MONOTONIC)`。esp ヘッダを含めないのでホストでもそのままビルドできる。
-2. `components/pocketjs_guest/include/pocketjs/vm_sched.h` / `src/vm_sched.c` — §1.1 の `vm_sched_drain` と `vm_budget_t`、全定数。**esp ヘッダを含まない**ので `tools/vmtest/vmrun.c` はこれを写さず**リンクする**（ハーネスが出荷するスケジューラそのものを検査する）。
-3. `guest.c` / `guest.h` — `drain_jobs` を `vm_sched_drain` 経由に、`pocketjs_guest_continue` / `_jobs_pending` / `_budget` / `_set_watchdog` / `_drain_total` を追加、stats に `yields` / `continuations` / `jobs_pending` / `jobs_dropped`（件数ではなく **pending だったか否かの 1 bit** — `JS_ExecutePendingJob` を呼ばずに数える手段が無いため。件数が要るなら L2 のフック）。
-4. `components/pocketjs_ui_qjs/` — **新規に取り込み**（最初のコミットが無改変のバイト列、以後が改変）。`pocketjs_ui_turn_continue()` を追加（§2.4）。
+1. `components/kobako_guest/include/kobako/vm_clock.h` / `src/vm_clock.c` — §1.3。既定は device が `esp_timer_get_time()`、host が `clock_gettime(CLOCK_MONOTONIC)`。esp ヘッダを含めないのでホストでもそのままビルドできる。
+2. `components/kobako_guest/include/kobako/vm_sched.h` / `src/vm_sched.c` — §1.1 の `vm_sched_drain` と `vm_budget_t`、全定数。**esp ヘッダを含まない**ので `tools/vmtest/vmrun.c` はこれを写さず**リンクする**（ハーネスが出荷するスケジューラそのものを検査する）。
+3. `guest.c` / `guest.h` — `drain_jobs` を `vm_sched_drain` 経由に、`kobako_guest_continue` / `_jobs_pending` / `_budget` / `_set_watchdog` / `_drain_total` を追加、stats に `yields` / `continuations` / `jobs_pending` / `jobs_dropped`（件数ではなく **pending だったか否かの 1 bit** — `JS_ExecutePendingJob` を呼ばずに数える手段が無いため。件数が要るなら L2 のフック）。
+4. `components/kobako_ui_qjs/` — **新規に取り込み**（最初のコミットが無改変のバイト列、以後が改変）。`kobako_ui_turn_continue()` を追加（§2.4）。
 5. `main/app_session.c` / `.h` — §2.2 の骨格を `app_tick` と `app_overlay_tick` に。`deferred_buttons`、`continuation_turns`、離脱ターンの予算、`arm_turn()`、`present_frame()`（`goto` ではなく関数切り出しにした — `goto` がラベルを跨いで初期化を飛ばす問題を避けるため、挙動は骨格と同じ）、`drain_runaway()`、`final_stats`（§3.2 参照）。
 6. `main/vm/vm_wake.[ch]`（新規）— §4.2 の起床 API。ISR 文脈は `xPortInIsrContext()` で内部判定。
 7. `main/main.c` — §4.2 の `vm_wake_wait` と `VM_MIN_PERIOD_MS`。`vm_wake_bind()` を `ui_task` 冒頭に。
-8. `main/pocket/pocket_api.c` — `pocket_api_complete` 末尾（`done` 公開の**後**）に `vm_wake_post()`。
-9. `main/pocket/pocket_app.c` / `.h` — `pocket_app_exit_requested()` を関数に出す。stop hook の割り込み登録を `app_vm_watchdog()`（§5.3）経由に。
-10. `main/pocket/pocket_text.c` — `pocket_text_pump()`（§2.3）。
-11. `main/Kconfig.projbuild` — `CONFIG_POCKET_VM_SCHED`（既定 y）。`n` で予算無制限・継続ターン無し・L1 前と同じ挙動に戻る。`sdkconfig.vmsched_off.defaults` がその重ね方。
+8. `main/kobako/kobako_api.c` — `kobako_api_complete` 末尾（`done` 公開の**後**）に `vm_wake_post()`。
+9. `main/kobako/kobako_app.c` / `.h` — `kobako_app_exit_requested()` を関数に出す。stop hook の割り込み登録を `app_vm_watchdog()`（§5.3）経由に。
+10. `main/kobako/kobako_text.c` — `kobako_text_pump()`（§2.3）。
+11. `main/Kconfig.projbuild` — `CONFIG_KOBAKO_VM_SCHED`（既定 y）。`n` で予算無制限・継続ターン無し・L1 前と同じ挙動に戻る。`sdkconfig.vmsched_off.defaults` がその重ね方。
 12. `tools/vmtest/vmrun.c` — §7 のフラグ、新規コーパス。
-13. `tools/hostshim/vm_wake.h`（新規）— ホストビルド用のスタブ。`main/pocket/pocket_api.c` が `main/vm/vm_wake.h` を include するようになったため、`-I main/vm` を持たないホストの `tools/build_pocket_random_test.sh` 等がリンクできなくなっていた（レビューで発見。CLAUDE.md が警告する「`main/` にディレクトリを足したら `grep -rn "main/" tools/` で参照元を洗う」を怠った具体例）。中身は名前を解決するだけの空スタブで足りる（`vm_wake_post()` の呼び出しは `CONFIG_POCKET_VM_SCHED` の内側にあり、ホストはそれを定義しないため）。
+13. `tools/hostshim/vm_wake.h`（新規）— ホストビルド用のスタブ。`main/kobako/kobako_api.c` が `main/vm/vm_wake.h` を include するようになったため、`-I main/vm` を持たないホストの `tools/build_kobako_random_test.sh` 等がリンクできなくなっていた（レビューで発見。CLAUDE.md が警告する「`main/` にディレクトリを足したら `grep -rn "main/" tools/` で参照元を洗う」を怠った具体例）。中身は名前を解決するだけの空スタブで足りる（`vm_wake_post()` の呼び出しは `CONFIG_KOBAKO_VM_SCHED` の内側にあり、ホストはそれを定義しないため）。
 14. 計測: `tools/memlog.py --map … --port COM3 --check`。実測は静的 DIRAM +112 B（`vm/main` 統合後の最終値）、上限 +8 KiB の 1.4%。詳細は [vm-L1-report.md](vm-L1-report.md) §2・§8。
 
 ## 7. 不変条件と検査（実装者とレビュアーの共通点検表）
@@ -322,7 +322,7 @@ void pocketjs_guest_set_watchdog(pocketjs_guest_t *g, int (*fn)(void *), void *o
 | 6 | 完了を失わない | 新規 `budget_completions.js` + `--host-events`: vmrun の `host.request(k)` が「k 番目のターン境界」で完了を投稿する Promise を返す。継続ターンの最中に 8 件投稿し、`frame()` を 1 回挟む | 8 つのハンドラが**投稿順に 1 回ずつ**走り、すべて継続 drain が空になった後の同じターンで走る。`job_throw.js` は不変 |
 | 7 | 永久に飢えるキューが無い | 新規 `budget_starve.js`: `frame()` がジョブを 40 件積み、`--frames 10 --budget-jobs 8`（件数モードでは `frame()` の費用を予算超過に見立て、floor だけが走る条件になる）| 各ターンで少なくとも floor 件走り、10 ターン目までに連鎖が完了した回数を出力。`ceil(40/8)=5` ターンごとに 1 回 |
 | 8 | 暴走の検出 | 新規 `runaway_jobs.js`: `function f(){Promise.resolve().then(f)} f()`。`--runaway-turns 30 --budget-jobs 8` | 終了コード 5、継続ターン数 30 を `#info` に、LSan 報告 0（捨てたジョブの argv が `JS_FreeRuntime` で解放される、事実 9）|
-| 9 | ジョブを残した終了 | 新規 `stop_with_queue.js`: 1000 段の連鎖 + `--frames 1 --budget-jobs 4` | 終了コード 0、LSan 0、`E pocketjs_guest: Unhandled Promise rejection` が **1 行も出ない**（残った rejection は報告しない、§3.2）。`#info jobs_dropped=1` |
+| 9 | ジョブを残した終了 | 新規 `stop_with_queue.js`: 1000 段の連鎖 + `--frames 1 --budget-jobs 4` | 終了コード 0、LSan 0、`E kobako_guest: Unhandled Promise rejection` が **1 行も出ない**（残った rejection は報告しない、§3.2）。`#info jobs_dropped=1` |
 | 10 | Test262 の合格集合 | `test262.py --force-yield -j 8` と `--variant o2 --force-yield` | `test262-baseline.txt` から減らない（7,501 pass） |
 | 11 | 予算無効時の費用 | `timing.py` を予算無効（`limit_us=0, backstop=UINT_MAX`）で | `bench_*` の中央値が `timing-baseline.txt` の p95 以内（README: p95 と中央値の差より小さい差は結果と呼ばない）|
 | 12 | 実機（ホストでは不可） | `smoke_device.py --cycles 20`、`test_settings.py`、`capture_home.py`、`benchmark_app.py` | 全標識バイト一致。`memlog.py --port --check` の予算内。L0 行列の F / E / D を同一バイナリで再取得し、F の turn 中央値 ≤ 12 ms（**推定**の目標）、E の lat 中央値が 33 ms のフレーム周期成分を失っていること。**実施済み（2026-09-12）— [vm-L1-report.md](vm-L1-report.md) §2** |
@@ -342,7 +342,7 @@ L2（ジョブの内側での中断が要る）:
 L1 の範囲外だが L2 ではない（別途判断）:
 
 - 専用の所有タスク（§4.1、DIRAM +24〜32 KiB 推定）。
-- 公平モード: 継続 drain より前に `pocket_api_pump` の resolve だけを許す（FIFO は壊れないが旧 drain 完了前の resolve になる）。F 型のアプリの完了遅延を縮めるのはこれだが、互換モードを既定とする §6 の下では build 時選択の候補として記録に留める。
+- 公平モード: 継続 drain より前に `kobako_api_pump` の resolve だけを許す（FIFO は壊れないが旧 drain 完了前の resolve になる）。F 型のアプリの完了遅延を縮めるのはこれだが、互換モードを既定とする §6 の下では build 時選択の候補として記録に留める。
 - `frame()` を飛ばす完了専用ターン（§4.2）。`.then` が次の `frame()` より前に走る順序変更を伴う。
 - pump をネイティブ取り込みと JS 配送に二分する改修（§2.3 の表の「取り込み」列を継続ターンでも走らせる）。10 ファイルに触る割に、resolve が保留される以上、観測差は `lat` の数字だけ。
 - GC 閾値（256 KiB > 160 KiB、L0 §2）と OOM 時の use-after-free。`main` にも効く不具合で、L1 と独立（backlog.md）。

@@ -16,7 +16,7 @@
 // there rather than the template again.
 #define SRC_SLOT_LESSON   1
 // Nine chapters today, so the lesson slots are 1..9 and the tail of the table
-// is free. pocket_workspace.c hands those out as the works library; the
+// is free. kobako_workspace.c hands those out as the works library; the
 // Playground's own slot 0 appears there too, because it is the person's work
 // like any other. Growing the tutorial past six more chapters would need this
 // boundary moved and every work below it rehomed, which is why the two numbers
@@ -31,8 +31,8 @@
 // slot it belongs to so that a draft of the tutorial's chapter 3 is never
 // handed to the Playground.
 //
-// It lives past the end of pocket.fs rather than in a seventeenth slot,
-// because pocket_fs.c derives the filesystem's offset from SRC_SLOT_COUNT --
+// It lives past the end of kobako.fs rather than in a seventeenth slot,
+// because kobako_fs.c derives the filesystem's offset from SRC_SLOT_COUNT --
 // adding a slot would slide every file the person has stored. Two faces like a
 // slot, so a power cut during the park costs the draft and not the save.
 #define SRCSTORE_DRAFT_BASE 0xa0000u

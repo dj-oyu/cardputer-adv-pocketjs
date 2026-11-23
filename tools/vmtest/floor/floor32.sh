@@ -15,7 +15,7 @@ mkdir -p "$OUT"
 VMTEST_OUT=$OUT VMTEST_CFLAGS="$F" bash tools/vmtest/build.sh "$V" > "$OUT/floor32_build.log" 2>&1 || { tail -20 "$OUT/floor32_build.log"; exit 1; }
 QJS=components/quickjs-ng/quickjs-ng
 obj=$OUT/obj-$V
-gcc -std=gnu11 -O2 $F -DQUICKJS_NG_BUILD -D_GNU_SOURCE -I "$OUT/include" -I components/pocketjs_guest/include -I $QJS \
-  "$SP/floor32.c" components/pocketjs_guest/src/vm_sched.c components/pocketjs_guest/src/vm_clock.c \
+gcc -std=gnu11 -O2 $F -DQUICKJS_NG_BUILD -DQJS_LEAN_LAZY_BUILTINS=1 -D_GNU_SOURCE -I "$OUT/include" -I components/kobako_guest/include -I $QJS \
+  "$SP/floor32.c" components/kobako_guest/src/vm_sched.c components/kobako_guest/src/vm_clock.c \
   $obj/quickjs.o $obj/libregexp.o $obj/libunicode.o $obj/dtoa.o $obj/quickjs-vm.o -lm -lpthread -ldl -o "$OUT/floor32"
 "$OUT/floor32"

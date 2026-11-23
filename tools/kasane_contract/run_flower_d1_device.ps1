@@ -4,8 +4,8 @@ param([string]$DiagBuild='build_flower_d1_device',
       [string]$Port='COM3')
 $ErrorActionPreference='Stop'
 $py='C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe'
-$diag=Join-Path $DiagBuild 'cardputer_pocketjs.bin'
-$normal=Join-Path $NormalBuild 'cardputer_pocketjs.bin'
+$diag=Join-Path $DiagBuild 'cardputer_kobako.bin'
+$normal=Join-Path $NormalBuild 'cardputer_kobako.bin'
 $cache=Join-Path $DiagBuild 'CMakeCache.txt'
 if(!(Test-Path $diag) -or !(Test-Path $normal) -or !(Test-Path $cache) -or
    !(Select-String -Path $cache -Pattern '^KASANE_FLOWER_D1_PROBE:BOOL=ON$' -Quiet)) {

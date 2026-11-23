@@ -11,7 +11,7 @@ enum {ESP_OK=0,ESP_FAIL=-1,ESP_ERR_TIMEOUT=-2,ESP_ERR_INVALID_STATE=-3,KSN_INPUT
 typedef int ksn_result;
 enum { KSN_OK, KSN_BUSY };
 typedef struct {size_t struct_size;uint32_t buttons,analog;const uint32_t *touches;
-    const int32_t *touch_hits;size_t touch_count;} pocketjs_guest_frame_t;
+    const int32_t *touch_hits;size_t touch_count;} kobako_guest_frame_t;
 typedef struct {int id;} sys_notice;
 static void *guest;
 static bool turn_continued,pending,remain,activate,need_present,submission;
@@ -29,14 +29,14 @@ static char calls[1024];
 static void call(char c){size_t n=strlen(calls);assert(n+1<sizeof(calls));calls[n]=c;calls[n+1]=0;}
 static int64_t esp_timer_get_time(void){return now;}
 static void arm_turn(uint32_t b){armed=b;call('A');}
-static bool pocketjs_guest_work_pending(void *g){(void)g;return pending;}
+static bool kobako_guest_work_pending(void *g){(void)g;return pending;}
 /* cont_submits: the continuation finishes a frame() the VM parked mid-call,
  * and that frame() submits its picture (backlog R3a). jobs_left: as in
  * guest.c, whether work remains after a resume is JS_IsJobPending(), read
  * whether or not the resumed frame() threw -- a failed continuation can
  * still leave jobs queued. */
 static bool jobs_left;
-static int pocketjs_guest_continue(void *g){
+static int kobako_guest_continue(void *g){
     (void)g;call('C');pending=remain||jobs_left;
     const bool finished=!remain&&!guest_error;
     if(proc_commits&&finished)proc_pending=true;
@@ -48,8 +48,8 @@ static bool frame_parks;
  * frame's pending procedural frame or ticket was not presented first. */
 static bool frame_met_pending;
 /* A procedural commit() marks its frame pending; present_frame() clears it. */
-static bool pocket_proc_pending(void){return proc_pending;}
-static int pocketjs_guest_frame(void *g,const pocketjs_guest_frame_t *f){
+static bool kobako_proc_pending(void){return proc_pending;}
+static int kobako_guest_frame(void *g,const kobako_guest_frame_t *f){
     (void)g;frame_met_pending=proc_pending||submission;if(frame_parks)pending=true;
     assert(f->struct_size==sizeof(*f)&&f->analog==0x8080);
     assert(!f->touch_count&&!f->touches&&!f->touch_hits);
@@ -58,43 +58,43 @@ static int pocketjs_guest_frame(void *g,const pocketjs_guest_frame_t *f){
 static void *sys_device_notifications(void){return NULL;}
 static bool sys_notify_active(void *n,sys_notice *out){(void)n;(void)out;return false;}
 static uint16_t pet_hub_selected(void){return 0;}
-static int pocket_kasane_update_notice(const sys_notice *n,uint16_t pet){(void)n;(void)pet;return KSN_OK;}
-static bool pocket_kasane_needs_present(void){return need_present;}
-static bool pocket_kasane_has_submission(void){return submission;}
-static void pocket_kasane_set_animation_time(uint64_t now){(void)now;}
+static int kobako_kasane_update_notice(const sys_notice *n,uint16_t pet){(void)n;(void)pet;return KSN_OK;}
+static bool kobako_kasane_needs_present(void){return need_present;}
+static bool kobako_kasane_has_submission(void){return submission;}
+static void kobako_kasane_set_animation_time(uint64_t now){(void)now;}
 static bool native_animation,system_pending;
 // Actual scope reset/claim functions, without printing protocol text in tests.
 #define printf(...) ((void)0)
 #include "capture_scope_impl.inc"
 #undef printf
-static bool pocket_kasane_animation_pending(void){return native_animation;}
-static bool pocket_kasane_system_pending(void){return system_pending;}
-static int pocket_kasane_input_scope(bool b){(void)b;return scope;}
-static void pocket_kasane_end_turn(void){call('E');}
+static bool kobako_kasane_animation_pending(void){return native_animation;}
+static bool kobako_kasane_system_pending(void){return system_pending;}
+static int kobako_kasane_input_scope(bool b){(void)b;return scope;}
+static void kobako_kasane_end_turn(void){call('E');}
 /* 'Y': the host turn ended with the guest's turn still open (parked frame()
  * or a cut drain), so the procedural frame under construction is kept. */
-static void pocket_kasane_park_turn(void){call('Y');}
+static void kobako_kasane_park_turn(void){call('Y');}
 static void report_oom_if_any(void){call('O');}
 static bool drain_runaway(void){return runaway;}
-static bool pocket_app_exit_requested(void){return exit_requested;}
+static bool kobako_app_exit_requested(void){return exit_requested;}
 static void app_request_stop(void){stopped=true;call('S');}
 static int present_frame(void){call('P');need_present=false;submission=false;proc_pending=false;return 0;}
 /* Silent: the call strings below predate these, and none of them decides an
  * ordering this test checks. The presenter step can be made to fail. */
 static void sample_memory_pressure(void){}
-static ksn_result pocket_kasane_presenter_step(bool *blocked){*blocked=false;return presenter_result;}
+static ksn_result kobako_kasane_presenter_step(bool *blocked){*blocked=false;return presenter_result;}
 #define ESP_LOGE(tag,...) ((void)(tag))
 enum {KSN_P0_APP_TURN};
 static void ksn_p0_probe_sample(int which,uint32_t us){(void)which;(void)us;}
-static void pocket_memory_pump(bool leaving){(void)leaving;}
+static void kobako_memory_pump(bool leaving){(void)leaving;}
 #define PUMP(name,c) static void name(void){call(c);}
-PUMP(pocket_app_pump,'a') PUMP(pocket_text_pump,'t') PUMP(pocket_imu_pump,'i')
-PUMP(pocket_io_pump,'o') PUMP(pocket_bridge_pump,'b') PUMP(pocket_net_pump,'n')
-PUMP(pocket_capture_pump,'c') PUMP(pocket_api_pump,'p') PUMP(pocket_fs_pump,'f')
-PUMP(pocket_av_pump,'v')
+PUMP(kobako_app_pump,'a') PUMP(kobako_text_pump,'t') PUMP(kobako_imu_pump,'i')
+PUMP(kobako_io_pump,'o') PUMP(kobako_bridge_pump,'b') PUMP(kobako_net_pump,'n')
+PUMP(kobako_capture_pump,'c') PUMP(kobako_api_pump,'p') PUMP(kobako_fs_pump,'f')
+PUMP(kobako_av_pump,'v')
 /* Silent, like the pumps added after the call strings were fixed. */
-static void pocket_video_sd_stream_reap(void){}
-static void pocket_input_pump(uint32_t b){delivered=b;call('k');}
+static void kobako_video_sd_stream_reap(void){}
+static void kobako_input_pump(uint32_t b){delivered=b;call('k');}
 /* Measurement probes (frame_bd.h, icache_ab), compiled out on the device by
  * default: silent here, none of them decides an ordering. */
 static void frame_bd_turn_begin(void){}
@@ -103,7 +103,7 @@ static void frame_bd_js(uint32_t us){(void)us;}
 static void frame_bd_tick(uint32_t us){(void)us;}
 static void icache_ab_turn(void){}
 /* P2a (two-core-pipeline.md sec.2.3 B). present_defer_block() is 1 without
- * CONFIG_POCKET_DISP_DEFER, so no frame is ever left on a display task here:
+ * CONFIG_KOBAKO_DISP_DEFER, so no frame is ever left on a display task here:
  * nothing is in flight, the join and the settling have nothing to do, and the
  * call strings above stay those of the inline present. */
 static bool present_defer;

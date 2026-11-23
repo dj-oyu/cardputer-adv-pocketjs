@@ -13,13 +13,13 @@ esp_err_t app_start(void);
 esp_err_t app_start_source(const char *prelude, size_t prelude_length,
                            const char *source, size_t length);
 esp_err_t app_start_test(char test);
-#ifdef CONFIG_POCKET_VM_RELOC
+#ifdef CONFIG_QJS_LEAN_RELOC
 /* L3a: every app started from now on moves its frame segments at every park,
- * and logs VM_RELOC when it stops. Only linked in CONFIG_POCKET_VM_RELOC. */
+ * and logs VM_RELOC when it stops. Only linked in CONFIG_QJS_LEAN_RELOC. */
 void app_vm_reloc_request(void);
 #endif
-void app_vm_back_selftest(void); /* Only linked in CONFIG_POCKET_VM_SELFTEST. */
-#ifdef POCKET_HEAPPROBE
+void app_vm_back_selftest(void); /* Only linked in CONFIG_KOBAKO_VM_SELFTEST. */
+#ifdef KOBAKO_HEAPPROBE
 /* docs/vm/spread-eval-oom.md. `arg` is "<index>[,<heap limit>]": select that
  * apps/heapprobe variant for the next start, the limit (0 = the usual 160 KiB)
  * applying to it only. On success the source, its length and the manifest id
@@ -48,10 +48,10 @@ void app_heapprobe_release(void);
 //
 // Because it is a ceiling, a generous value costs nothing: QuickJS allocates
 // what it uses and no more. So this is set clear of every recorded figure --
-// 85,602 bytes for hello/main.js before the pocket surfaces existed, js=86,233
+// 85,602 bytes for hello/main.js before the kobako surfaces existed, js=86,233
 // measured on the board for a running app -- rather than tuned close to one.
 // It was 128 KiB and that was too close, which took a board run to find: the
-// player asked for pocket.fs on its first keypress, the lazy namespace could
+// player asked for kobako.fs on its first keypress, the lazy namespace could
 // not be built, and the error came back as "no memory to build this namespace"
 // from inside a key listener -- nowhere near the allocation that was actually
 // short. A ceiling set near the cost is a ceiling that turns growth in an app

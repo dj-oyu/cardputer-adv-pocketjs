@@ -280,7 +280,7 @@ def judge(meta, flags, code, out):
     # throwing resolve). Test262 judges a sync test by its synchronous run
     # only; the report timing itself is the corpus's job (rejections.js).
     if code == 2 and "vmrun: uncaught" not in out and all(
-            l.startswith("E pocketjs_guest: Unhandled Promise rejection:")
+            l.startswith("E kobako_guest: Unhandled Promise rejection:")
             for l in out.strip().splitlines() if l.strip()):
         return "PASS", ""
     if code != 0:

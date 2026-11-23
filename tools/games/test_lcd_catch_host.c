@@ -1,8 +1,8 @@
 /* apps/lcdcatch/lcd_catch.js as the firmware runs it, on the host: the real
- * QuickJS, the real pocket.kasane (view, validator, renderer into a 240x135
- * panel after every frame()) and the real pocket.input.keys, with key edges
- * fed through the real keymap_poll() and keystate. pocket.audio, pocket.storage
- * and pocket.random are small JS stand-ins: tone() is counted, the store is one
+ * QuickJS, the real kobako.kasane (view, validator, renderer into a 240x135
+ * panel after every frame()) and the real kobako.input.keys, with key edges
+ * fed through the real keymap_poll() and keystate. kobako.audio, kobako.storage
+ * and kobako.random are small JS stand-ins: tone() is counted, the store is one
  * C string that survives a session, random is xorshift32-v1 as common-api.md
  * section 8.1 fixes it, seeded with a constant so a script replays exactly.
  *
@@ -21,10 +21,10 @@
  *
  *   bash tools/games/run_lcd_catch.sh
  */
-#include "pocket_kasane.h"
-#include "pocket_input.h"
-#include "pocket_api.h"
-#include "pocket_av.h"
+#include "kobako_kasane.h"
+#include "kobako_input.h"
+#include "kobako_api.h"
+#include "kobako_av.h"
 #include "keymap.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_render.h"
@@ -34,12 +34,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-/* Generated verbatim from pocket_api.c: production subscription semantics. */
-#include "pocket_sub_impl.inc"
+/* Generated verbatim from kobako_api.c: production subscription semantics. */
+#include "kobako_sub_impl.inc"
 
 void host_capabilities_clear(void);
-int32_t pocket_av_ui_current_player(void){return 0;}
-bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out){(void)id;(void)out;return false;}
+int32_t kobako_av_ui_current_player(void){return 0;}
+bool kobako_av_ui_read(int32_t id,kobako_av_ui_snapshot *out){(void)id;(void)out;return false;}
 bool sys_device_clock_read(sys_clock_state *out){(void)out;return false;}
 void sound_stream_set_observer(sound_stream_observer_fn o){(void)o;}
 void sound_stream_set_observer_interval(sound_stream_observer_fn o,uint32_t n){(void)o;(void)n;}
@@ -47,22 +47,22 @@ void *__real_calloc(size_t count,size_t size);
 void __real_free(void *ptr);
 void __wrap_free(void *ptr){__real_free(ptr);}
 void *__wrap_calloc(size_t count,size_t size){return __real_calloc(count,size);}
-bool pocket_text_active(void){return false;}
+bool kobako_text_active(void){return false;}
 int64_t esp_timer_get_time(void){return 0;}
 /* Image surfaces this app does not use; linking them pulls in the SD stream. */
-esp_err_t pocket_grid_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
-void pocket_grid_reset(void){}
-bool pocket_grid_pending(void){return false;}
-void pocket_grid_present_result(ksn_result r){(void)r;}
-void pocket_grid_source_invalidated(uint32_t id){(void)id;}
-esp_err_t pocket_video_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
-void pocket_video_reset(void){}
-bool pocket_video_pending(void){return false;}
-void pocket_video_present_result(ksn_result r){(void)r;}
-esp_err_t pocket_pixel_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
-void pocket_pixel_reset(void){}
-bool pocket_pixel_pending(void){return false;}
-void pocket_pixel_present_result(ksn_result r){(void)r;}
+esp_err_t kobako_grid_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void kobako_grid_reset(void){}
+bool kobako_grid_pending(void){return false;}
+void kobako_grid_present_result(ksn_result r){(void)r;}
+void kobako_grid_source_invalidated(uint32_t id){(void)id;}
+esp_err_t kobako_video_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void kobako_video_reset(void){}
+bool kobako_video_pending(void){return false;}
+void kobako_video_present_result(ksn_result r){(void)r;}
+esp_err_t kobako_pixel_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void kobako_pixel_reset(void){}
+bool kobako_pixel_pending(void){return false;}
+void kobako_pixel_present_result(ksn_result r){(void)r;}
 
 /* The device's TLSF charge per block: request rounded up to 4 B, 12 B minimum. */
 typedef struct { size_t n; size_t pad[3]; } pk_hdr;
@@ -134,7 +134,7 @@ static bool eval(const char *src,size_t len,const char *name){
     }
     JS_FreeValue(ctx,v);
     JSContext *c;while(JS_ExecutePendingJob(rt,&c)>0){}
-    pocket_kasane_end_turn();
+    kobako_kasane_end_turn();
     return ok;
 }
 static double num(const char *expr){
@@ -148,11 +148,11 @@ static ksn_result send_strip(void *o,uint16_t y,uint16_t rows,const uint16_t *p)
     (void)o;memcpy(panel+y*240,p,rows*240*sizeof *p);return KSN_OK;
 }
 static void present(void){
-    if(!pocket_kasane_needs_present())return;
+    if(!kobako_kasane_needs_present())return;
     ksn_display_port port={.strip=get_strip,.present=send_strip,.width=240,.height=135,
                            .strip_rows=8,.text=&ksn_font_port};
     ksn_render_stats stats;
-    if(pocket_kasane_present(&port,&stats)!=KSN_OK)bad_present++;
+    if(kobako_kasane_present(&port,&stats)!=KSN_OK)bad_present++;
 }
 static void ppm(const char *label){
     const char *dir=getenv("LCD_PPM");if(!dir)return;
@@ -172,7 +172,7 @@ static void ppm(const char *label){
 static unsigned ops_play_max,ops_any_max,frames_patched,frames_run;
 static unsigned long ops_play_sum,play_frames;
 static void frame_b(unsigned buttons){
-    pocket_input_pump(0);
+    kobako_input_pump(0);
     char call[48];snprintf(call,sizeof call,"frame(%u)",buttons);
     eval(call,strlen(call),"frame.js");
     present();
@@ -198,7 +198,7 @@ static void bot_frame(bool play){
 
 static const char STUB[]=
     "globalThis.console={log:globalThis.__log};"
-    "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,"
+    "globalThis.kobako={kasane:globalThis.kasane,input:globalThis.input,"
     "capabilities:{get:n=>({name:n,supported:true,available:true})},"
     "audio:{tone(s){__tone(s.frequencyHz,s.durationMs);return Promise.resolve()}},"
     "storage:{get(k){const s=__kvGet(k);return Promise.resolve(s===null?null:{value:JSON.parse(s),revision:1})},"
@@ -214,12 +214,12 @@ static void open_session(void){
     JS_SetMemoryLimit(rt,163840);          /* main/app_session.c heap_limit */
     if(163840/2<JS_GetGCThreshold(rt))JS_SetGCThreshold(rt,163840/2);
     ctx=JS_NewContext(rt);
-    // As pocketjs_guest_create: apps run hardened (docs/vm/harden.md).
-    // POCKET_NO_HARDEN=1 skips it, for host A/B only.
-    if(!ctx||(!getenv("POCKET_NO_HARDEN")&&JS_PocketHarden(ctx)<0)){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
+    // As kobako_guest_create: apps run hardened (docs/vm/harden.md).
+    // KOBAKO_NO_HARDEN=1 skips it, for host A/B only.
+    if(!ctx||(!getenv("KOBAKO_NO_HARDEN")&&JS_LeanHarden(ctx)<0)){fprintf(stderr,"JS_LeanHarden failed\n");abort();}
     host_capabilities_clear();
-    pocket_kasane_install(ctx,NULL);
-    pocket_input_install(ctx,NULL);
+    kobako_kasane_install(ctx,NULL);
+    kobako_input_install(ctx,NULL);
     JSValue g=JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx,g,"__log",JS_NewCFunction(ctx,js_log,"log",1));
     JS_SetPropertyStr(ctx,g,"__tone",JS_NewCFunction(ctx,js_tone,"tone",2));
@@ -233,14 +233,14 @@ static void open_session(void){
     eval(src,src_n,"lcd_catch.js");present();
     heap_eval_peak=peak_bytes-before;
     JS_RunGC(rt);heap_eval=cur_bytes-before;
-    commands=(size_t)num("pocket.kasane.stats().displayed.commands");
+    commands=(size_t)num("kobako.kasane.stats().displayed.commands");
     frame();edge("enter",false);frame();
     peak_bytes=cur_bytes;
 }
 static size_t heap_base;
 static void close_session(void){
     heap_run_peak=peak_bytes;
-    pocket_input_reset();pocket_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+    kobako_input_reset();kobako_kasane_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
 }
 
 typedef struct { unsigned score_a,ticks_a,score_b,tick_b0,tick_a0; char kv[256]; } result;

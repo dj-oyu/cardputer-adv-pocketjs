@@ -1,5 +1,5 @@
 (function(){
-var art=pocket.kasane.resource('pets'),v=pocket.kasane.mount('companion'),p=pocket.pet,pg=['CODEX','CLAUDE','ALARM','TIMER'];
+var art=kobako.kasane.resource('pets'),v=kobako.kasane.mount('companion'),p=kobako.pet,pg=['CODEX','CLAUDE','ALARM','TIMER'];
 var wk=p.clock().wakeMinute,s={g:0,d:p.select(),e:wk<0?420:wk,m:5,x:''};
 function hh(n){return('0'+Math.floor(n/60)).slice(-2)+':'+('0'+n%60).slice(-2);}
 function lf(r,n){if(r===null||n===null)return'--';var d=Math.max(0,r-n);return Math.floor(d/3600)+'h '+Math.floor(d%3600/60)+'m';}
@@ -22,7 +22,7 @@ return{h:h,l:l,f:t.x||f,i:i};
 function render(){var c=cn(s);v.set({resource:art,variant:s.d,head:c.h,line0:c.l[0],line1:c.l[1],
 line2:c.l[2],line3:c.l[3],foot:c.f,hint:c.i});}
 // press only: old edge=buttons&~prev, no up/down repeat.
-pocket.input.onAction(function(e){
+kobako.input.onAction(function(e){
 if(e.phase!=='press')return;
 s.x='';
 if(e.action==='left')s.g=(s.g+3)%4;
@@ -41,7 +41,7 @@ else if(s.g===3)p.alarm('companion.timer',p.timer('companion.timer')===null?s.m*
 render();
 });
 var last=0;
-pocket.app.start({resume:render});
-pocket.app.onFrame(function(){var now=p.now();if(now-last>=1000){last=now;render();}});
+kobako.app.start({resume:render});
+kobako.app.onFrame(function(){var now=p.now();if(now-last>=1000){last=now;render();}});
 render();console.log('COMPANION_READY');
 })();

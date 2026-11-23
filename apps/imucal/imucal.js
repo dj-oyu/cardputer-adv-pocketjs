@@ -1,11 +1,11 @@
 // IMU calibration owns measurements; Kasane owns the picture.
 (function () {
-  const view = pocket.kasane.mount('imucal');
+  const view = kobako.kasane.mount('imucal');
   view.set({head: 'START', live: 'NO SAMPLE YET', stat: 'WAIT',
             spin: 'GYR OFF', foot: 'HOLD STILL. ESC QUITS'});
   function say(key, t) { var slot = {}; slot[key] = t; view.set(slot); }
   function beep(hz) {
-    pocket.audio.tone({ frequencyHz: hz, durationMs: 120, gain: 0.4 }).then(null, function () {});
+    kobako.audio.tone({ frequencyHz: hz, durationMs: 120, gain: 0.4 }).then(null, function () {});
   }
   function mm(v) { var n = Math.round(v * 1000); return (n < 0 ? '' : '+') + n; }
 
@@ -14,7 +14,7 @@
   var AXIS = [2, 2, 1, 1, 0, 0], SIGN = [1, -1, 1, -1, -1, 1];
   var NAME = ['AX', 'AY', 'AZ'], PUB = ['X', 'Y', 'Z'];
 
-  var cap = pocket.capabilities.get('sensors.imu');
+  var cap = kobako.capabilities.get('sensors.imu');
   console.log('IMUCAL CAP ' + cap.supported + ' ' + cap.available);
   if (!cap.supported || !cap.available) {
     say('head', 'NO IMU: ' + cap.reason);
@@ -24,15 +24,15 @@
   }
 
   var now = null, recent = [], got = [], peak = [0, 0, 0], seen = 0;
-  var idle = pocket.sensors.imu.latest();
+  var idle = kobako.sensors.imu.latest();
   console.log('IMUCAL GYRO BEFORE ' + (idle && idle.gyro ? 'ON' : 'null'));
 
-  pocket.storage.get('axes').then(function (r) {
+  kobako.storage.get('axes').then(function (r) {
     if (r) console.log('IMUCAL_LAST ' + r.value.map + ' err=' + r.value.err +
                        '% gyr=' + r.value.n + (r.value.ok ? ' ok' : ' SUSPECT'));
   }, function (e) { console.log('IMUCAL_LAST_FAILED ' + e.code); });
 
-  var sub = pocket.sensors.imu.watch({ rateHz: 20 }, function (s) {
+  var sub = kobako.sensors.imu.watch({ rateHz: 20 }, function (s) {
     now = s;
     recent.push([s.accel.x, s.accel.y, s.accel.z]);
     if (recent.length > 12) recent.shift();
@@ -91,7 +91,7 @@
     say('stat', 'ERR ' + err + '%  GYR ' + mm(peak[0]) + ' ' + mm(peak[1]) + ' ' + mm(peak[2]));
     say('spin', 'SAVING');
     say('foot', 'ESC QUITS');
-    pocket.storage.set('axes', { map: t, err: err, peak: peak, n: seen, ok: ok })
+    kobako.storage.set('axes', { map: t, err: err, peak: peak, n: seen, ok: ok })
       .then(function () { say('spin', 'SAVED'); },
             function (e) { say('spin', 'SAVE ' + e.code); });
     sub.close();
@@ -120,7 +120,7 @@
     ticks++;
     if (checkAt && ticks >= checkAt) {
       checkAt = 0;
-      var after = pocket.sensors.imu.latest();
+      var after = kobako.sensors.imu.latest();
       console.log('IMUCAL GYRO AFTER ' + (after && after.gyro ? 'STILL ON' : 'null'));
     }
     if (got.length >= 6) return;
@@ -143,8 +143,8 @@
     show();
   }
 
-  pocket.app.start({ resume: function () { still = 0; } });
-  pocket.app.onFrame(step);
+  kobako.app.start({ resume: function () { still = 0; } });
+  kobako.app.onFrame(step);
 
   show();
   console.log('IMUCAL_READY');

@@ -1,6 +1,6 @@
 // LCD CATCH: fixed LCD segments, lit or ghosted on a beat. See README.md.
 (function () {
-  const V = pocket.kasane, K = pocket.input.keys;
+  const V = kobako.kasane, K = kobako.input.keys;
   // Tuning (README.md). Times are frames at 30 fps; pairs are [GAME A, GAME B].
   const T = {
     tick: [13, 10], fast: 5, step: 20,
@@ -20,10 +20,10 @@
   const S = globalThis.lcdCatch = {mode: 0, fc: 0, wait: T.lampF, game: 0, pl: 1,
     score: 0, misses: 0, paused: false, splat: -1, last: 1, idle: 0, ticks: 0,
     hi: [0, 0], ops: 0, sky: sky};
-  function cap(n) { const c = pocket.capabilities.get(n); return c.supported && c.available; }
-  const au = cap('audio.tone') ? pocket.audio : null;
-  const kv = cap('storage.kv') ? pocket.storage : null;
-  const rng = pocket.random.create(pocket.random.seed());
+  function cap(n) { const c = kobako.capabilities.get(n); return c.supported && c.available; }
+  const au = cap('audio.tone') ? kobako.audio : null;
+  const kv = cap('storage.kv') ? kobako.storage : null;
+  const rng = kobako.random.create(kobako.random.seed());
   let saved = true;
   if (kv) kv.get('hi').then(function (r) {
     if (r && r.value) S.hi = [r.value[0] | 0, r.value[1] | 0];

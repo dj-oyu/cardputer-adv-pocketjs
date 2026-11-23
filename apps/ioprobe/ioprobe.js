@@ -1,6 +1,6 @@
-// pocket.io probe; "|" lists codes that are all right answers. README.md.
+// kobako.io probe; "|" lists codes that are all right answers. README.md.
 globalThis.frame = () => {};
-const p = pocket, U = Uint8Array, log = (s) => console.log(s);
+const p = kobako, U = Uint8Array, log = (s) => console.log(s);
 const shot = async (name, run, want) => {
   let got;
   try { const v = await run(); got = v && v.length !== undefined ? 'ok ' + v.length + 'B' : 'ok'; }

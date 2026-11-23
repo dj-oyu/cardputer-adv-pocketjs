@@ -10,7 +10,7 @@
 
 `tools/r5sim`（QEMU の ESP32-S3 像。STRESS のターンを実機と同じゲスト部品で回す）に、測定用の選択肢を足した。
 
-- `-DR5SIM_GC_TRACE=1`: ターンごとの行 `R5SIM GC t= used= thr= gc=(+) freed= last= oom= q= a= req= sys_free= sys_largest= pend= needs= sub=`。GC の回数と解放量は quickjs.c の `POCKET_GC_STATS`（測定用、ファームでは無効）。`q`/`a` は OOM の内訳（ゲストの上限で断った数／アロケータが断った数）。`pend` は Shiki のフレームが提示待ちか、`needs`/`sub` は Kasane が提示を要るか・提出があるか。
+- `-DR5SIM_GC_TRACE=1`: ターンごとの行 `R5SIM GC t= used= thr= gc=(+) freed= last= oom= q= a= req= sys_free= sys_largest= pend= needs= sub=`。GC の回数と解放量は quickjs.c の `QJS_LEAN_GC_STATS`（測定用、ファームでは無効）。`q`/`a` は OOM の内訳（ゲストの上限で断った数／アロケータが断った数）。`pend` は Shiki のフレームが提示待ちか、`needs`/`sub` は Kasane が提示を要るか・提出があるか。
 - `-DR5SIM_FREE_KIB=89`: 評価の後のシステムヒープの空きを実機と同じ約 91 KB にする（QEMU には無線もパネルも無いので、そのままでは空きがずっと多い）。4 KB の塊で埋める。
 - `-DR5SIM_GC_ON_OOM=1`: アロケータが断ったターンの後で GC する実験（今回は使わなかった。アロケータの拒否が起きなかったため）。
 - 実行: `FAST_WAIT_TICKS=2400 tools/r5sim/fast.sh .cache/r5gc -DR5SIM_DEVICE=1 -DR5SIM_APP=shiki -DR5SIM_LEVEL_UP=1 -DR5SIM_FRAMES=400 -DR5SIM_GC_TRACE=1 -DR5SIM_FREE_KIB=89`（LV3 はフレーム 80 から）。
@@ -27,8 +27,8 @@
 QEMU の 1 回目は、フレーム 295 から毎フレーム `STRESS_FAIL frame Error: previous frame awaits presentation or repair` になり、二度と描かなかった。
 
 - その直前のターンは OOM で、HUD の `V.patch` も失敗した。そのターンで commit した Shiki のフレームは前と同じで、損傷が空だった。
-- Shiki の `commit` は、image モードでは変わったバンドだけを無効化する（`pocket_kasane_proc_publish_at`）。損傷が空なら何も無効化しない。ふだんは HUD の提出があるので提示が走り、そこで `pending` が下りる。HUD も失敗したターンでは提示が走らず、`pending` が立ったまま残った（トレース: `pend=1 needs=0 sub=0`）。以後の `beginFrame` はすべて BUSY。
-- 修正: `commit` の後で Kasane に提示するものが無ければ、そのフレームはその場で提示済みにする（`pocket_shiki_frame.c`、`pocket_proc_present_result(KSN_OK)`）。見せるものが無いので、見せたことにしてよい。
+- Shiki の `commit` は、image モードでは変わったバンドだけを無効化する（`kobako_kasane_proc_publish_at`）。損傷が空なら何も無効化しない。ふだんは HUD の提出があるので提示が走り、そこで `pending` が下りる。HUD も失敗したターンでは提示が走らず、`pending` が立ったまま残った（トレース: `pend=1 needs=0 sub=0`）。以後の `beginFrame` はすべて BUSY。
+- 修正: `commit` の後で Kasane に提示するものが無ければ、そのフレームはその場で提示済みにする（`kobako_shiki_frame.c`、`kobako_proc_present_result(KSN_OK)`）。見せるものが無いので、見せたことにしてよい。
 - 修正後: 400 フレームで `fail=0`。フレーム 295 は `pend=0`。
 
 ## 3.1 アリーナの大きさの A/B と、拒否の後の GC（QEMU、400 フレーム、空き約 91 KB）
@@ -56,7 +56,7 @@ QEMU の 1 回目は、フレーム 295 から毎フレーム `STRESS_FAIL frame
 
 1. **フレームの入口でスタック片を取り直さない（D44）。** `JS_VMStackTrim` はターンの終わりに、`JS_VM_SEG_KEEP`（1,024 B）以下のキャッシュを 1 本だけ残す。約 1 KB 常駐。`frame()` に入るときの確保が無くなる。
 2. **システムヒープが断ったターンの後で GC する**（`app_session.c` `report_oom_if_any`）。
-3. **ゲストの上限を、実際に取れる量に合わせる**（`pocketjs_guest_fit_limit`、`CONFIG_POCKET_GUEST_NATIVE_FLOOR_KB` 既定 16）。100 ms ごとの標本で、上限 = min(160 KiB, 使用量 ＋ アリーナとブロックキャッシュの空き ＋ システムの空きのうち床より上)。尽きるときは捕まえられる上限の OOM になり、GC の天井（上限の割合）にも届く。床は「遊ばせるメモリ」ではなく、Kasane・無線・表示の作業場所。
+3. **ゲストの上限を、実際に取れる量に合わせる**（`kobako_guest_fit_limit`、`CONFIG_KOBAKO_GUEST_NATIVE_FLOOR_KB` 既定 16）。100 ms ごとの標本で、上限 = min(160 KiB, 使用量 ＋ アリーナとブロックキャッシュの空き ＋ システムの空きのうち床より上)。尽きるときは捕まえられる上限の OOM になり、GC の天井（上限の割合）にも届く。床は「遊ばせるメモリ」ではなく、Kasane・無線・表示の作業場所。
 
 QEMU（アリーナ 24 KiB、空き約 91 KB、LV3、400 フレーム）:
 
@@ -76,7 +76,7 @@ QEMU（アリーナ 24 KiB、空き約 91 KB、LV3、400 フレーム）:
 
 ### 6.1 G2: 上限を 1 KiB 単位にする
 
-`pocketjs_guest_fit_limit` は、上限を 1 KiB に丸め、下げるのは余地が今の上限より 1 KiB 以上下回ったときだけにする。
+`kobako_guest_fit_limit` は、上限を 1 KiB に丸め、下げるのは余地が今の上限より 1 KiB 以上下回ったときだけにする。
 
 QEMU（アリーナ 24 KiB、床 16 KiB、LV3、400 フレーム）:
 
@@ -87,7 +87,7 @@ QEMU（アリーナ 24 KiB、床 16 KiB、LV3、400 フレーム）:
 | 上限が断ったターン | 14 | 14 |
 | アロケータが断ったターン | 0 | 0 |
 
-### 6.2 G1: GC の 1 回の時間（実機、`CONFIG_POCKET_GC_STATS`）
+### 6.2 G1: GC の 1 回の時間（実機、`CONFIG_KOBAKO_GC_STATS`）
 
 `JS_RunGC` の前後の CPU サイクルを数え、1 秒に 1 行 `GC_STATS` を出す（計測専用、既定 n）。
 
@@ -96,7 +96,7 @@ QEMU（アリーナ 24 KiB、床 16 KiB、LV3、400 フレーム）:
 - ただし LV3 の GC の大半は何も回収しない（`last=124904->124904`）。上限に当たるたびの「3〜8 回」が、1 秒の中で繰り返されている。後退の一般化（設計 G3）で減らせる。
 - QEMU の `gc_cc`（命令数に近い）は 1 回 2.5〜3.6 万で、実機の 1.5 ms（約 36 万サイクル）の約 1/10。GC は全オブジェクトを歩くので、キャッシュミスが支配的と見られる（推定）。QEMU で GC の時間は測れない。
 
-### 6.3 伸びるアリーナ（`CONFIG_POCKET_VM_GUEST_CHUNK_KB`、既定 0）
+### 6.3 伸びるアリーナ（`CONFIG_KOBAKO_GUEST_CHUNK_KB`、既定 0）
 
 16 KiB の塊を必要に応じて取り、空になったら返す。2 KiB を超える要求と、どの塊にも入らない要求は共有ヒープへ。
 
@@ -131,7 +131,7 @@ QEMU（同じ条件）:
 - QEMU では評価の後にバラストでヒープを埋めるので、評価のピークで塊が留まることが見えなかった（§6.3 の表は評価の後の比較）。
 - **既定は 0（固定のアリーナ）のまま。** 塊のコードは残す。直すなら、評価中は塊を使わない（評価が終わってから最初の塊を取る）、または長生きのブロックを別の塊に寄せる手が要る（未検討）。
 
-### 6.5 評価直後のヒープの地図（実機、DERBY、`CONFIG_POCKET_HEAP_MAP`）
+### 6.5 評価直後のヒープの地図（実機、DERBY、`CONFIG_KOBAKO_HEAP_MAP`）
 
 `heap_caps_walk` で内部ヒープを、ゲストを作る前（Shiki のヒープ 48 KiB は取った後）・評価の直後・ゲストを壊した後の 3 回、歩いた（計測ビルド a90567a）。256 B 以上の空きを位置つきで出す。
 
@@ -149,7 +149,7 @@ QEMU（同じ条件）:
 
 **含意:** 評価中の配置を良くしても（解析の一時領域を別の場所に取る）、DERBY の評価直後の連続領域はほとんど増えない（主領域は満杯で、一時領域の穴は既に埋まっている）。連続領域を決めているのは、ゲストより前にあるネイティブの小さなブロックの位置。
 
-### 6.6 大きな穴を分けているネイティブのブロック（実機、`CONFIG_POCKET_HEAP_ORIGIN`）
+### 6.6 大きな穴を分けているネイティブのブロック（実機、`CONFIG_KOBAKO_HEAP_ORIGIN`）
 
 ヒープトレース（`HEAP_TRACING_STANDALONE`、leaks モード、300 件、深さ 4）を `app_main` の頭から回し、DERBY を起動する直前の地図（§6.5 の「前」と同じ並び）で、2 KiB 以上の空き 2 つに挟まれた 8 KiB 以下の使用中ブロックの確保元を出した（計測ビルド 97309ae）。トレースの 17 KB が加わるので DERBY 自体は評価中に OOM で起動しなかったが、地図は評価の前に取っている。
 
@@ -160,7 +160,7 @@ QEMU（同じ条件）:
 | 0x3fcd0214 | 84 | 2,560 / 11,792 | `xQueueCreateCountingSemaphore` |
 | 0x3fcd0154 ほか 2 個 | 12 × 3 | 2,560 / 11,792 | `pthread_key_create` / `pthread_setspecific`（スレッド局所の領域） |
 
-- 6 個すべてが、ネットワークの起動（`main/pocket/wifi_time.c:273` の `esp_netif_init()`、自動時刻同期で起動のたびに走る）で作られるものと見られる。セマフォ・カウンティングセマフォ・pthread のキーの呼び出し元は、深さ 4 が確保の関数の入れ子で尽きて見えていない（lwIP の netconn のスレッド別セマフォと推定）。
+- 6 個すべてが、ネットワークの起動（`main/kobako/wifi_time.c:273` の `esp_netif_init()`、自動時刻同期で起動のたびに走る）で作られるものと見られる。セマフォ・カウンティングセマフォ・pthread のキーの呼び出し元は、深さ 4 が確保の関数の入れ子で尽きて見えていない（lwIP の netconn のスレッド別セマフォと推定）。
 - **tcpip スレッドのスタック 3,584 B が 1 個だけ、11,792 B と 26,780 B の穴を分けている。** これが無ければ約 42 KB の連続領域になる（計算）。
 - 起動の途中（ホーム画面を作った後）で無線が上がるので、その時点の空きの真ん中に恒久のブロックが置かれる。
 

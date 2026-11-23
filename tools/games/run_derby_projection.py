@@ -36,16 +36,16 @@ static JSValue js_projection_detach(JSContext *c,JSValueConst self,int argc,JSVa
     (void)self;REQ(argc==1);JS_DetachArrayBuffer(c,argv[0]);return JS_UNDEFINED;
 }
 static JSValue js_projection_reset(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
-    (void)c;(void)self;(void)argc;(void)argv;pocket_derby_reset();return JS_UNDEFINED;
+    (void)c;(void)self;(void)argc;(void)argv;kobako_derby_reset();return JS_UNDEFINED;
 }
 static JSValue js_projection_stats(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)self;(void)argc;(void)argv;JSValue o=JS_NewObject(c);
     uint32_t cache=0;bool cache_enabled=false;
-#ifdef POCKET_DERBY_COURSE_CACHE
+#ifdef KOBAKO_DERBY_COURSE_CACHE
     cache_enabled=true;
 #endif
-#if defined(POCKET_DERBY_COURSE_CACHE) || defined(POCKET_DERBY_PROJECT_BATCH)
-    DerbyProjectionCounts counts;pocket_derby_projection_counts(&counts);cache=counts.cache_bytes;
+#if defined(KOBAKO_DERBY_COURSE_CACHE) || defined(KOBAKO_DERBY_PROJECT_BATCH)
+    DerbyProjectionCounts counts;kobako_derby_projection_counts(&counts);cache=counts.cache_bytes;
     JS_SetPropertyStr(c,o,"registration_poses",JS_NewUint32(c,counts.registration_poses));
     JS_SetPropertyStr(c,o,"view_poses",JS_NewUint32(c,counts.view_poses));
     JS_SetPropertyStr(c,o,"project_calls",JS_NewUint32(c,counts.project_calls));
@@ -82,7 +82,7 @@ static JSValue js_projection_stats(JSContext *c,JSValueConst self,int argc,JSVal
     if text.count(marker)!=1:raise ValueError('env marker drift')
     text=text.replace(marker,marker+'''
     if(getenv("DERBY_PROJECT_BENCH_ONLY")){
-        pocket_input_reset();pocket_kasane_reset();pocket_derby_reset();
+        kobako_input_reset();kobako_kasane_reset();kobako_derby_reset();
         JS_FreeContext(ctx);JS_FreeRuntime(rt);puts("PROJECTION_BENCH_ONLY PASS");return 0;
     }
 ''')

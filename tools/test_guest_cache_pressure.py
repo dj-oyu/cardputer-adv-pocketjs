@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Host-check actual pressure/owner wiring with scripted native heap samples.
 
-Compiles selected production functions, the real pocket_memory state machine,
+Compiles selected production functions, the real kobako_memory state machine,
 QuickJS counters, and block_cache. The RTOS task identity and heap samples are
 stubs: this does not test the device allocator, scheduling, or memory gains.
 Build the QuickJS host objects first with tools/build_memory_test.sh.
@@ -31,9 +31,9 @@ C = r'''
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "pocketjs/guest.h"
-#include "pocketjs/block_cache.h"
-#include "pocket_memory.h"
+#include "kobako/guest.h"
+#include "kobako/block_cache.h"
+#include "kobako_memory.h"
 
 static size_t native_free = 50000, native_largest = 30000;
 static int task = 1;
@@ -58,13 +58,13 @@ static size_t length(void *ctx, const void *p) {
     return ((const header_t *)p - 1)->size;
 }
 static const block_cache_backend_t backend = {allocate, release, length, NULL};
-struct pocketjs_guest {
+struct kobako_guest {
     block_cache_t block_cache;
     uintptr_t owner_task;
     bool block_cache_on;
     JSContext *ctx;
 };
-static pocketjs_guest_t *guest;
+static kobako_guest_t *guest;
 #define MALLOC_CAP_INTERNAL 1u
 #define MALLOC_CAP_8BIT 2u
 /* main/hal/frame_bd.h's probe hooks, compiled out on the device by default. */
@@ -81,7 +81,7 @@ static size_t heap_caps_get_largest_free_block(unsigned caps) {
     assert(caps == (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     return native_largest;
 }
-static JSContext *pocketjs_guest_quickjs_context(pocketjs_guest_t *g) { return g->ctx; }
+static JSContext *kobako_guest_quickjs_context(kobako_guest_t *g) { return g->ctx; }
 #define ESP_PLATFORM 1
 /* Selected production bodies are inserted here, never copied by hand. */
 @FUNCTIONS@
@@ -94,39 +94,39 @@ static void reuse_once(void) {
 }
 int main(void) {
     const uint16_t sizes[] = {48};
-    pocketjs_guest_t g = {.owner_task = 1, .block_cache_on = true};
+    kobako_guest_t g = {.owner_task = 1, .block_cache_on = true};
     guest = &g;
     JSRuntime *rt = JS_NewRuntime();
     assert(rt);
     JS_SetMemoryLimit(rt, 163840);
     g.ctx = JS_NewContext(rt);
-    assert(g.ctx && pocket_memory_install(g.ctx, NULL) == ESP_OK);
+    assert(g.ctx && kobako_memory_install(g.ctx, NULL) == ESP_OK);
     block_cache_init(&g.block_cache, &backend, sizes, 1, true);
     reuse_once();
     task = 2;
-    pocketjs_guest_block_cache_flush(&g);
-    pocketjs_guest_block_cache_set_pressure(&g, true);
+    kobako_guest_block_cache_flush(&g);
+    kobako_guest_block_cache_set_pressure(&g, true);
     assert(g.block_cache.enabled && g.block_cache.depth == BLOCK_CACHE_DEPTH &&
            block_cache_held(&g.block_cache) == 48);
     task = 1;
     sample_memory_pressure();
-    assert(pocket_memory_mask() == 0 && g.block_cache.enabled);
+    assert(kobako_memory_mask() == 0 && g.block_cache.enabled);
     size_t used, limit;
     JS_GetMemoryCounters(rt, &used, &limit);
     JS_SetMemoryLimit(rt, used + 4096);
     clock_us += 100000;
     sample_memory_pressure();
-    assert(pocket_memory_mask() == POCKET_MEMORY_GUEST);
+    assert(kobako_memory_mask() == KOBAKO_MEMORY_GUEST);
     assert(g.block_cache.enabled && block_cache_held(&g.block_cache) == 48);
 
     native_free = 20948; native_largest = 9216;
     clock_us += 100000;
     sample_memory_pressure();
-    assert((pocket_memory_mask() & 6) == 6);
+    assert((kobako_memory_mask() & 6) == 6);
     assert(g.block_cache.enabled && g.block_cache.depth == BLOCK_CACHE_PRESSURE_DEPTH &&
            block_cache_held(&g.block_cache) <= BLOCK_CACHE_PRESSURE_DEPTH * 48);
     // Entering native pressure returns the cached blocks at once
-    // (pocketjs_guest_release_memory, guest-memory-design.md sec.6.1).
+    // (kobako_guest_release_memory, guest-memory-design.md sec.6.1).
     assert(block_cache_held(&g.block_cache) == 0);
     for (unsigned i = 0; i < 20; i++) {
         reuse_once();
@@ -138,7 +138,7 @@ int main(void) {
     // Once per episode: the samples inside it did not flush the refilled cache.
     assert(block_cache_held(&g.block_cache) > 0);
     task = 2;
-    pocketjs_guest_block_cache_set_pressure(&g, false);
+    kobako_guest_block_cache_set_pressure(&g, false);
     assert(g.block_cache.depth == BLOCK_CACHE_PRESSURE_DEPTH);
     task = 1;
     native_free = 50000; // Largest still pressured, so neither partial nor
@@ -146,7 +146,7 @@ int main(void) {
     sample_memory_pressure();
     clock_us += 500000;
     sample_memory_pressure();
-    assert((pocket_memory_mask() & 6) == POCKET_MEMORY_LARGEST);
+    assert((kobako_memory_mask() & 6) == KOBAKO_MEMORY_LARGEST);
     assert(g.block_cache.depth == BLOCK_CACHE_PRESSURE_DEPTH);
     native_largest = 30000;
     clock_us += 100000;
@@ -157,26 +157,26 @@ int main(void) {
     assert(g.block_cache.depth == BLOCK_CACHE_PRESSURE_DEPTH);
     clock_us += 100000;
     sample_memory_pressure();
-    assert(pocket_memory_mask() == POCKET_MEMORY_GUEST && g.block_cache.enabled &&
+    assert(kobako_memory_mask() == KOBAKO_MEMORY_GUEST && g.block_cache.enabled &&
            g.block_cache.depth == BLOCK_CACHE_DEPTH);
     size_t after_used, after_limit;
     JS_GetMemoryCounters(rt, &after_used, &after_limit);
     assert(after_used == used && after_limit == used + 4096);
     reuse_once();
     assert(block_cache_held(&g.block_cache) == 48);
-    pocketjs_guest_block_cache_flush(&g);
+    kobako_guest_block_cache_flush(&g);
     assert(g.block_cache.enabled && backend_live == 0);
     // The wrapper never activates a cache rejected at creation (PSRAM or
     // failed TLSF eligibility). Eligibility is independent of pressure.
     g.block_cache_on = false;
     block_cache_init(&g.block_cache, &backend, sizes, 1, false);
-    pocketjs_guest_block_cache_set_pressure(&g, false);
-    pocketjs_guest_block_cache_set_pressure(&g, true);
+    kobako_guest_block_cache_set_pressure(&g, false);
+    kobako_guest_block_cache_set_pressure(&g, true);
     assert(!g.block_cache.enabled);
-    pocketjs_guest_block_cache_set_pressure(NULL, true);
+    kobako_guest_block_cache_set_pressure(NULL, true);
     guest = NULL;
     sample_memory_pressure();
-    pocket_memory_reset();
+    kobako_memory_reset();
     JS_FreeContext(g.ctx);
     JS_FreeRuntime(rt);
     assert(backend_live == 0);
@@ -188,10 +188,10 @@ int main(void) {
 
 def main():
     bodies = "\n\n".join([
-        function("components/pocketjs_guest/src/guest.c", "guest_uses_block_cache"),
-        function("components/pocketjs_guest/src/guest.c", "pocketjs_guest_block_cache_flush"),
-        function("components/pocketjs_guest/src/guest.c", "pocketjs_guest_block_cache_set_pressure"),
-        function("components/pocketjs_guest/src/guest.c", "pocketjs_guest_release_memory"),
+        function("components/kobako_guest/src/guest.c", "guest_uses_block_cache"),
+        function("components/kobako_guest/src/guest.c", "kobako_guest_block_cache_flush"),
+        function("components/kobako_guest/src/guest.c", "kobako_guest_block_cache_set_pressure"),
+        function("components/kobako_guest/src/guest.c", "kobako_guest_release_memory"),
         function("main/app_session.c", "sample_memory_pressure"),
     ])
     with tempfile.TemporaryDirectory(prefix="guest-cache-pressure-") as tmp:
@@ -201,11 +201,11 @@ def main():
         args = ["gcc", "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
                 "-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
         for directory in ["components/quickjs-ng/quickjs-ng", "tools/hostshim",
-                          "main/pocket", "components/pocketjs_guest/include"]:
+                          "main/kobako", "components/kobako_guest/include"]:
             args += ["-I", str(ROOT / directory)]
-        args += [str(source), str(ROOT / "main/pocket/pocket_memory.c"),
-                 str(ROOT / "components/pocketjs_guest/src/block_cache.c"),
-                 str(ROOT / "tools/hostshim/pocket_api_stub.c")]
+        args += [str(source), str(ROOT / "main/kobako/kobako_memory.c"),
+                 str(ROOT / "components/kobako_guest/src/block_cache.c"),
+                 str(ROOT / "tools/hostshim/kobako_api_stub.c")]
         args += [str(CACHE / (name + ".o")) for name in
                  ["dtoa", "libregexp", "libunicode", "quickjs", "quickjs-vm"]]
         subprocess.run(args + ["-lm", "-o", str(binary)], check=True)

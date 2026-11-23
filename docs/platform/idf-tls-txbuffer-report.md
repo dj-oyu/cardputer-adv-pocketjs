@@ -316,7 +316,7 @@ exactly **4,437** (= 4,429 + 8). The difference, **333 bytes**, matches the
 arithmetic to the byte.
 
 **On the number 674.** Our commit `fb41a02` and the original version of the
-comment in `pocket_tls_txfix.c` both said 674, which charged the 8-byte
+comment in `kobako_tls_txfix.c` both said 674, which charged the 8-byte
 `SSL_BUF_HEAD_OFFSET_SIZE` against a baseline that does not pay it either way.
 The waste is 333. The source comment has since been corrected and now names the
 commit message as wrong; the commit itself is pushed history in a tree several
@@ -328,7 +328,7 @@ also six chances to leave a hole in a heap that has no PSRAM to fall back on.
 For calibration on the same board: a handshake wants roughly 6,600–8,300 bytes
 of free heap in total, so this single buffer is a large fraction of it.
 
-Our local correction is `main/pocket/pocket_tls_txfix.c`: a linker `--wrap` on
+Our local correction is `main/kobako/kobako_tls_txfix.c`: a linker `--wrap` on
 `esp_mbedtls_add_tx_buffer` that rewrites the argument to 0 on exact equality
 with `MBEDTLS_SSL_OUT_BUFFER_LEN` (wired up at `main/CMakeLists.txt:35`). We did
 not edit the shared IDF checkout. That is a workaround, not a proposed patch —

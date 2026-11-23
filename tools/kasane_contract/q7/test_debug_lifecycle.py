@@ -10,10 +10,10 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[3]
-source = (ROOT / 'main/pocket/pocket_shiki.c').read_text()
+source = (ROOT / 'main/kobako/kobako_shiki.c').read_text()
 block = source[
     source.index('/* Bounded adaptive native batch per guest frame'):
-    source.index('\n#endif\n\nesp_err_t pocket_shiki_debug_fill')
+    source.index('\n#endif\n\nesp_err_t kobako_shiki_debug_fill')
 ]
 prefix = r'''
 #include "ui/kasane/ksn_mesh_q7_preflight.h"
@@ -193,7 +193,7 @@ static void make_oracle(void){
     record_oracle=false;free(raw);
 }
 static void fresh(void){
-    pocket_shiki_debug_reset();assert(!active && allocations==frees);
+    kobako_shiki_debug_reset();assert(!active && allocations==frees);
     assert(!q7_preflight_state.started_once && !q7_preflight_state.raw);
     available=largest=100000;stack_watermark=16000;
     heap_oom=object_oom=begin_fail=false;
@@ -388,7 +388,7 @@ static void oom_tests(void){
     object_oom=false;assert(call()==32 && active==1 && begin_calls==1);
     object_oom=true;
     assert(js_mesh_q7_preflight(NULL,0,0,NULL)==EXCEPTION);
-    pocket_shiki_debug_reset();assert(!active && allocations==frees);
+    kobako_shiki_debug_reset();assert(!active && allocations==frees);
     puts("Q7_DEBUG_OOM_PASS heap/stack admission, allocation OOM, JS object OOM retains/retries/resets");
 }
 static void reset_tests(void){
@@ -399,15 +399,15 @@ static void reset_tests(void){
         fresh();step_cost=650;
         for(unsigned j=0;j<stops[i];j++)assert(call()==4 && !done);
         assert(step_calls==4*stops[i] && step_calls<QUANTA);
-        pocket_shiki_debug_reset();assert(!active && allocations==frees);
-        pocket_shiki_debug_reset();assert(!active && allocations==frees);
+        kobako_shiki_debug_reset();assert(!active && allocations==frees);
+        kobako_shiki_debug_reset();assert(!active && allocations==frees);
     }
     /* A teardown after stopped execution must also allow a complete new run. */
     fresh();step_cost=12001;assert(call()==1);assert_stopped(1);
     fresh();
     do{call();}while(!done);
     assert_complete();
-    pocket_shiki_debug_reset();assert(!active && allocations==frees);
+    kobako_shiki_debug_reset();assert(!active && allocations==frees);
     puts("Q7_DEBUG_RESET_PASS partial batch, scene boundary, near-final stop, idempotent reset/restart");
 }
 int main(void){

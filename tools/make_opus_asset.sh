@@ -5,7 +5,7 @@
 #         bash tools/make_opus_asset.sh IN.wav OUT.pok [bitrate]"
 #
 # WSL, because gcc is not on the Windows side of this machine -- the same reason
-# tools/test_sfx.py and tools/build_pocket_text_test.sh say so.
+# tools/test_sfx.py and tools/build_kobako_text_test.sh say so.
 #
 # It builds libopus from .cache/codecs/opus-1.6.1, the tree
 # tools/prepare_dependencies.py pins and components/opus compiles for the device,

@@ -2,14 +2,14 @@
 
 2026-11-13、ブランチ `p4c-derby`（`69c92cc` から）。[api-reorg-perf.md](../kasane/logs/api-reorg-perf.md) §7 の「次の山」（draws 約 50・`pat=` 約 40 の CAM WIDE 2 が native の走者でも `turn_ms` 11.5〜11.7 ms、ほかの WIDE 2 は 6.4〜7.4 ms）を r5sim で分けた。
 
-**結論:** 重い WIDE 2 で増える時間は **JS ではなく、`pocket.derby.ser()`（C）の倍精度の計算**だった。観客の `pat=` の draw は JS が組み立てているのではなく、`ser()` の観客の列（スタンドの弦 1 本につき `crowd` の draw 1 本、1 本の中に `linePattern` が行の数 × 3）から出る。`pat=` が多いことは「視野に入るスタンドの弦が多い」ことを示しているだけで、その同じ弦の数だけ、5 本の列（スタンド・内外の柵・芝 2 本）の弦ごとの倍精度の計算（ソフトウェアの double。ESP32-S3 に倍精度の FPU は無い）が増える。境目の呼び出しは 1 フレーム 5 回で、P4b のように「1 回の native 呼び出しへ畳む」余地は無い。`ser()` の式は JS の oracle とビット単位で一致させる約束（[derby-ser-native.md](derby-ser-native.md)）なので、画素を変えずに大きく削れる箇所も無い。**この段では実装せず、内訳と見込みだけを記録する。** ビット単位で同じ 2 つの巻き上げ（§4 の A・B）だけは後で入れた（§6、重い WIDE 2 で r5sim −3.7%）。
+**結論:** 重い WIDE 2 で増える時間は **JS ではなく、`kobako.derby.ser()`（C）の倍精度の計算**だった。観客の `pat=` の draw は JS が組み立てているのではなく、`ser()` の観客の列（スタンドの弦 1 本につき `crowd` の draw 1 本、1 本の中に `linePattern` が行の数 × 3）から出る。`pat=` が多いことは「視野に入るスタンドの弦が多い」ことを示しているだけで、その同じ弦の数だけ、5 本の列（スタンド・内外の柵・芝 2 本）の弦ごとの倍精度の計算（ソフトウェアの double。ESP32-S3 に倍精度の FPU は無い）が増える。境目の呼び出しは 1 フレーム 5 回で、P4b のように「1 回の native 呼び出しへ畳む」余地は無い。`ser()` の式は JS の oracle とビット単位で一致させる約束（[derby-ser-native.md](derby-ser-native.md)）なので、画素を変えずに大きく削れる箇所も無い。**この段では実装せず、内訳と見込みだけを記録する。** ビット単位で同じ 2 つの巻き上げ（§4 の A・B）だけは後で入れた（§6、重い WIDE 2 で r5sim −3.7%）。
 
 ## 1. 道具
 
 `tools/r5sim`（`fast.sh <dir> -DR5SIM_DEVICE=1 -DR5SIM_APP=derby`、`R5SIM_ICOUNT=shift=2,sleep=off`、デモのレース 1 本）に 2 つを足した。
 
 - **場面の行の `pat=`** と、首振りの単位ごとの行 `wide1`・`wide2`・`wide3`（`wide` の行を、そのとき出ていた `CAM WIDE n` で分けてもう一度数える）。`pat=` は実機の `SHIKI_TURN` の `pat=` と同じ数（`ksn_shiki_curve_n[1]`、`LINE_PATTERN` の呼び出し）。
-- **`-DR5SIM_DERBY_PROF=1`**（計測用の像だけ）: `pocket.derby` の各関数の包括カウントと、その中の Shiki の draw（`pocket_shiki_turn` の `total_cy`）を場面ごとに `R5SIM prof` の行で出す。`ser()` の中は区間ごとに分け、WIDE 2 について `R5SIM serprof` の行を出す。ファームと既定の r5sim の像では何も入らない（`SP()`/`SC()` は空のマクロ。既定の像の場面の数は計装の前と全部同じ数だった）。
+- **`-DR5SIM_DERBY_PROF=1`**（計測用の像だけ）: `kobako.derby` の各関数の包括カウントと、その中の Shiki の draw（`kobako_shiki_turn` の `total_cy`）を場面ごとに `R5SIM prof` の行で出す。`ser()` の中は区間ごとに分け、WIDE 2 について `R5SIM serprof` の行を出す。ファームと既定の r5sim の像では何も入らない（`SP()`/`SC()` は空のマクロ。既定の像の場面の数は計装の前と全部同じ数だった）。
 
 このレースは r5sim でも重い WIDE 2 に当たる: WIDE 2 の 455 ターンが draws 46・`pat=` 37（実機の重い窓の 47〜53・37〜47 と同じ側）。作り直す必要は無かった。
 
@@ -24,7 +24,7 @@
 | wide3 | 100 | 195,639 | 35 | 18 | 78,781（5 回） | 30,877 | 11,998 | 14,157 | 3,821 | 1,626 | 約 85,300 |
 | field | 145 | 106,859 | 22 | 9 | — | — | — | 9,849 | 15,122 | 521 | 約 81,400 |
 
-（ほか native: `aim`・`wide`・`screen`。「JS ほか」は全体からそれらを引いた残りで、JS の命令、`dr()` で JS が直接出す draw、HUD、`pocket_kasane_end_turn` 以外のすべて。）
+（ほか native: `aim`・`wide`・`screen`。「JS ほか」は全体からそれらを引いた残りで、JS の命令、`dr()` で JS が直接出す draw、HUD、`kobako_kasane_end_turn` 以外のすべて。）
 
 - **wide2 − wide1 = +84.7k のうち、`ser()` が +75.3k（89%）。** その中で Shiki の draw は +7.0k だけで、**残りの +68.2k は `ser()` の倍精度の計算**。`view` +0.9k、`runners` +2.1k、JS ほか +4.5k。
 - JS ほか（約 83〜87k）は WIDE のどの単位でもほぼ同じで、draws や `pat=` に比例しない。これは P4b §8 の「残り」（HUD の文字列、`at()` の `zo.sort` と `mx.apply`、`attract()`）で、重い窓の原因ではない。
@@ -40,9 +40,9 @@
 | 傾き・投影・`lim()` 4 回 | 30,377 | 弦 1 本に除算 9 回（`dx`・`dz`、`Q`・`u`、`lim` 4 回、`zf/pc[4]`）と乗算・加算 約 25 回 |
 | LOD の段数・端（`sqrt`、`ceil`/`floor`、`inr()` 2 回） | 16,901 | |
 | draw の入力 8 個（`1/z`、芝の `fmod` など） | 6,394 | |
-| draw（`pocket_proc_draw_numbers`、Shiki を含む） | 34,139 | うち Shiki の `total_cy` 30,865、境目 約 3.3k |
+| draw（`kobako_proc_draw_numbers`、Shiki を含む） | 34,139 | うち Shiki の `total_cy` 30,865、境目 約 3.3k |
 
-**draw とその境目を除く倍精度の計算が約 82.7k/ターン、弦 1 本あたり約 2.9k。** 1 本あたりの重さは、ROM のソフトウェアの倍精度（`__divdf3`・`__muldf3`・`__adddf3`）と picolibc の `sqrt`（ビットごとの開平）の積み重ねで、どこか 1 つが突出しているのではない。三角関数はすでに表（`pocket_trig.h`）なので安い。
+**draw とその境目を除く倍精度の計算が約 82.7k/ターン、弦 1 本あたり約 2.9k。** 1 本あたりの重さは、ROM のソフトウェアの倍精度（`__divdf3`・`__muldf3`・`__adddf3`）と picolibc の `sqrt`（ビットごとの開平）の積み重ねで、どこか 1 つが突出しているのではない。三角関数はすでに表（`lean_trig.h`）なので安い。
 
 ## 3. 実機の尺度での見当（推定）
 
@@ -66,20 +66,20 @@ r5sim は flash の待ちが無く、Shiki の engine を C のモデルで回�
 | C. 弦の除外を `lim` の前に寄せる | 変わらないように作るには、結局 `lim` と同じ計算が要る | 除外される 7 本 × 約 1.6k = 最大 11k（推定、上限） | 割に合わない |
 | D. `ser()` を float32（S3 の単精度 FPU）か整数（[derby-integer.md](derby-integer.md) の `side()` と同じ道）に書き直す | **変わる**（JS の oracle とのビット一致、host の画素の基準を作り直す） | draw を除く 86k の大半、重い WIDE 2 で約 3〜3.5 ms（推定） | 唯一大きい案。仕様の変更なので SLOW のレビューと持ち主の判断が要る。楕円の遠い弦で単精度の桁（`pc` の座標は数百 m、分母 `Z` は 0.02 から）が足りるかを host で確かめるところから |
 | E. 観客の `pat=` の draw を JS から native へ畳む（P4b の形） | — | なし | 前提が違った。`crowd` の draw はすでに `ser()` の中から出ていて、JS は関与していない |
-| F. `POCKET_DERBY_COURSE_CACHE`（[derby-camera-history.md](derby-camera-history.md) §9、既定 OFF） | 変わらない | `view` の端の `pose()` だけ。`view` 全体が 12.3k なので最大でもその一部（推定） | 測っていない。三角関数が表になった今は効きが小さい |
+| F. `KOBAKO_DERBY_COURSE_CACHE`（[derby-camera-history.md](derby-camera-history.md) §9、既定 OFF） | 変わらない | `view` の端の `pose()` だけ。`view` 全体が 12.3k なので最大でもその一部（推定） | 測っていない。三角関数が表になった今は効きが小さい |
 
 - **P4b の A/B の `up` は広げていない**（新しい経路が無いため）。`DERBY AB JS` / `DERBY AB NATIVE` はそのまま。
 - 重い窓の差の残り（`ser` 以外の約 16k、うち JS ほか +4.5k、`runners` +2.1k、Shiki の draw +7k）は draw の数そのものに比例する分で、絵を変えずには消えない。
 
 ## 5. 残り
 
-- 実機で確かめていない: 比の換算（§3）。`CONFIG_POCKET_FRAME_BREAKDOWN` か TURNPERF で、重い WIDE 2 の `ser()` の実時間を測れば確定する。
+- 実機で確かめていない: 比の換算（§3）。`CONFIG_KOBAKO_FRAME_BREAKDOWN` か TURNPERF で、重い WIDE 2 の `ser()` の実時間を測れば確定する。
 - ~~A・B は host の全検査と一緒に入れる~~ → 入れた（§6）。
 - D は設計から（SLOW）。
 
 ## 6. A・B を入れた（2026-11-13、ブランチ `derby-ser-hoist`、`106bee4` から）
 
-`main/apps/derby/pocket_derby.c` の 2 か所。どちらも同じ式を同じ順で、計算する場所だけを動かした（ビット単位で同じ）。
+`main/apps/derby/kobako_derby.c` の 2 か所。どちらも同じ式を同じ順で、計算する場所だけを動かした（ビット単位で同じ）。
 
 - **A:** `view` の構造体に `fr` を足し、`aim()` が `pc[4]` を決めた直後に `fr = sqrt(pc[4]*pc[4]+25600)` を 1 回。`ou()` は `k = m*view.fr`。`ou()` が呼ばれるのは `view()` と `ser()` の中だけで、どちらも `aim()` の後（`cam.aimed`・`view.set` の判定）なので、`fr` が古いことは無い。host の fuzz（4,000 カメラ × 8）も `S.aim()` を通る。
 - **B:** `ser()` の入口で `zp = zf/pc[4]`、`lim()` の 2 本目は `zp - q[1]`。

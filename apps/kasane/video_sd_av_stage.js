@@ -26,7 +26,7 @@
     }
     return out;
   }
-  pocket.kasane.replace(tx => {
+  kobako.kasane.replace(tx => {
     tx.background(0x061322ff);
     tx.text({bounds: [8, 2, 232, 18], text: 'D6 SD AV STAGE',
              font: 'caption', color: 0xe7f4ffff});
@@ -34,23 +34,23 @@
   async function run() {
     try {
       console.log('D6_STAGE GRANT_REQUEST');
-      if (await pocket.fs.requestFolder('sd') !== 'sd:/')
+      if (await kobako.fs.requestFolder('sd') !== 'sd:/')
         throw new Error('folder grant declined');
       console.log('D6_STAGE GRANTED');
       try {
-        await pocket.fs.stat(path);
+        await kobako.fs.stat(path);
         throw new Error('reserved filename collision');
       } catch (error) {
         if (error.code !== 'NOT_FOUND') throw error;
       }
       console.log('D6_STAGE CREATE_START');
-      file = await pocket.fs.open(path, {mode: 'create', durability: 'synced'});
+      file = await kobako.fs.open(path, {mode: 'create', durability: 'synced'});
       console.log('D6_STAGE OPENED');
       await file.write(header());
-      await pocket.time.sleep(20);
+      await kobako.time.sleep(20);
       for (let i = 0; i < frames; ++i) {
         await file.write(packet(i));
-        await pocket.time.sleep(20);
+        await kobako.time.sleep(20);
         if ((i + 1) % 50 === 0)
           console.log('D6_STAGE WRITE frames=' + (i + 1));
       }

@@ -26,7 +26,7 @@
   // 4 rows x 8 dots = 32 dots a bay; input 4 (bays) makes 32/64/128.
   const KC = [5, 4, 8, 8, 4, 5, 1 / 8];
   const BAND = 'I0,0 I1,1 I2,2 I3,3 S4,1 Q2 V0,1 L3,1,33808 A1,1,4 E';
-  const V = pocket.kasane, H = V.procedural, log = m => console.log('BGS ' + m), SIZES = [32, 64, 128];
+  const V = kobako.kasane, H = V.procedural, log = m => console.log('BGS ' + m), SIZES = [32, 64, 128];
   H.beginFrame(0);
   const res = H.resource(), NOP = prog('S0,0'), P = {crowd: H.register(prog(CROWD, KC)), band: H.register(prog(BAND))};
   // A tile: a random walk of p points in a 28 x 12 px bay, from a hash
@@ -58,7 +58,7 @@
     // info() samples the heap at the start of a turn (null while
     // evaluating): register in one frame, read the difference in later ones.
     if (mf < 3) {
-      const m = pocket.memory.info().internalFreeBytes;
+      const m = kobako.memory.info().internalFreeBytes;
       if (mf === 0) f0 = m;
       else if (mf === 1) {
         TT = {};

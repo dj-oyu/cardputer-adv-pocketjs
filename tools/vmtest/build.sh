@@ -4,7 +4,7 @@
 #   tools/vmtest/build.sh           # asan (default)
 #   tools/vmtest/build.sh o2        # -O2, for timing
 #   tools/vmtest/build.sh all
-#   tools/vmtest/build.sh asan-reloc  # + CONFIG_POCKET_VM_RELOC (L3a), for --force-reloc
+#   tools/vmtest/build.sh asan-reloc  # + CONFIG_QJS_LEAN_RELOC (L3a), for --force-reloc
 #
 # The engine has one path: the VM levels (L1 scheduling, L2 segment frames,
 # flat calls and yield, stripped function source) and the F/R lines (flash
@@ -14,7 +14,7 @@
 # -recur, -noyield, -keepsrc, -norom, ...) went with them; commit 5db834f is
 # the last tree that has them.
 #
-# Unlike tools/build_pocket_text_test.sh, the asan variant instruments QuickJS
+# Unlike tools/build_kobako_text_test.sh, the asan variant instruments QuickJS
 # itself: the code under test from L1 on IS quickjs.c, so a use-after-free in a
 # modified call path has to be reported, not just one in the driver. Objects
 # are cached per variant and rebuilt when the vendored source is newer.
@@ -34,12 +34,12 @@ build_variant() {
   # the only way it is built, and --force-reloc is the only thing that calls it.
   local reloc=""
   local base=${variant%-reloc}
-  [ "$base" != "$variant" ] && reloc="-DCONFIG_POCKET_VM_RELOC=1"
-  # R2: the intrinsics from quickjs-rom-intrinsics.h (CONFIG_POCKET_VM_ROM_INTRINSICS
+  [ "$base" != "$variant" ] && reloc="-DCONFIG_QJS_LEAN_RELOC=1"
+  # R2: the intrinsics from quickjs-rom-intrinsics.h (CONFIG_QJS_LEAN_ROM_INTRINSICS
   # on the device). The context is born hardened; run it with --harden.
   local rom=""
   local b2=${base%-rom}
-  [ "$b2" != "$base" ] && rom="-DPOCKET_VM_ROM_INTRINSICS_HOST=1"
+  [ "$b2" != "$base" ] && rom="-DQJS_LEAN_ROM_INTRINSICS_HOST=1"
   base=$b2
   case "$base" in
     asan) cflags="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=undefined" ;;
@@ -52,28 +52,28 @@ build_variant() {
   cflags="$cflags ${VMTEST_CFLAGS:-}"
   local obj=$OUT/obj-$variant
   mkdir -p "$obj" "$OUT/include"
-  # quickjs-vmprobe.h includes sdkconfig.h to see CONFIG_POCKET_VM_PROBE. The
+  # quickjs-vmprobe.h includes sdkconfig.h to see CONFIG_QJS_LEAN_PROBE. The
   # host has no IDF config; an empty one means every probe is compiled out,
   # which is the shipping default. Written only if absent so objects are not
   # rebuilt for nothing.
   [ -f "$OUT/include/sdkconfig.h" ] || echo "/* vmtest host stub: no CONFIG_* set */" > "$OUT/include/sdkconfig.h"
-  # QUICKJS_NG_BUILD/_GNU_SOURCE/QJS_DISABLE_DUMPS: the same defines components/quickjs-ng/CMakeLists.txt passes.
+  # QUICKJS_NG_BUILD/QJS_LEAN_LAZY_BUILTINS/_GNU_SOURCE/QJS_DISABLE_DUMPS: the same defines components/quickjs-ng/CMakeLists.txt passes.
   # GUEST: from L1 on the harness LINKS the firmware's scheduler
-  # (components/pocketjs_guest/src/vm_sched.c, vm_clock.c) instead of copying
+  # (components/kobako_guest/src/vm_sched.c, vm_clock.c) instead of copying
   # it, so a change to the drain cannot pass here and fail there. Those two
   # files deliberately include no esp headers; nothing else from that component
   # is host-compilable.
-  local GUEST=components/pocketjs_guest
+  local GUEST=components/kobako_guest
   # QJS_DISABLE_DUMPS: the firmware passes it too, so the dispatch here has
   # no per-opcode dump-flag test either. VMTEST_DUMPS=1 keeps the JS_DUMP_*
   # hooks (JS_SetDumpFlags) for debugging; objects are not keyed on it, so
   # pair it with its own VMTEST_OUT.
   local dumps="-DQJS_DISABLE_DUMPS"
   [ "${VMTEST_DUMPS:-0}" = 1 ] && dumps=""
-  # POCKET_VM_IMMORTAL_TEST: the host-only JS_PocketImmortalizeIntrinsics
+  # QJS_LEAN_IMMORTAL_TEST: the host-only JS_LeanImmortalizeIntrinsics
   # behind vmrun --immortal (docs/vm/rom-intrinsics.md R1). An extra entry
   # point only; the firmware never defines it.
-  local defs="-DQUICKJS_NG_BUILD -D_GNU_SOURCE $dumps $reloc $rom -DPOCKET_VM_IMMORTAL_TEST -I $OUT/include -I $GUEST/include"
+  local defs="-DQUICKJS_NG_BUILD -DQJS_LEAN_LAZY_BUILTINS=1 -D_GNU_SOURCE $dumps $reloc $rom -DQJS_LEAN_IMMORTAL_TEST -I $OUT/include -I $GUEST/include"
   local objs=() compile_pids=()
   # quickjs-vm: the L2 harness hooks (forced yield at opcode safepoints, G5
   # gap recorder) that vmrun reaches through its weak symbols. Not upstream,

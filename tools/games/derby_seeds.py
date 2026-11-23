@@ -1,6 +1,6 @@
 """DERBY WATCH's seeds, recomputed on the host (apps/derby/derby_watch.js).
 
-The app draws pocket.random.seed() (esp_random() on the device) once per
+The app draws kobako.random.seed() (esp_random() on the device) once per
 session, mixes it with the stored race count sn, and derives each race's seed
 from that base and the race number:
 

@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
         fseek(f,0,SEEK_END); long size=ftell(f); rewind(f);
         uint8_t *data=malloc((size_t)size); assert(data);
         assert(fread(data,1,(size_t)size,f)==(size_t)size); fclose(f);
-        pocket_mp3_decoder_t *d=malloc(sizeof(*d)); assert(d);
+        kobako_mp3_decoder_t *d=malloc(sizeof(*d)); assert(d);
         int16_t decoded[2304];
         uint64_t count[2]={0,0}, hash[2]={0,0};
         unsigned rate=0, packets=0;
@@ -39,15 +39,15 @@ int main(int argc, char **argv) {
         assert(arms[0]&&arms[1]);
         for(int pass=0;pass<2;pass++) {
             g_mp3_fir_pie=pass==0;
-            pocket_mp3_init(d,decoded);
+            kobako_mp3_init(d,decoded);
             mp3dec_t ref; mp3dec_init(&ref);
             int16_t pcm[2304], mono[1152];
             output_t out={0};
             out.cap=4096; out.got=malloc(out.cap*2); assert(out.got); out.n=0;
             uint64_t input=0; unsigned pk=0;
             for(long at=0;at+4<=size;) {
-                pocket_mp3_header_t h;
-                if(!pocket_mp3_header(data+at,&h)) break;
+                kobako_mp3_header_t h;
+                if(!kobako_mp3_header(data+at,&h)) break;
                 assert(at+h.bytes<=size);
                 mp3dec_frame_info_t info={0};
                 int n=mp3dec_decode_frame(&ref,data+at,(int)h.bytes,pcm,&info);
@@ -58,7 +58,7 @@ int main(int argc, char **argv) {
                         (int16_t)(((int)pcm[2*i]+pcm[2*i+1])/2);
                     out.expected=mono; out.at=0;
                 }
-                assert(pocket_mp3_decode(d,data+at,h.bytes,emit,&out));
+                assert(kobako_mp3_decode(d,data+at,h.bytes,emit,&out));
                 input+=h.samples; rate=h.rate; pk++; at+=h.bytes;
                 assert(out.count==input*24000/rate);
             }
@@ -90,12 +90,12 @@ int main(int argc, char **argv) {
         assert(count[0]==count[1]);
         assert(hash[0]==hash[1]);
         assert(packets>0);
-        uint8_t bad[4]={255,251,0,0}; pocket_mp3_header_t h;
-        assert(!pocket_mp3_header(bad,&h)); // free-format
-        bad[2]=0xf0; assert(!pocket_mp3_header(bad,&h)); // reserved bitrate
+        uint8_t bad[4]={255,251,0,0}; kobako_mp3_header_t h;
+        assert(!kobako_mp3_header(bad,&h)); // free-format
+        bad[2]=0xf0; assert(!kobako_mp3_header(bad,&h)); // reserved bitrate
         g_mp3_fir_pie=1;
         output_t dummy={0};
-        assert(!pocket_mp3_decode(d,data,3,emit,&dummy));
+        assert(!kobako_mp3_decode(d,data,3,emit,&dummy));
         printf("MP3_OK %s rate=%u packets=%u output=%llu hash=%llu state=%zu fir=block==scalar\n",
                argv[a],rate,packets,(unsigned long long)count[0],
                (unsigned long long)hash[0],sizeof(*d));

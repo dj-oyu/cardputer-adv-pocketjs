@@ -1,38 +1,38 @@
-# Pocket共通JS API仕様
+# Kobako共通JS API仕様
 
-`globalThis.pocket` の公開契約。型表記は説明用TypeScriptで、デバイスのアプリは素のJavaScriptとする。`main/pocket/` にJS APIの実装があり、土台（capability登録・エラー・非同期契約）は `pocket_api.c`、各面はその他の `pocket_*.c` にある。19節はHoneとAyatsuriの言語非依存の設計案。節番号はコード・アプリ・tools から `docs/api/common-api.md section N` の形で約58箇所参照されているため、**この文書の節番号は動かさない**。
+`globalThis.kobako` の公開契約。型表記は説明用TypeScriptで、デバイスのアプリは素のJavaScriptとする。`main/kobako/` にJS APIの実装があり、土台（capability登録・エラー・非同期契約）は `kobako_api.c`、各面はその他の `kobako_*.c` にある。19節はHoneとAyatsuriの言語非依存の設計案。節番号はコード・アプリ・tools から `docs/api/common-api.md section N` の形で約58箇所参照されているため、**この文書の節番号は動かさない**。
 
 ## 実装状況（節ごと）
 
-ほぼ全ての節は `pocket_api_register()` で実際にcapability登録され、`supported=true` を返す形で実装済み。未実装・意図的に断っている面は明記する。
+ほぼ全ての節は `kobako_api_register()` で実際にcapability登録され、`supported=true` を返す形で実装済み。未実装・意図的に断っている面は明記する。
 
 | 節 | 面 | 状態 | 実装 |
 | --- | --- | --- | --- |
-| 2 | capabilities／apiVersion | 実装済み | `pocket_api.c` |
-| 3 | アプリ登録（静的テーブル） | 実装済み | `main/pocket/app_registry.c` |
-| 3.1 | オーバーレイ | 実装済み（描画は`pocket.kasane`、region/inputは`pocket.overlay`） | `pocket_kasane.c`、`pocket_overlay.c`、`main/ui/overlay*.c` |
-| 4 | 共通エラー・cancel・Options | 実装済み | `pocket_api.c` |
-| 5 | app／time／log | 実装済み | `pocket_app.c` |
-| 5.1 | app.load（チャンクの読み込み） | 実装済み | `pocket_app_load.c`、`tools/make_app_chunks.py` |
-| 5.2 | 静的 `import`（モジュールの入口） | 実装済み | `pocket_app_load.c`、`app_session.c` の `eval_reporting()` |
-| 6 | ui／input／input.text／input.keys | 実装済み（`ui.basic` は未実装） | `pocket_input.c`、`pocket_text.c`、`main/hal/keystate.c` |
-| 7 | storage | 実装済み | `pocket_storage.c` |
-| 7 | fs（`pocket.fs`） | 実装済み。詳細は[ファイルシステムAPI](filesystem-api.md) | `pocket_fs.c` |
-| 7 | workspace（`pocket.workspace`） | 実装済み。srcstore 16スロットの上に構築 | `pocket_workspace.c` |
-| 8 | sensors.imu | 実装済み | `pocket_imu.c` |
-| 8 | power | 実装済み（`keepAwake` だけはUNSUPPORTED。§8） | `pocket_av.c` |
-| 8.1 | random | 実装済み | `pocket_random.c` |
-| 9 | audio.cue／tone／playback（WAV, IMA ADPCM, Opus CELT, MP3）、power | 実装済み | `pocket_av.c`、`opus_feed.c`、`mp3_feed.c`／`mp3_decode.c` |
-| 9 | io.ir（送信） | 実装済み | `pocket_io.c` |
-| 9.2 | audio.capture（マイク） | 実装済み | `pocket_capture.c` |
-| 10 | io.i2c／spi／uart／gpio | 実装済み | `pocket_io.c` |
-| 11 | net.wifi／net.http | 実装済み | `pocket_net.c` |
-| 12 | ble.central／ble.peripheral | **未実装（意図的）**。名前空間はあるが全メソッドがUNSUPPORTEDを返す | `pocket_ble.c`（76行、capabilityは登録しない設計） |
-| 13 | bridge（PC link、USB transport） | 実装済み | `pocket_bridge.c`、`tools/pocket_bridge.py` |
+| 2 | capabilities／apiVersion | 実装済み | `kobako_api.c` |
+| 3 | アプリ登録（静的テーブル） | 実装済み | `main/kobako/app_registry.c` |
+| 3.1 | オーバーレイ | 実装済み（描画は`kobako.kasane`、region/inputは`kobako.overlay`） | `kobako_kasane.c`、`kobako_overlay.c`、`main/ui/overlay*.c` |
+| 4 | 共通エラー・cancel・Options | 実装済み | `kobako_api.c` |
+| 5 | app／time／log | 実装済み | `kobako_app.c` |
+| 5.1 | app.load（チャンクの読み込み） | 実装済み | `kobako_app_load.c`、`tools/make_app_chunks.py` |
+| 5.2 | 静的 `import`（モジュールの入口） | 実装済み | `kobako_app_load.c`、`app_session.c` の `eval_reporting()` |
+| 6 | ui／input／input.text／input.keys | 実装済み（`ui.basic` は未実装） | `kobako_input.c`、`kobako_text.c`、`main/hal/keystate.c` |
+| 7 | storage | 実装済み | `kobako_storage.c` |
+| 7 | fs（`kobako.fs`） | 実装済み。詳細は[ファイルシステムAPI](filesystem-api.md) | `kobako_fs.c` |
+| 7 | workspace（`kobako.workspace`） | 実装済み。srcstore 16スロットの上に構築 | `kobako_workspace.c` |
+| 8 | sensors.imu | 実装済み | `kobako_imu.c` |
+| 8 | power | 実装済み（`keepAwake` だけはUNSUPPORTED。§8） | `kobako_av.c` |
+| 8.1 | random | 実装済み | `kobako_random.c` |
+| 9 | audio.cue／tone／playback（WAV, IMA ADPCM, Opus CELT, MP3）、power | 実装済み | `kobako_av.c`、`opus_feed.c`、`mp3_feed.c`／`mp3_decode.c` |
+| 9 | io.ir（送信） | 実装済み | `kobako_io.c` |
+| 9.2 | audio.capture（マイク） | 実装済み | `kobako_capture.c` |
+| 10 | io.i2c／spi／uart／gpio | 実装済み | `kobako_io.c` |
+| 11 | net.wifi／net.http | 実装済み | `kobako_net.c` |
+| 12 | ble.central／ble.peripheral | **未実装（意図的）**。名前空間はあるが全メソッドがUNSUPPORTEDを返す | `kobako_ble.c`（76行、capabilityは登録しない設計） |
+| 13 | bridge（PC link、USB transport） | 実装済み | `kobako_bridge.c`、`tools/kobako_bridge.py` |
 | 14 | 資源上限 | 一部は`limits`として実測値を公開、残りは初期案のまま | 各面の`limits` |
 | 19 | Hone／Ayatsuri フレームワーク | 統合後のAPI設計とC実装の対応範囲 | `main/ayatsuri/ayatsuri_model.h`、`main/hone/hone_frame.h` |
 
-現行JS APIのBLE（12節）は名前空間を提供し、`pocket_ble.c` の全メソッドがUNSUPPORTEDを返す。現行JS APIの利用可否はfeature-testで確認できる。「必須」はこのAPI版を提供するときの契約。`limits` に出す値のうち「初期上限案」と書いたものは実測前の見積りで、コードが強制している値だけを`limits`が返すという規則（CLAUDE.md）は変わらない。Wi-Fi/BLEを含む全機能の同時搭載・同時利用を約束しない。
+現行JS APIのBLE（12節）は名前空間を提供し、`kobako_ble.c` の全メソッドがUNSUPPORTEDを返す。現行JS APIの利用可否はfeature-testで確認できる。「必須」はこのAPI版を提供するときの契約。`limits` に出す値のうち「初期上限案」と書いたものは実測前の見積りで、コードが強制している値だけを`limits`が返すという規則（CLAUDE.md）は変わらない。Wi-Fi/BLEを含む全機能の同時搭載・同時利用を約束しない。
 
 未実装・未決の残件は[docs/api/backlog.md](backlog.md)にまとめた。ハードウェア前提は[ハードウェア制約](../platform/hardware-constraints.md)、プラットフォーム全体の構成は[プラットフォーム設計](../platform/architecture.md)を参照する。
 
@@ -55,13 +55,13 @@ Docs・チュートリアル自身を直ちにJS化する必要はない。ネ�
 
 ## 2. 公開面・互換性・機能検出
 
-公開ルートは読み取り専用の `globalThis.pocket`。`__pjs_*` を教材の安定APIにしない（旧 `ui.setProp` などの `ui.*` はファームから削除済み）。DOM、Node.js、ブラウザーfetch、Web Bluetooth互換を名乗らない。
+公開ルートは読み取り専用の `globalThis.kobako`。`__pjs_*` を教材の安定APIにしない（旧 `ui.setProp` などの `ui.*` はファームから削除済み）。DOM、Node.js、ブラウザーfetch、Web Bluetooth互換を名乗らない。
 
 ```ts
-pocket.apiVersion: string;                    // 例 "0.2.0"
-pocket.device.info(): DeviceInfo;
-pocket.capabilities.get(name: string): Capability;
-pocket.capabilities.onChange(fn: (c: Capability) => void): Subscription;
+kobako.apiVersion: string;                    // 例 "0.2.0"
+kobako.device.info(): DeviceInfo;
+kobako.capabilities.get(name: string): Capability;
+kobako.capabilities.onChange(fn: (c: Capability) => void): Subscription;
 type Capability = {
   name: string;
   supported: boolean;                         // このfirmwareに実装されている
@@ -77,30 +77,32 @@ type DeviceInfo = {
 
 名前例: `ui.basic`, `input.text`, `storage.kv`, `fs.volume.app`, `fs.volume.assets`, `fs.volume.sd`, `sensors.imu`, `audio.tone`, `audio.capture`, `audio.playback`, `net.wifi`, `net.http`, `ble.central`, `ble.peripheral`, `io.i2c`, `io.spi`, `io.uart`, `io.gpio`, `io.ir`, `bridge.pc`。未知名はsupported=falseで返す。supported=falseの機能も名前空間／メソッドを持ち、呼出しはUNSUPPORTEDで失敗する。
 
-**capabilityの登録はセッションごと。** 各面は注入時に登録し、`pocket_api_reset()`がセッション終了時に表を空にする。したがって`capabilities.get()`は「このセッションに注入された面」を答え、前のセッションが注入した面を引き継がない（オーバーレイは無線・バス等を注入しないので、それらはsupported=false）。
+**capabilityの登録はセッションごと。** 各面は注入時に登録し、`kobako_api_reset()`がセッション終了時に表を空にする。したがって`capabilities.get()`は「このセッションに注入された面」を答え、前のセッションが注入した面を引き継がない（オーバーレイは無線・バス等を注入しないので、それらはsupported=false）。
 
-**アプリ固有の面は共通APIに含めない。** `pocket.pet`（capability `pet.companion`）はネイティブアプリ Pocket Pet / Pet Companion の面で、上の名前一覧に入らない。登録情報（§3）の`required`/`optional`で`pet.companion`を名指ししたアプリのセッションにだけ注入し、他のアプリには名前空間もcapabilityも存在しない。`pocket.derby`（capability `derby.series`、DERBY WATCH の首振りの列を C で描く。[derby-ser-native.md](../apps/derby-ser-native.md)）も同じ扱いで、`local.derby` のセッションにだけ注入する。依存の向きはペット→システム基盤で、通知・タイマー・時計の共通化は[Kasaneの境界と契約](../kasane/architecture.md)を参照。
+**アプリ固有の面は共通APIに含めない。** `kobako.pet`（capability `pet.companion`）はネイティブアプリ Kobako Pet / Pet Companion の面で、上の名前一覧に入らない。登録情報（§3）の`required`/`optional`で`pet.companion`を名指ししたアプリのセッションにだけ注入し、他のアプリには名前空間もcapabilityも存在しない。`kobako.derby`（capability `derby.series`、DERBY WATCH の首振りの列を C で描く。[derby-ser-native.md](../apps/derby-ser-native.md)）も同じ扱いで、`local.derby` のセッションにだけ注入する。依存の向きはペット→システム基盤で、通知・タイマー・時計の共通化は[Kasaneの境界と契約](../kasane/architecture.md)を参照。
 
 availableは予約ではなく観測値。確認直後に資源が変わり得るため、open/acquireの結果が最終判断となる。認可状態は別であり、available=trueだけでは利用権を得ない。limitsはそのビルドのハード上限、取得ハンドルは実際に割り当てられた値を返す。
 
-版0.xでは破壊的変更をminor版で明示する。アプリ登録情報に対応APIの範囲を持ち、不適合なら起動前に表示する。旧 `legacy-pocketjs` 実行モード（`ui.createNode` などの `ui.*`、Rust UIコアとTaffyレイアウト）は、全アプリの移行後にファームから削除した（2026-09-17）。全アプリが `pocket-app` で、描画は `pocket.kasane`（[Kasaneの現行境界](../kasane/architecture.md)）。旧APIを呼ぶ保存済みプログラムは変換せず、起動前に「旧API(ui.*)のため実行できません」と表示してログに `APP_LEGACY_UI` を出し、実行しない。
+版0.xでは破壊的変更をminor版で明示する。アプリ登録情報に対応APIの範囲を持ち、不適合なら起動前に表示する。旧 `legacy-pocketjs` 実行モード（`ui.createNode` などの `ui.*`、Rust UIコアとTaffyレイアウト）は、全アプリの移行後にファームから削除した（2026-09-17）。全アプリが `kobako-app` で、描画は `kobako.kasane`（[Kasaneの現行境界](../kasane/architecture.md)）。旧APIを呼ぶ保存済みプログラムは変換せず、起動前に「旧API(ui.*)のため実行できません」と表示してログに `APP_LEGACY_UI` を出し、実行しない。
 
 ## 3. アプリ登録と権限
 
-初期はビルド内の登録情報で十分。将来のインストールでも同じ情報モデルを使う。以下の形は`main/pocket/app_registry.c`の静的テーブル（`app_manifest_t`）として実装済みで、動的インストールや`.pocket`受け入れは未実装のまま。
+初期はビルド内の登録情報で十分。将来のインストールでも同じ情報モデルを使う。以下の形は`main/kobako/app_registry.c`の静的テーブル（`app_manifest_t`）として実装済みで、動的インストールや`.kobako`受け入れは未実装のまま。
 
 ```json
 {
   "id": "local.pet",
-  "title": "Pocket Pet",
+  "title": "Kobako Pet",
   "entry": "main.js",
-  "runtime": "pocket-app",
+  "runtime": "kobako-app",
   "api": ">=0.1.0 <0.2.0",
   "required": ["storage.kv"],
   "optional": ["sensors.imu", "audio.tone"],
   "access": {"storage": "self", "sensors": ["imu"], "audio": ["tone"]}
 }
 ```
+
+`kobako.app.info().runtime` は `kobako-app`（ゲストで動く JS アプリ）か `native`（ゲストを持たないネイティブの画面）。2026-11-23 までは、ネイティブの画面にも旧実行モードの名前 `legacy-pocketjs` を返していた。
 
 アプリIDはホストが登録時に確定し、JSの自己申告で他アプリの保存領域に入れない。教材は自分の作業コピーを持ち、サンプルを開く操作でユーザー作品を上書きしない。Playgroundからの実行も固有の実行所有者を持つ。
 
@@ -113,7 +115,7 @@ API境界は能力の制限であり、C/Rustまで含む敵対的コードの�
 **ホーム画面のUIそのものになるアプリ。XMBを終了させ、その場所に立つ。** シーンは下で描かれ続け、シェルは画面を手放さない（背景の代わりに走る通常アプリとは、そこが違う）。時計・いま鳴っている曲・観賞用の表示・シーン定義の編集など「背景を見ながら使うもの」がこの形になる。
 
 ```json
-{ "runtime": "pocket-overlay", "required": ["ui.overlay", "display.kasane"] }
+{ "runtime": "kobako-overlay", "required": ["ui.overlay", "display.kasane"] }
 ```
 
 **この種別を分ける理由は、合成ではなく統治にある。** 描画の重ね合わせはホーム画面が既に行っている（背景＋メニュー）。新しいのは、**ユーザーがホーム画面に居るあいだゲストが生きている**という点で、危険はすべてそこから出る。
@@ -169,11 +171,11 @@ API境界は能力の制限であり、C/Rustまで含む敵対的コードの�
 `overlay_yield()` の最初の呼び出し元は予約キーである。無線とストリームの側の
 呼び出し元は依然として無い。
 
-overlay sessionにも`pocket.kasane`を注入する。座標はmanifest region相対で、adapterがLCD座標へ
+overlay sessionにも`kobako.kasane`を注入する。座標はmanifest region相対で、adapterがLCD座標へ
 変換しregionでclipする。shellは現在のnative sceneを各帯のbackdropとして供給し、その上へ同じ
-APP layerを合成するため、OVERLAYという第三layerやfull-frame bufferは持たない。`pocket.overlay`の
+APP layerを合成するため、OVERLAYという第三layerやfull-frame bufferは持たない。`kobako.overlay`の
 旧display list（`begin`/`rect`/`text`、24項目・1,440 Bの`.bss`）はapiVersion 0.2.0で消した。
-`pocket.overlay`はregion limitsとkey listenerだけを担う。
+`kobako.overlay`はregion limitsとkey listenerだけを担う。
 Kasane modalは全画面scrim/SOLID背景がregion付きbackdropと両立しないためoverlayでは非対応。
 submission/repair中は通常入力と次のguest turnを止め、Kasane合成費用もoverlay予算へ含める。
 
@@ -201,7 +203,7 @@ ESCが `action_of()` で名前を持たず落ちたからで、それは偶然�
 * **ゲストの上限（ceiling）と、実際にかかる費用（cost）を混ぜない。** `JS_SetMemoryLimit()` は `JS_NewContext()` **より前**に適用されるので、空のrealmを作る費用より小さい上限を置くと、小さなゲストではなく生成失敗（`ESP_ERR_NO_MEM`）が返る。2026-09-09、空きヒープ278,820バイトの機体で48KiBの上限がこれを起こした。**上限は天井なので大きく取っても費用は増えない**（QuickJSは使う分しか確保しない）。足切りに入れてよいのは費用の側だけで、天井ではない。
 * **起動後に検証する。** ゲストが上がった時点で、消費量はもはや予測ではなく引き算である。**残りが他の常設要求の最大値を下回っていたら、その場で降りる。** 現行機では `NET_RADIO_MIN_FREE`（56KiB、2026-09-07実測、無線を上げる費用）がその値で、「オーバーレイが起動する前に機体ができたことを、今もできる」を意味する。**これができるのはオーバーレイだけである** — 起動のために何も追い出していないので、降りれば機体は元の状態に正確に戻る。前景アプリは上がった時点で置き換えた画面が既に無く、この撤退ができない。
 
-**残る不確かさは設計目標ではなく、記録すべき限界である。** このタスク上のどんな測定も、1マイクロ秒後に別のタスクが動かすヒープについては何も約束しない。`pocket_api.h` は `available` について既に同じことを書いている（「取られた瞬間の観測であって予約ではない」）。上の二段と、次段落の譲渡は窓を狭め、失敗を可視かつ可逆にするだけで、閉じはしない。閉じられると書くほうが害が大きい。
+**残る不確かさは設計目標ではなく、記録すべき限界である。** このタスク上のどんな測定も、1マイクロ秒後に別のタスクが動かすヒープについては何も約束しない。`kobako_api.h` は `available` について既に同じことを書いている（「取られた瞬間の観測であって予約ではない」）。上の二段と、次段落の譲渡は窓を狭め、失敗を可視かつ可逆にするだけで、閉じはしない。閉じられると書くほうが害が大きい。
 
 **予測を改善するより、要求が来た瞬間に譲る。** 起動時に「後で誰かが必要とするか」を当てにいくのが予測で、無線の起動やストリーム開始という**実際にその瞬間**にオーバーレイを降ろせば、予測そのものが要らなくなる。降りる側の実装は `overlay_yield()` にあり、呼び出し側は要求する側のコードに置く。
 
@@ -218,9 +220,9 @@ ESCが `action_of()` で名前を持たず落ちたからで、それは偶然�
 ```ts
 type Subscription = { close(): void };        // 冪等。以後callbackなし
 type CancelToken = object;                   // ホスト生成、JSで偽造不可
-pocket.cancel.source(): {token: CancelToken; cancel(): void};
+kobako.cancel.source(): {token: CancelToken; cancel(): void};
 type Options = {timeoutMs?: number; cancel?: CancelToken};
-type PocketError = Error & {
+type KobakoError = Error & {
   code: string; operation: string; retryable: boolean;
   outcome?: "not-applied" | "applied" | "unknown";
 };
@@ -228,7 +230,7 @@ type PocketError = Error & {
 
 同期関数は引数検証・状態取得・小さなUI変更に限る。待ちを伴うI/OはPromiseを返す。Promiseを返すメソッドは引数エラーもrejectへ統一する。同期関数はthrowする。JSへESP-IDFの数値エラーを直接返さず、診断情報にだけ保持する。
 
-面の仕様は、`PocketError` に読み取り専用のプロパティを足してよい（その面の仕様に定義を書く。例: `kasane.shiki.drawMany` の `index`、[shiki-spec.md](../kasane/shiki-spec.md) §9.4）。共通の4つの意味は変えない。
+面の仕様は、`KobakoError` に読み取り専用のプロパティを足してよい（その面の仕様に定義を書く。例: `kasane.shiki.drawMany` の `index`、[shiki-spec.md](../kasane/shiki-spec.md) §9.4）。共通の4つの意味は変えない。
 
 共通code: INVALID_ARGUMENT、UNSUPPORTED、NOT_AVAILABLE、PERMISSION_DENIED、BUSY、LIMIT_EXCEEDED、OUT_OF_MEMORY、TIMEOUT、CANCELLED、CLOSED、DISCONNECTED、NOT_FOUND、CORRUPT_DATA、IO_ERROR、AUTH_FAILED、TLS_ERROR、CONFLICT。retryableは自動再送の指示ではない。書込や外部操作の結果が不明ならoutcome=unknownとし、再試行で重複し得ることをアプリが判断できるようにする。
 
@@ -243,29 +245,29 @@ type PocketError = Error & {
 ## 5. ライフサイクルとイベントループ
 
 ```ts
-pocket.app.start(hooks: {
+kobako.app.start(hooks: {
   start?: () => void | Promise<void>;
   stop?: (reason: "back" | "evict" | "replace" | "shutdown") => void | Promise<void>;
   suspend?: () => void | Promise<void>;
   resume?: (info: {suspendedMs: number}) => void | Promise<void>;
 }): void;
-pocket.app.exit(): void;
-pocket.app.onFrame(fn: (f: {timeMs: number; deltaMs: number}) => void): Subscription;
-pocket.time.now(): number;
-pocket.time.wall(): {unixMs: number | null; source: "unsynced" | "host" | "network"};
-pocket.time.wallSource(): KasaneSourceCapability;
-pocket.time.sleep(ms: number, options?: Options): Promise<void>;
+kobako.app.exit(): void;
+kobako.app.onFrame(fn: (f: {timeMs: number; deltaMs: number}) => void): Subscription;
+kobako.time.now(): number;
+kobako.time.wall(): {unixMs: number | null; source: "unsynced" | "host" | "network"};
+kobako.time.wallSource(): KasaneSourceCapability;
+kobako.time.sleep(ms: number, options?: Options): Promise<void>;
 ```
 
 `time.wall()`はSystemの共通anchorを読む。`source`はRTC/SNTPなら互換表記`network`、検証済みPC packetの補完なら`host`、利用できる時刻がなければ`unsynced`。RTC/SNTPを優先し、PC補完はOS時計を書き換えない。PC packetのCRCは時刻の真正性保証ではない。TLSは別に実際のOS時計の信頼状態を検査する。`unixMs`は丸めた整数ミリ秒で、安全な数値範囲を越える場合もnullを返す。
 
-`time.wallSource()`はKasaneのmountへ渡す不透明なsession-scoped capabilityを返す。`view.bind(pocket.time.wallSource(), {face: 0, tag: 1})`で、text field 0を`HH:MM`（同期前は`--:--`）、field 1を`UTC`または`NO SYNC`として購読できる。JS側の毎フレーム時刻取得や描画更新は不要。sourceは時計サービスが所有し、Kasaneは型付きsnapshotを一時的に借りるだけである。capabilityはセッション終了後に失効する。
+`time.wallSource()`はKasaneのmountへ渡す不透明なsession-scoped capabilityを返す。`view.bind(kobako.time.wallSource(), {face: 0, tag: 1})`で、text field 0を`HH:MM`（同期前は`--:--`）、field 1を`UTC`または`NO SYNC`として購読できる。JS側の毎フレーム時刻取得や描画更新は不要。sourceは時計サービスが所有し、Kasaneは型付きsnapshotを一時的に借りるだけである。capabilityはセッション終了後に失効する。
 
 startはソース評価中に1回登録する。新ランタイムではglobalThis.frameをホストが用意し、Promiseだけを待つアプリもイベント処理を継続できる。start hook終了まで状態はStartingだが、I/O完了とキャンセルは配送する。onFrameはRunningでのみ呼ぶ。
 
 **常駐中断**（[docs/vm/app-suspend-design.md](../vm/app-suspend-design.md)）: `resume`を登録したアプリは、ホームのメニューから起動したときに限り、Backで終了せずに眠る。ゲストは残り、同じ行を開くとその時点から続く（行に一時停止の印が出る）。眠る前に`suspend`フックが走り（stopと同じ200ms）、実行中の操作はすべて`CANCELLED`（再試行可）で決着する。無線のリース・開いているファイルとSD・マイク・UART/I2C/RMT・テキスト入力・ピッカーは手放し、再開後はリースが`onChange`で`disconnected`、SDが`onVolumeChange`、テキスト入力が`onCancel`、再生が`onState`で知らせる（内蔵素材の再生は一時停止して再開で戻り、SD・ネットワークからの再生は閉じる）。通知の無い面の古いハンドルは`CLOSED`を返す。再開では`resume({suspendedMs})`が走り、最初の`onFrame`の`deltaMs`は0になる。別のアプリを起動する・診断を走らせるときは、眠っているアプリを`stop("evict")`で終える。眠っている間はオーバーレイを起動しない。中断が失敗した（フックが200msで終わらない、操作が決着しない、中断後の空きが96KiB未満）ときは通常のBackと同じく終了する。`capabilities.get("app")`の`limits.suspend`が1なら対応している。
 
-`pocket.app.start()`を使わず、入力・Promiseだけで動くアプリは明示的に`globalThis.frame = null`を指定できる。この場合も各host turnでservice pumpとPromise job drainは続き、JS frame呼出しと引数生成だけを省く。`frame`未定義は引き続き起動エラーである。
+`kobako.app.start()`を使わず、入力・Promiseだけで動くアプリは明示的に`globalThis.frame = null`を指定できる。この場合も各host turnでservice pumpとPromise job drainは続き、JS frame呼出しと引数生成だけを省く。`frame`未定義は引き続き起動エラーである。
 
 1ターンは停止要求→入力／I/O完了→上限付きPromise job→frame→描画の順。Promise連鎖を含むJSターン全体に期限を設ける。frameは同期関数で、Promiseを返したらINVALID_ARGUMENTとしてアプリを停止する。I/Oのawaitはstart、別のasync関数、イベントから開始する。
 
@@ -275,13 +277,13 @@ startはソース評価中に1回登録する。新ランタイムではglobalTh
 
 イベント／completion用の制御領域は一般データキューと分け、Promise完了や停止通知を黙って落とさない。センサーの最新値は統合できるが、入力・通信の欠落はカウンターとoverflow状態で通知する。入力overflow時はheld状態をリセットして古いイベントを破棄する。
 
-### 5.1 チャンクの読み込み（`pocket.app.load`、実装、2026-09-30）
+### 5.1 チャンクの読み込み（`kobako.app.load`、実装、2026-09-30）
 
 ```ts
-pocket.app.load(name: string): boolean;   // true: いま評価した。false: 読み込み済みで何もしなかった
+kobako.app.load(name: string): boolean;   // true: いま評価した。false: 読み込み済みで何もしなかった
 ```
 
-アプリのソースを複数の**チャンク**（ビルドに埋め込んだ、そのアプリ自身のソース片）に分け、同期で1つずつ評価する。目的は評価のピークを下げること（QuickJSは1つのスクリプトの解析用の構造を、そのスクリプトの解析が終わるまで全部保つ。[評価のピーク](../vm/eval-peak.md) §7）。実装は `main/pocket/pocket_app_load.c`。
+アプリのソースを複数の**チャンク**（ビルドに埋め込んだ、そのアプリ自身のソース片）に分け、同期で1つずつ評価する。目的は評価のピークを下げること（QuickJSは1つのスクリプトの解析用の構造を、そのスクリプトの解析が終わるまで全部保つ。[評価のピーク](../vm/eval-peak.md) §7）。実装は `main/kobako/kobako_app_load.c`。
 
 - チャンクは、アプリと**同じrealmのグローバルスクリプト**として評価する。トップレベルの `function` 宣言・`var`・`globalThis.x = ...`・グローバルの `let`/`const` は、入口のソースと他のチャンクから見える（同じ束縛で、写しではない）。
 - **冪等**。読み込み済みの名前は評価せず `false` を返す。グローバルの `let`/`const` を持つスクリプトは、同じrealmへもう一度評価すると再宣言のSyntaxErrorになるので、二度目を評価しない。
@@ -289,7 +291,7 @@ pocket.app.load(name: string): boolean;   // true: いま評価した。false: �
 - 評価（アプリ起動）中の呼び出しには評価の2秒の期限が、`frame()`などターンの中の呼び出しにはそのターンの250msの期限がかかる。**解析は割り込みを見ない**（実測・実機: 10.7KBで約45ms、30KBで約150ms）。期限は実行の最初のセーフポイントで効く。
 - capability `app.load`: 全セッションで`supported=true`（表の無いアプリも関数はあり、`NOT_FOUND`を返す）。`limits`は`maxChunks: 32`（1アプリのチャンク数。ビルドが33個目を断る）と`maxNameBytes: 31`（毎回の呼び出しで検査）。
 
-失敗はすべて同期のthrowで、`PocketError`（§4）。`message`は `chunk 'scene' did not compile: SyntaxError: ... at derby_scene.js:12:5` の形で、チャンクのファイル名と行を含む。`cause`に元の例外（スタック付き）を持つ。
+失敗はすべて同期のthrowで、`KobakoError`（§4）。`message`は `chunk 'scene' did not compile: SyntaxError: ... at derby_scene.js:12:5` の形で、チャンクのファイル名と行を含む。`cause`に元の例外（スタック付き）を持つ。
 
 | 状況 | code | outcome | retryable | その名前の次の`load` |
 | --- | --- | --- | --- | --- |
@@ -300,7 +302,7 @@ pocket.app.load(name: string): boolean;   // true: いま評価した。false: �
 | 構文エラー | `CORRUPT_DATA` | not-applied | false | もう一度解析して同じエラー |
 | トップレベルの実行が例外を投げた | `CORRUPT_DATA`（heap不足なら`OUT_OF_MEMORY`、スタック超過なら`LIMIT_EXCEEDED`） | **unknown** | false | `CORRUPT_DATA`（二度と実行しない。途中までの宣言が残りうる） |
 | そのチャンクのトップレベルから自分自身（または読み込み中のチャンク）を`load` | `CONFLICT` | not-applied | false | — |
-| 期限切れ・停止要求 | PocketErrorにしない。捕まえられない例外のまま伝わり、アプリは止まる | | | |
+| 期限切れ・停止要求 | KobakoErrorにしない。捕まえられない例外のまま伝わり、アプリは止まる | | | |
 
 手放すAPIは無い。チャンクが作った関数は、参照を捨てればGCで解放される（トップレベルの関数宣言・`var`・`let`は値を`null`にする。`const`は捨てられない）。捨てた後も`load`は`false`を返し、再評価はしない。書き方の指針は[評価のピーク](../vm/eval-peak.md) §7.3。
 
@@ -313,11 +315,11 @@ import * as demo from 'demo';
 globalThis.frame = () => drawScene();   // モジュールの名前はグローバルに出ない
 ```
 
-`pocket.*` の面ではなく、言語の構文そのもの（capability は無い）。目的は §5.1 と同じ評価のピークの削減で、モジュールは1つずつ解析される。作りと測定は[評価のピーク](../vm/eval-peak.md) §9。
+`kobako.*` の面ではなく、言語の構文そのもの（capability は無い）。目的は §5.1 と同じ評価のピークの削減で、モジュールは1つずつ解析される。作りと測定は[評価のピーク](../vm/eval-peak.md) §9。
 
 - **入口がモジュールになる条件**: `app_registry.c` のマニフェストの `entry` が `.mjs` で終わる。それ以外（`.js`・Playground・チュートリアル・作品）は従来どおりグローバルスクリプトで、`import` 文は SyntaxError のまま。
 - **import できるもの**: そのアプリの `chunks.txt` にある、ファイル名が `.mjs` のチャンクだけ。指定子はチャンクの**名前**そのもの（`'scene'`）。相対・絶対パス・URL・他のアプリのチャンクは解決しない。`.js` のチャンクは `load` 専用、`.mjs` のチャンクは `import` 専用。
-- **入口の評価の中でだけ解決する**。動的 `import()` は、どこから呼んでも（モジュールのトップレベルでも、後の `frame()` でも）Promise の reject（`TypeError: ... dynamic import() is not supported; use pocket.app.load()`）。後から読むのは `pocket.app.load`。
+- **入口の評価の中でだけ解決する**。動的 `import()` は、どこから呼んでも（モジュールのトップレベルでも、後の `frame()` でも）Promise の reject（`TypeError: ... dynamic import() is not supported; use kobako.app.load()`）。後から読むのは `kobako.app.load`。
 - **トップレベル await は断る**（`SyntaxError: ... top-level await is not supported`）。モジュールのグラフは評価の中で同期に終わる。
 - import attributes（`with { type: 'json' }`）は断る。import の入れ子は深さ 8 まで（`RangeError`）。循環 import は仕様どおり動く（初期化前の束縛を読めば `ReferenceError`）。
 - 失敗はすべて評価の失敗で、`EVAL_ERROR` の行に出てアプリは起動しない（`START_FAILED`、ホームへ戻る）。行の形は従来どおり: 構文エラー・トップレベルの例外はそのモジュールのファイル名と行（`SyntaxError: variable name expected at import_bad.mjs:3:1`）、解決の失敗は取り込む側のファイル名（`ReferenceError: user.js imports 'nope': this app has no chunk 'nope' (chunks.txt names them)`、行は無い）。heap 不足は `OOM` の行が別に出る。
@@ -326,17 +328,17 @@ globalThis.frame = () => drawScene();   // モジュールの名前はグロー�
 
 ## 6. UI・画面遷移・入力
 
-**`pocket.ui`（capability `ui.basic`）は実装していない。** 下の `pocket.ui.*` は当初案で、旧UIコアの上に載せた実装（`pocket_ui.c`）は旧UI経路とともに削除した。`capabilities.get("ui.basic")` は supported=false を返す。画面の描画は `pocket.kasane` を使う。入力（`pocket.input.*`）とTextSessionは実装済みで、TextSessionの編集欄はKasaneが描いた帯へホストが合成する。
+**`kobako.ui`（capability `ui.basic`）は実装していない。** 下の `kobako.ui.*` は当初案で、旧UIコアの上に載せた実装（`kobako_ui.c`）は旧UI経路とともに削除した。`capabilities.get("ui.basic")` は supported=false を返す。画面の描画は `kobako.kasane` を使う。入力（`kobako.input.*`）とTextSessionは実装済みで、TextSessionの編集欄はKasaneが描いた帯へホストが合成する。
 
-**`pocket.kasane`（capability `display.kasane`）の、[Kasane API の整理](../kasane/api-reorg.md) P3 で足し、P5 で古い形を消した現在の形（2026-11-13、`apiVersion` は `"0.2.0"`）。** 境界と契約は[Kasaneの現行境界](../kasane/architecture.md)、Shiki は[仕様](../kasane/shiki-spec.md) §9。
+**`kobako.kasane`（capability `display.kasane`）の、[Kasane API の整理](../kasane/api-reorg.md) P3 で足し、P5 で古い形を消した現在の形（2026-11-13、`apiVersion` は `"0.2.0"`）。** 境界と契約は[Kasaneの現行境界](../kasane/architecture.md)、Shiki は[仕様](../kasane/shiki-spec.md) §9。
 
 - `ref.setRect(tx, x0, y0, x1, y1)`・`ref.setClip(tx, x0, y0, x1, y1)`: 配列 `[x0, y0, x1, y1]` と同じ矩形を整数 4 つで渡す（丸め・int16 の範囲・辺の向きの検査は配列の形と同じ）。毎ターンの配列を作らずに済む。
 - `replace(build)`・`patch(build)` は**何も返さない**。結果は、`build` が投げた例外（`BUSY` など）と画面に出たものでわかる。ticket・`poll()`・`cancel()`・`features()`・`createScene()`・`inputScope()` は P5 で消した（呼ぶと存在しない関数の `TypeError`）。保存済みのプログラムが使う見込みが低いので、起動前に断る検査は足していない（旧 `ui.*` の `APP_LEGACY_UI` とは違う）。`build` に渡る `tx` は、アプリが手元に残さなければ次の `replace`/`patch` でも同じオブジェクトが使われる（呼び出しごとのゲストの確保をしない）。残した `tx` は、コールバックの外でも、後の別のコールバックの中でも `CLOSED`。`tx.modal` は prototype の getter。
-- `cache`・`grid`・`video`・`pixel` は、その名前を最初に読んだ時に作る（`pocket.kasane` を読んだだけでは作らない）。`grid.fold`・`grid.index`・`grid.view` が記号的な式の入口で、グローバルの `gridFold` と `pocket.kasane.shiki.grid`（`grid` の写し）は P5 で消した。`grid` の計画の表（ネイティブ 7,200 B）は、最初の `grid.register*` で確保し、アプリの終わりに返す。
+- `cache`・`grid`・`video`・`pixel` は、その名前を最初に読んだ時に作る（`kobako.kasane` を読んだだけでは作らない）。`grid.fold`・`grid.index`・`grid.view` が記号的な式の入口で、グローバルの `gridFold` と `kobako.kasane.shiki.grid`（`grid` の写し）は P5 で消した。`grid` の計画の表（ネイティブ 7,200 B）は、最初の `grid.register*` で確保し、アプリの終わりに返す。
 - `display.kasane` の `limits` に `textBytes`（1 つの画面の文字のバイト数、896）・`animations`（6）・`cacheCommands`（1 つのテンプレートのコマンド数、48）を足した。消した `features()` が返していた値のうち、コードが強制しているもの。
 
 ```ts
-pocket.ui.screen({background: number}): Screen;
+kobako.ui.screen({background: number}): Screen;
 type Screen = {
   text({x,y,width,height,text,font,color}: TextSpec): TextNode;
   rect({x,y,width,height,color,radius?}: RectSpec): Node;
@@ -347,14 +349,14 @@ type Node = {remove(): void};
 type TextNode = Node & {setText(text: string): void; setPosition(x: number,y: number): void};
 type ListNode = Node & {setItems(items: {id:string;label:string;detail?:string}[]):void;
                         select(id:string):void};
-pocket.ui.push(screen: Screen): void;
-pocket.ui.pop(): void;
-pocket.ui.toast(text: string, options?: {durationMs?: number}): void;
-pocket.input.onAction(fn: (e: ActionEvent) => void): Subscription;
-pocket.input.onKey(fn: (e: KeyEvent) => void): Subscription;
-pocket.input.held(action: string): boolean;
-pocket.input.keys: KeyState;                  // capability "input.keys"
-pocket.input.text.open(options: TextOptions): TextSession;
+kobako.ui.push(screen: Screen): void;
+kobako.ui.pop(): void;
+kobako.ui.toast(text: string, options?: {durationMs?: number}): void;
+kobako.input.onAction(fn: (e: ActionEvent) => void): Subscription;
+kobako.input.onKey(fn: (e: KeyEvent) => void): Subscription;
+kobako.input.held(action: string): boolean;
+kobako.input.keys: KeyState;                  // capability "input.keys"
+kobako.input.text.open(options: TextOptions): TextSession;
 type KeyState = {
   held(key: string): boolean;                 // いま押されている
   pressed(key: string): boolean;              // 前のターンから押された（1回以上）
@@ -367,9 +369,9 @@ type KeyState = {
 
 screenは非表示で生成、pushで有効化。popは画面を破棄し直前へ戻る。最後の画面からpopはapp.exitと同じ。最大画面深度を制限する。異なる画面のノードを混ぜた操作はINVALID_ARGUMENT。削除済みノード操作はCLOSED。表示・フォント確保のnative予算を先に確認してから変更を適用する。超過時は旧表示を維持する。
 
-**`pocket.input.keys`（実装済み、2026-09-29）は物理キーの状態。** ゲームの連続移動と同時押しのための面で、`onAction` が6アクションに縮約するものを、キー単位でそのまま返す。キー名は正規名が56個: 文字キーはキートップの素の文字（`"e"` `"1"` `";"` `` "`" ``、英字は小文字）、残りは `"del"` `"tab"` `"enter"` `"space"` `"fn"` `"shift"` `"ctrl"` `"opt"` `"alt"`。別名 `"up"` `"left"` `"down"` `"right"`（`;` `,` `.` `/`、Fnで矢印になるキー）と `"esc"` `"back"`（`` ` ``）も受け、名前はASCIIの大文字小文字を区別しない（`"E"` は `"e"`）。Shiftは独立したキーで、他のキーの名前を変えない。文字列でない引数と未知の名前は `INVALID_ARGUMENT`。`down()` は正規名だけを返す。
+**`kobako.input.keys`（実装済み、2026-09-29）は物理キーの状態。** ゲームの連続移動と同時押しのための面で、`onAction` が6アクションに縮約するものを、キー単位でそのまま返す。キー名は正規名が56個: 文字キーはキートップの素の文字（`"e"` `"1"` `";"` `` "`" ``、英字は小文字）、残りは `"del"` `"tab"` `"enter"` `"space"` `"fn"` `"shift"` `"ctrl"` `"opt"` `"alt"`。別名 `"up"` `"left"` `"down"` `"right"`（`;` `,` `.` `/`、Fnで矢印になるキー）と `"esc"` `"back"`（`` ` ``）も受け、名前はASCIIの大文字小文字を区別しない（`"E"` は `"e"`）。Shiftは独立したキーで、他のキーの名前を変えない。文字列でない引数と未知の名前は `INVALID_ARGUMENT`。`down()` は正規名だけを返す。
 
-状態は**ゲストのターンの頭で1回だけ読む**（`onAction` と同じポンプ）。1回の `frame()` の中で何度呼んでも同じ値で、`pressed`/`released` は前のターンの読み取りからの辺を数えたものなので、1フレームより短い押下も1回の押下と1回の解放として見える。**アプリが見ていない間に押されていたキーは、離されるまで見えない**: セッション開始（起動したEnter）、中断からの再開、ホストがキーボードを持っていたターン（テキスト欄、入力を止めるSYSTEM通知、ピッカー画面）の後。その間の押下・解放は辺として届かない。キーパッドのFIFOがあふれたら押されていたキーをすべて解放扱いにする（押しっぱなしで止まらず、離れたまま止まる側へ倒す）。`limits` は無い（同時押しの上限は実機で未測定で、コードも制限しない）。オーバーレイのセッションには `pocket.input` 自体が無い。実装と設計は[キー状態層](../platform/keystate.md)。
+状態は**ゲストのターンの頭で1回だけ読む**（`onAction` と同じポンプ）。1回の `frame()` の中で何度呼んでも同じ値で、`pressed`/`released` は前のターンの読み取りからの辺を数えたものなので、1フレームより短い押下も1回の押下と1回の解放として見える。**アプリが見ていない間に押されていたキーは、離されるまで見えない**: セッション開始（起動したEnter）、中断からの再開、ホストがキーボードを持っていたターン（テキスト欄、入力を止めるSYSTEM通知、ピッカー画面）の後。その間の押下・解放は辺として届かない。キーパッドのFIFOがあふれたら押されていたキーをすべて解放扱いにする（押しっぱなしで止まらず、離れたまま止まる側へ倒す）。`limits` は無い（同時押しの上限は実機で未測定で、コードも制限しない）。オーバーレイのセッションには `kobako.input` 自体が無い。実装と設計は[キー状態層](../platform/keystate.md)。
 
 ActionEventは `{action:"left"|"right"|"up"|"down"|"accept"|"back", phase:"press"|"repeat"|"release", timeMs:number}`。KeyEventは `{key:string, code:string, modifiers:{shift,ctrl,alt,fn,opt}, phase, timeMs}`で、文字の確定は含めない。key/codeの一覧は実装時にキーマップから公開する。onActionはIMEやホストに消費されなかった操作だけを受ける。back未購読時はホストがpopを行い、購読時はアプリが処理を担当する。ForceStopは購読不可で、アプリより先に処理する。
 
@@ -381,36 +383,36 @@ TextSessionは `{getText():string, close():void}`。ホスト所有の小さな�
 ## 7. 保存・ファイル・作品
 
 ```ts
-pocket.storage.get(key:string, options?:Options): Promise<{value:unknown;revision:number}|null>;
-pocket.storage.set(key:string, value:unknown, options?:Options & {ifRevision?:number}): Promise<{revision:number}>;
-pocket.storage.remove(key:string, options?:Options): Promise<void>;
+kobako.storage.get(key:string, options?:Options): Promise<{value:unknown;revision:number}|null>;
+kobako.storage.set(key:string, value:unknown, options?:Options & {ifRevision?:number}): Promise<{revision:number}>;
+kobako.storage.remove(key:string, options?:Options): Promise<void>;
 ```
 
 storageはアプリIDごとに分離した小さな状態保存。valueはJSON互換のnull/boolean/有限number/string/配列/plain object。関数、循環、undefined、BigIntは拒否。keyは1〜64 UTF-8 bytes。未作成はnull、保存したnullはvalue:nullのレコードで区別する。revision不一致はCONFLICT。成功応答は永続化完了後。旧値か新値のどちらかに復旧できる原子的置換を必須とする。終了hookに依存しない。
 
-ファイルシステムは **pocket.fs** に統一する。初稿のpocket.filesは採用しない。[ファイルシステムAPI詳細](filesystem-api.md)をファイル操作の正規仕様とし、本書の共通規則より具体的な契約・上限・既定値は詳細仕様を優先する。
+ファイルシステムは **kobako.fs** に統一する。初稿のkobako.filesは採用しない。[ファイルシステムAPI詳細](filesystem-api.md)をファイル操作の正規仕様とし、本書の共通規則より具体的な契約・上限・既定値は詳細仕様を優先する。
 
 fsは `app:/`（アプリの永続ファイル）、`assets:/`（同梱の読取専用素材）、`sd:/`（許可フォルダーを仮想ルートにしたSD）を扱う。stat/list/mkdir/remove/rename/copy、open/read/write/seek/flush/commit/close、readText/writeText、媒体状態と世代を定義する。listはページ取得、読書きはチャンク単位で、全量RAM読み込みを前提にしない。
 
 openはread/create/replace/append。create/replaceは一時版へ書き、commitで公開して自動close。空ファイルとNOT_FOUNDを区別する。appendは末尾追記で、電源断による部分書込を許容する用途に分ける。通常運転中のatomicReplaceと電源断復旧のcrashSafeReplaceを別featureとし、既定の安全な保存を黙って弱い保証へ落とさない。媒体抜去でハンドルを無効化し、再挿入でも復活させない。JSへformatや生Flash操作は提供しない。
 
-作品管理は別のホストサービス`pocket.workspace`として実装済み（`main/pocket/pocket_workspace.c`）。`pick({kind:"source"}) -> Promise<SourceRef|null>`、`read(ref) -> Promise<{text,revision}>`、`create({title,text}) -> Promise<SourceRef>`、`save(ref,text,{ifRevision}) -> Promise<{revision}>`、`run(ref,{returnState}) -> void`を持つ。SourceRefはホスト発行の不透明参照。教材はcreateでコピーし、既存作品へのsaveは明示的な選択とrevision確認を必要とする。バックエンドは現行srcstoreの16スロット（次段落）。
+作品管理は別のホストサービス`kobako.workspace`として実装済み（`main/kobako/kobako_workspace.c`）。`pick({kind:"source"}) -> Promise<SourceRef|null>`、`read(ref) -> Promise<{text,revision}>`、`create({title,text}) -> Promise<SourceRef>`、`save(ref,text,{ifRevision}) -> Promise<{revision}>`、`run(ref,{returnState}) -> void`を持つ。SourceRefはホスト発行の不透明参照。教材はcreateでコピーし、既存作品へのsaveは明示的な選択とrevision確認を必要とする。バックエンドは現行srcstoreの16スロット（次段落）。
 
-runは参照・能力・JSON互換returnState（最大1024bytes）を同期検証し、失敗時はthrow、受付後は新規入力を止めて現在のセッションを終了し対象へ遷移する。同時JS実行や、破棄したJSのPromiseを後から解決する仕組みは使わない。呼出元へ戻る場合は新セッションを作り、`pocket.app.launchContext()`が `{returnState, result:{reason,errorCode?}}` を返す。通常起動時は両方null。対象の起動失敗もホストが同じ復帰経路へ渡す。編集カーソル等はreturnState、作品本文は保存サービスが所有する。ネイティブPlaygroundの既存復帰はこのJSセッション規則とは別のホスト実装である。
+runは参照・能力・JSON互換returnState（最大1024bytes）を同期検証し、失敗時はthrow、受付後は新規入力を止めて現在のセッションを終了し対象へ遷移する。同時JS実行や、破棄したJSのPromiseを後から解決する仕組みは使わない。呼出元へ戻る場合は新セッションを作り、`kobako.app.launchContext()`が `{returnState, result:{reason,errorCode?}}` を返す。通常起動時は両方null。対象の起動失敗もホストが同じ復帰経路へ渡す。編集カーソル等はreturnState、作品本文は保存サービスが所有する。ネイティブPlaygroundの既存復帰はこのJSセッション規則とは別のホスト実装である。
 
 現行srcstoreの16スロット（0はユーザー、1以降は教材用）が`storage`/`workspace`のバックエンドで、公開APIにスロット番号は露出しない。保存失敗・空文書・破損復旧の既知課題は[docs/platform/backlog.md](../platform/backlog.md)を参照。
 
 ### ログと診断
 
-`pocket.log.write(level, text)`（同期、levelはdebug/info/warn/error）は上限付きリングへ記録し、console.log/warn/errorとprintも同じ経路へ接続する。1レコード256 UTF-8 bytes、32レコードを初期上限案とし、文字境界で切り詰めてtruncated=trueを記録する。連続出力には毎秒のbyte上限を設け、超過は破棄数で報告する。USBへ同期で全量出力してJSターンを止めない。
+`kobako.log.write(level, text)`（同期、levelはdebug/info/warn/error）は上限付きリングへ記録し、console.log/warn/errorとprintも同じ経路へ接続する。1レコード256 UTF-8 bytes、32レコードを初期上限案とし、文字境界で切り詰めてtruncated=trueを記録する。連続出力には毎秒のbyte上限を設け、超過は破棄数で報告する。USBへ同期で全量出力してJSターンを止めない。
 
-`pocket.log.read({afterSequence?,limit})`は同期で `{records:[{sequence,timeMs,level,text,truncated}],dropped}` を返し、1回最大8件、自己アプリのログだけを読める。`pocket.device.metrics()`はキャッシュ済みの `{heapFreeBytes,largestFreeBlockBytes,jsHeapBytes,fps,ioDropped}` を返す。取得不能値はnull。システム全体の例外・機器状態はネイティブ診断画面が担当し、任意アプリへ他アプリのログや秘密値を公開しない。
+`kobako.log.read({afterSequence?,limit})`は同期で `{records:[{sequence,timeMs,level,text,truncated}],dropped}` を返し、1回最大8件、自己アプリのログだけを読める。`kobako.device.metrics()`はキャッシュ済みの `{heapFreeBytes,largestFreeBlockBytes,jsHeapBytes,fps,ioDropped}` を返す。取得不能値はnull。システム全体の例外・機器状態はネイティブ診断画面が担当し、任意アプリへ他アプリのログや秘密値を公開しない。
 
 ### 7.1 `jsHeapBytes` が何でできているか（2026-09-09）
 
 **この数字はこの機体のメモリ議論のほぼ全部が参照するので、何を測っていて何を測っていないかを
 書いておく。** `jsHeapBytes` は `JS_ComputeMemoryUsage()` の `malloc_size` で、
-`app_report()` が出す `MEM ... js=` と `pocketjs_guest_stats()` の `heap_used` は
+`app_report()` が出す `MEM ... js=` と `kobako_guest_stats()` の `heap_used` は
 **同じ値**である（`guest.c:435`）。だから3者は直接比べてよい。
 
 **中身は「大きな固定の床」＋「ソース1バイトあたり約4.5バイト」である。**
@@ -455,15 +457,15 @@ QuickJSの帳簿の外にあるので、**実機が失うバイト数は `js=` �
 ## 8. センサー・時刻・電源
 
 ```ts
-pocket.sensors.imu.latest(): ImuSample|null;
-pocket.sensors.imu.watch({rateHz:number}, fn:(s:ImuSample)=>void): Subscription;
+kobako.sensors.imu.latest(): ImuSample|null;
+kobako.sensors.imu.watch({rateHz:number}, fn:(s:ImuSample)=>void): Subscription;
 type ImuSample = {timeMs:number; sequence:number; dropped:number;
   accel:{x:number;y:number;z:number}; gyro:{x:number;y:number;z:number}|null;
   tilt:{roll:number;pitch:number}|null};
-pocket.power.status(): {millivolts:number|null; percent:number|null;
+kobako.power.status(): {millivolts:number|null; percent:number|null;
                        charging:boolean|null; timeMs:number|null};
-pocket.power.onChange(fn:(state:ReturnType<typeof pocket.power.status>)=>void):Subscription;
-pocket.power.keepAwake(options:{reason:string;durationMs:number}): {close():void};
+kobako.power.onChange(fn:(state:ReturnType<typeof kobako.power.status>)=>void):Subscription;
+kobako.power.keepAwake(options:{reason:string;durationMs:number}): {close():void};
 ```
 
 IMUの公開座標は画面を正立させた本体基準でx右、y上、z画面手前。基板座標からの変換はHALが行う。加速度は重力を含む加速度計出力、m/s²。角速度はrad/s、右手系。rollはatan2(ay,az)、pitchはatan2(-ax,sqrt(ay²+az²))、rad、静止時の推定傾斜。運動中の絶対姿勢として保証しない。画面上向きで水平静止したときazが約+9.81となる向きを受け入れ試験で確認する。
@@ -477,8 +479,8 @@ BMI270は6軸なので磁気方位・絶対yawを返さない。実装してい�
 演出・ゲーム向けの共通乱数は、**起動ごとの変化を与えるseed取得**と、**seedから再現可能な列を作る軽量PRNG**を分ける。native共通APIと以下のJS公開面を実装し、flowerに導入した。音声・ゲームも独立したstreamを作って利用できる。既存の `Math.random()` の挙動は変更しない。
 
 ```ts
-pocket.random.seed(): number; // ホスト由来のuint32。暗号用途の品質は保証しない
-pocket.random.create(seed: number): RandomStream;
+kobako.random.seed(): number; // ホスト由来のuint32。暗号用途の品質は保証しない
+kobako.random.create(seed: number): RandomStream;
 type RandomStream = {
   nextUint32(): number; // 0以上4294967295以下の整数
   nextFloat(): number;  // 0以上1未満
@@ -486,7 +488,7 @@ type RandomStream = {
 ```
 
 - `seed()` はESP32-S3では `esp_random()` を利用する。値の一意性や毎回異なる値は保証しない。主な呼び出し時点はアプリ／シーンの初期化で、描画の各ピクセルや毎フレームのノイズ評価には使わない。
-- `create(seed)` は有限の整数 `0..4294967295` のみ受け付け、それ以外は `INVALID_ARGUMENT`。seed省略や暗黙の整数化は行わない。毎回変えたい場合は `create(pocket.random.seed())`、再現したい場合は保存したseedを渡す。
+- `create(seed)` は有限の整数 `0..4294967295` のみ受け付け、それ以外は `INVALID_ARGUMENT`。seed省略や暗黙の整数化は行わない。毎回変えたい場合は `create(kobako.random.seed())`、再現したい場合は保存したseedを渡す。
 - 各streamは独立した状態を持つ。flower、音声、ゲーム間で共有のグローバル乱数列を消費しない。同じseedと同じ呼び出し順なら、native／JSとも同じ結果を返す。他のstreamの生成・消費やWi-Fiの状態に左右されない。
 - 初版の列は `xorshift32-v1` とする。32bit符号なし状態 `x` に順に `x ^= x << 13`、`x ^= x >> 17`、`x ^= x << 5` を適用し、更新した値を返す。右シフトは論理シフト、各演算は32bitで切り詰める。seedが0なら初期状態を `0x6D2B79F5` に置き換えるため、この2つのseedは同じ列になる。アルゴリズムを黙って差し替えない。
 - `nextFloat()` は `nextUint32()` を1回消費し、その上位24bitを `16777216` で割る。nativeの単精度floatでもJSと同じ値を表せる。いずれの取得も生成後のメモリ確保・ハードウェアRNG呼び出し・I/O待ちを行わない。
@@ -498,29 +500,29 @@ flowerでは配置・ray誕生時の寿命・幅・演出選択などの離散�
 
 **エントロピーの扱い。** ESP32-S3のハードウェアRNGでも、真性乱数の条件はWi-Fi/BluetoothのRF有効時、または内部エントロピー源有効時などに限られる。このAPIは無線停止時も演出用seedとして利用するが、暗号鍵・認証token・暗号nonce用には公開しない。乱数のために無線やADCのエントロピー源を自動で有効化せず、既存のADC・音声・無線利用へ干渉させない。[ESP-IDF v6.0.1 ESP32-S3 RNG仕様](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32s3/api-reference/system/random.html)
 
-`random.seed` と `random.stream` をcapabilityとして登録し、S3版はsupported／availableともtrue。`pocket.random` は最初の参照で構築する。ハードウェアRNGを持たない移植先のseed供給方式は移植時に明示し、供給できない場合は `random.seed` をunsupportedとする。固定seedのstreamは独立して提供できる。
+`random.seed` と `random.stream` をcapabilityとして登録し、S3版はsupported／availableともtrue。`kobako.random` は最初の参照で構築する。ハードウェアRNGを持たない移植先のseed供給方式は移植時に明示し、供給できない場合は `random.seed` をunsupportedとする。固定seedのstreamは独立して提供できる。
 
-native公開面は `main/pocket/random_stream.h` の `pocket_random_seed()`、`pocket_random_init(&rng, seed)`、`pocket_random_next(&rng)`、`pocket_random_float(&rng)`。`pocket_random_t` は4バイトで、初期化後は呼び出し側が所有し、同じstreamを複数タスクから同時に更新しない。ホストの描画テスト用seed取得は固定値で、エントロピー供給を模擬しない。
+native公開面は `main/kobako/random_stream.h` の `kobako_random_seed()`、`kobako_random_init(&rng, seed)`、`kobako_random_next(&rng)`、`kobako_random_float(&rng)`。`kobako_random_t` は4バイトで、初期化後は呼び出し側が所有し、同じstreamを複数タスクから同時に更新しない。ホストの描画テスト用seed取得は固定値で、エントロピー供給を模擬しない。
 
 flowerは初回利用時にハードウェアseedを1回取得し、花の選択・背景配置・補助ray用に列を分ける。補助rayの抽選結果はフレームに保持し、各slotの32秒周期境界で不可視の間に更新する。主光・霧の滑らかな128秒周期は維持しつつ、補助rayの抽選列は128秒で巻き戻さない。背景時計を花の時計から分離し、花の時計が折り返しても補助rayが途中で跳ばないようにした。追加の背景状態は28バイト。画素ごとの乱数取得や追加描画パスはない。実機FPSの比較は未実施。
 
 ```js
-const rng = pocket.random.create(pocket.random.seed());
+const rng = kobako.random.create(kobako.random.seed());
 const chance = rng.nextFloat();
-const replay = pocket.random.create(12345); // 保存したseedなら同じ列
+const replay = kobako.random.create(12345); // 保存したseedなら同じ列
 ```
 
-検証: `tools/test_random.c` で既知の列・zero seed・float範囲と精度を確認。`tools/build_pocket_random_test.sh` は実QuickJSとASan／UBSanで入力検証・capability・30セッションの生成と解放を確認する。`tools/test_garden_random.c` は3周期の誕生更新が不可視の間に行われること、同一seedの再現性、128秒後に列が繰り返さないこと、描画による状態変更がないことを確認する。既存のgarden／装飾ray／背景遷移／flowerテストも通過した。実機での見た目・FPSと無線稼働条件別の確認は別途行う。
+検証: `tools/test_random.c` で既知の列・zero seed・float範囲と精度を確認。`tools/build_kobako_random_test.sh` は実QuickJSとASan／UBSanで入力検証・capability・30セッションの生成と解放を確認する。`tools/test_garden_random.c` は3周期の誕生更新が不可視の間に行われること、同一seedの再現性、128秒後に列が繰り返さないこと、描画による状態変更がないことを確認する。既存のgarden／装飾ray／背景遷移／flowerテストも通過した。実機での見た目・FPSと無線稼働条件別の確認は別途行う。
 
 ## 9. 音声・マイク・IR
 
 ```ts
-pocket.audio.cue(name:"move"|"accept"|"back"): boolean;
-pocket.audio.tone({frequencyHz:number,durationMs:number,gain:number}, options?:Options):Promise<void>;
-pocket.audio.capture.open({sampleRate:24000,channels:1}, options?:Options):Promise<Recorder>;
+kobako.audio.cue(name:"move"|"accept"|"back"): boolean;
+kobako.audio.tone({frequencyHz:number,durationMs:number,gain:number}, options?:Options):Promise<void>;
+kobako.audio.capture.open({sampleRate:24000,channels:1}, options?:Options):Promise<Recorder>;
 type Recorder = {read(maxFrames:number, options?:Options):Promise<Int16Array>;
                  close():void};
-pocket.io.ir.send({carrierHz:number,durationsUs:number[]}, options?:Options):Promise<void>;
+kobako.io.ir.send({carrierHz:number,durationsUs:number[]}, options?:Options):Promise<void>;
 ```
 
 cueは既存合成音の非同期受付で、ミュート・キュー満杯ならfalse。再生完了を意味しない。toneは単音の再生完了Promise、gainは0〜1でホストの音量上限を掛ける。操作音の有効設定とアプリ音量を別の設定として扱い、現在の単一設定からの移行を決めてから公開する。サンプルレート・DMA供給・発振はnativeで行い、JSでPCMを毎フレーム生成させない。
@@ -538,10 +540,10 @@ WAV（PCM16／IMA ADPCM）、Opus CELT（§9.1.2）、MP3（§9.1.3）を実装�
 圧縮形式については、旧版がここに「この機体では圧縮音声のデコードが成立しないことが計測で確定した」と書いていた。2026-09-08に測り直した結果、その根拠は4つとも成立しない。下の「MP3/Opus/FLACの再測定」に訂正と現在の値を置く。
 
 ```ts
-pocket.audio.player.open({source:string}, options?:Options):Promise<Player>;
-pocket.audio.player.current():Player|null;
-pocket.audio.outputSource(options?: {sampleMs?: number}): KasaneSourceCapability;
-pocket.audio.playbackSource(): KasaneSourceCapability;
+kobako.audio.player.open({source:string}, options?:Options):Promise<Player>;
+kobako.audio.player.current():Player|null;
+kobako.audio.outputSource(options?: {sampleMs?: number}): KasaneSourceCapability;
+kobako.audio.playbackSource(): KasaneSourceCapability;
 type Player = {
   info(): {codec:"wav/pcm16"|"wav/ima-adpcm"|"opus/celt"|"mp3";sampleRate:24000;channels:1;
            durationMs:number|null;seekable:boolean;source:string};
@@ -550,7 +552,7 @@ type Player = {
   seek(positionMs:number,options?:Options):Promise<void>;
   status(): {state:"ready"|"playing"|"paused"|"ended"|"error";
              positionMs:number;underruns:number};
-  onState(fn:(event:{state:string;error:PocketError|null})=>void):Subscription;
+  onState(fn:(event:{state:string;error:KobakoError|null})=>void):Subscription;
   close():void;
 };
 ```
@@ -572,7 +574,7 @@ type Player = {
 音声出力taskが実際に消費したframeに基づき再生開始時・終了時と観測周期で
 完全snapshotを更新する。`sampleMs`は32～1000の整数で、既定は1000。
 観測は128-frame出力blockの境界に量子化され、source初回作成後は周期を変更できない。
-`view.bind(pocket.audio.outputSource(), {elapsed: 0, frames: 1, starved: 2,
+`view.bind(kobako.audio.outputSource(), {elapsed: 0, frames: 1, starved: 2,
 streamId: 3})`のように型の合うslotへ束縛する。再生していない間は全field invalidと
 なり、slotはJSの最新base値へ戻る。sourceの生成・寿命はセッション単位で、
 音声taskはJSやKasane coreを直接呼ばない。数値fieldの既定は約1 Hzの観測値で、
@@ -583,7 +585,7 @@ revisionを飛ばした場合は最新の完全snapshotを再取得し、必要�
 source。field 0は状態（`u16`: ready=0、playing=1、paused=2、ended=3、
 error=4）、field 1は`positionMs`（`u32`）、field 2は`durationMs`（`u32`、
 不明なら0）、field 3は累積`underruns`（`u32`）、field 4は`playing`
-（`bool`）、field 5は現在の`playerId`（`u32`）。`view.bind(pocket.audio.playbackSource(), {state:0,
+（`bool`）、field 5は現在の`playerId`（`u32`）。`view.bind(kobako.audio.playbackSource(), {state:0,
 positionMs:1,durationMs:2,underruns:3,playing:4,playerId:5})`のように型の合うslotへ
 束縛できる。playerがない間は全field invalidとなり、JSの最新base値に戻る。
 sourceは購読要求時だけ確保され、UI ownerが状態・再生秒・duration・underrun
@@ -599,7 +601,7 @@ seekはWAVおよび非network Opusで実装している。クリップ全体はR
 （ブロック先頭の4バイトが予測器を再初期化する）ので、要求位置を含む
 ブロックの先頭に落ちる。MP3 seekは現行実装では未対応。
 
-underrunsはもう常に0ではない。生産者（`pocket_av_pump()`）がリングを満たし損ねた128フレームのブロック数を数える。1回は5.3msで、**落ちるのではなく伸びる**——無音が挿入されるだけで音は1サンプルも失われず、positionMsもその間止まる。pause/seekを跨いで累積する。
+underrunsはもう常に0ではない。生産者（`kobako_av_pump()`）がリングを満たし損ねた128フレームのブロック数を数える。1回は5.3msで、**落ちるのではなく伸びる**——無音が挿入されるだけで音は1サンプルも失われず、positionMsもその間止まる。pause/seekを跨いで累積する。
 
 出力は本体スピーカー。ミュート中のクリップは長さを保ったまま無音になる（toneと同じ規則）。ミキシングはしない。別アプリへ移っても続くBGMは、ホスト所有のメディアサービスとして別段階の設計。
 
@@ -609,13 +611,13 @@ underrunsはもう常に0ではない。生産者（`pocket_av_pump()`）がリ�
 
 なのでストリーミングにした。ソースを2,048バイトのスロット3本（**6,144バイト**）でリングに流し込み、音声タスクが順に取ってデコードする。リングは**再生を要求されている間だけ**存在し、openしただけのプレイヤーは0バイト。
 
-**責任の所在は2回動いた。これを記録しておく。** 最初は「コーデックの制約」と読まれ、その訂正が「**上限はバッファである**」だった。訂正は正しかったが、まだ足りなかった——もう一段測ると、`app:/` では**ファイルシステムのクォータ**である。`FS_MAX_FILE`＝24,576バイトは16セクタのクォータと「replaceは新旧2版を同時に保持する」要件から導かれた値で（`pocket_fs.c`）、旧 `PLAYER_MAX_BYTES` はそれに**合わせて**設定されていた。**2つの数が等しいのは偶然ではなく導出である。** 片方を動かして長いクリップを期待した人は、何も変わらない理由を説明できない。各段が、次を測るまでは答えに見えた。もう1段あると思っておくこと。
+**責任の所在は2回動いた。これを記録しておく。** 最初は「コーデックの制約」と読まれ、その訂正が「**上限はバッファである**」だった。訂正は正しかったが、まだ足りなかった——もう一段測ると、`app:/` では**ファイルシステムのクォータ**である。`FS_MAX_FILE`＝24,576バイトは16セクタのクォータと「replaceは新旧2版を同時に保持する」要件から導かれた値で（`kobako_fs.c`）、旧 `PLAYER_MAX_BYTES` はそれに**合わせて**設定されていた。**2つの数が等しいのは偶然ではなく導出である。** 片方を動かして長いクリップを期待した人は、何も変わらない理由を説明できない。各段が、次を測るまでは答えに見えた。もう1段あると思っておくこと。
 
 **それでも今日の時点で長さは本当に動く。`sd:` が実装されたからである。** カード上のファイルにこのクォータは掛からない。そして旧実装ではカードのクリップは**そもそも鳴らせなかった**——ファイル全体をRAMに載せる必要があり、アプリ実行中の最大連続空きは73,728バイトだから。**ストリーミングは、sd: 上の長いクリップを「短くする」のではなく「再生可能にする」機能である。** `assets:/`（フラッシュにマップされたファームウェア同梱データ）にも上限は無い。動かないのは `app:/` だけで、そこは最初から24,576バイトだった。
 
 メモリ側も動く：再生中のヒープ確保が24,576→6,144バイト、openしただけなら0。そして**このプレイヤーはもうファイル長に意見を持たない**——より大きなボリュームが来ても、ここを書き直す必要はもう無い。
 
-- **生産者はJS/uiタスク**（`pocket_av_pump()` → `player_feed()`）。`pocket_fs.c` の読み出しはこのタスクのものだから（ストアの索引もブロック走査もスレッド安全ではない）。1回の補充は最大2,048バイトの `esp_partition_read` 1回で、PCM16の48,000バイト/秒に対して毎秒約23回、フレームあたり多くて1スロット。**実測した（2026-09-08）。** `apps/streamplay` が同一バイナリ上で「60フレームのidle」と「1回の再生」を計り、それを繰り返す。連続13サイクル：
+- **生産者はJS/uiタスク**（`kobako_av_pump()` → `player_feed()`）。`kobako_fs.c` の読み出しはこのタスクのものだから（ストアの索引もブロック走査もスレッド安全ではない）。1回の補充は最大2,048バイトの `esp_partition_read` 1回で、PCM16の48,000バイト/秒に対して毎秒約23回、フレームあたり多くて1スロット。**実測した（2026-09-08）。** `apps/streamplay` が同一バイナリ上で「60フレームのidle」と「1回の再生」を計り、それを繰り返す。連続13サイクル：
 
 ```
 underruns=0   deltaTenthMs -2..-4   worstFrameMs 35..36
@@ -629,7 +631,7 @@ idleTenthMs 337..338                playTenthMs 334..335
 
 **この設計が届かない先があり、それは `sd:` である。** 数字は `sd-surface` のもので、**すべて算術であって実測ではない**——カード上のストリームを実機で計った者はまだいない。
 
-- バスは400 kHzなので、2,048バイトのスロット1本は**それを要求したフレームの中で**約41msのバス時間になる。`pocket_fs_read_at()` がカードで毎回行うディレクトリ走査とopenはこれに加算される。33msのフレームはこれを収容できず、**終わらないフレームは止まった画面**である——`sound_capture_probe()` を別タスクへ追い出したのと同じ失敗。
+- バスは400 kHzなので、2,048バイトのスロット1本は**それを要求したフレームの中で**約41msのバス時間になる。`kobako_fs_read_at()` がカードで毎回行うディレクトリ走査とopenはこれに加算される。33msのフレームはこれを収容できず、**終わらないフレームは止まった画面**である——`sound_capture_probe()` を別タスクへ追い出したのと同じ失敗。
 - 24kHz・1ch・PCM16は48,000バイト/秒＝384 kbit/sで、400 kbit/sのバスに対して**誰が供給してもリアルタイムには成立しない**。ADPCMの12,000バイト/秒は帯域には収まるが、1回の補充がフレームを止める長さは変わらない。
 
 したがってこのフィーダーが served するのは `assets:/` と `app:/` で、**カード上のソースは綺麗に失敗せず、途切れながらフレームを引きずる**。出口は2つあって別々の作業である：SDのクロックを上げる（`sd_media.c` はそれを編集ではなく測定だと書いている。MISOは配線されているのでソフトウェアで確かめられる）か、供給を優先度4の専用タスクへ移す（fs面をスレッド安全にするのが先で、だからここではやっていない）。**どちらも算術だけで着手する価値は無い。まずカードの読みを実測すること。**
@@ -675,7 +677,7 @@ idleTenthMs 337..338                playTenthMs 334..335
 
 `limits` の変更：`streaming=1`、`ringBytes=6144`、`maxBlockBytes=2048`、`underrunPolicy="stretch"`、`maxStarveMs=2730` を追加し、**`maxSourceBytes` を削除した**。削除が報告である——この面はもうソースの大きさを何も強制していないので、強制していない数を publish するのは限界を持たないより悪い。ソースの上限はボリュームのもので、`fs.volume.app` の `maxFileBytes` が最初からそれを言っている。
 
-費用（実測、object単位、`xtensa-esp32s3-elf-size`）：静的DIRAM **+44バイト**（`pocket_av.c.obj` の `.bss` 150→190、`sound.c.obj` の `.bss` 60→64、`.data` は両方不変）。Flash code +1,049バイト。**永続DRAMで長さを買っていない**ことがこの数字の要点である。
+費用（実測、object単位、`xtensa-esp32s3-elf-size`）：静的DIRAM **+44バイト**（`kobako_av.c.obj` の `.bss` 150→190、`sound.c.obj` の `.bss` 60→64、`.data` は両方不変）。Flash code +1,049バイト。**永続DRAMで長さを買っていない**ことがこの数字の要点である。
 
 **鳴らせるものが在庫に無かったので、置いた。** `assets:/chime.wav`——24kHz・1ch・PCM16、**150,554バイト・3.135秒**。旧上限24,576バイトの6.1倍で、旧実装なら `open` が `LIMIT_EXCEEDED` で断っていた大きさである。ADPCMにしない理由は2つあって、圧縮すると約37KBに縮んで「上限を超えている」ことの分かりやすさが落ちること、そしてPCM16の48,000バイト/秒が生産者にとって**最悪ケース**でありテストすべきはそちらだからである。素材がクリック音なのも意図で、**アンダーランの穴はクリック列では耳に明らかだが和音では見逃す**。生成は `tools/make_wav_asset.py`（44.1kHzステレオから、11kHzのwindowed-sinc低域通過を掛けてから24kHzへ。掛けずに間引くと12kHz以上が可聴帯へ折り返す）。
 
@@ -713,9 +715,9 @@ Flash実測：app 2,008,416→**2,159,152**バイト（+150,736）、`tools/chec
 
 24,576バイトという上限は `app:/` の1ファイル上限そのものである。旧版の8,192は `app:/` ではなく当時の最大連続空き23,552から来ていた。その値が73,728になったので、24,576対73,728は8,192が23,552に対して持っていた余裕とほぼ同じ比になる。断片化していないときだけ通る機能は人の前で落ちる機能になる——上限の根拠をヒープ側に置く規則は変えていない。
 
-実装のコスト（`tools/memlog.py`、対 7c67504）：静的DIRAM **+160バイト**（`pocket_av.c.obj +133`、`sound.c.obj +12`、残りはalignment）、Flash code +4,588バイト。再生中はクリップ1つ分のmalloc（最大24,576バイト）だけが増える。デコードは既存の音声タスクとI²Sをそのまま使い、リングを持たない。IMA ADPCMの表は194バイトのFlash、状態は音声タスクのstack上に20バイト。
+実装のコスト（`tools/memlog.py`、対 7c67504）：静的DIRAM **+160バイト**（`kobako_av.c.obj +133`、`sound.c.obj +12`、残りはalignment）、Flash code +4,588バイト。再生中はクリップ1つ分のmalloc（最大24,576バイト）だけが増える。デコードは既存の音声タスクとI²Sをそのまま使い、リングを持たない。IMA ADPCMの表は194バイトのFlash、状態は音声タスクのstack上に20バイト。
 
-デコーダーの検証は `python tools/test_ima.py`（実機不要）。`main/hal/ima_adpcm.h` をホストのgccで同じ行のままコンパイルし、独立に書いた参照デコーダーとサンプル単位で照合し、正弦波の往復SNR（実測32.3dB）を測り、「ブロック単体のデコードが通しのデコードと一致する」——seekとresumeが立っている前提——を確認する。WAVのチャンク走査は `main/pocket/wav_scan.h` にあり、`tools/test_wav_scan.c`（WSL、ASan/UBSan）が `JUNK` チャンク・4KB先の `data`・奇数長のパディング・途中で切れたファイル・嘘のチャンク長・レートやチャンネル数の不一致を、メモリ上のファイルで検査する。**音そのものの正しさはソフトウェアだけでは確認できない**（`board_capture` はフレームバッファしか見えず、ES8311に何が届いたかは見えない）ので、実機での試聴は物理確認として別に依頼する。
+デコーダーの検証は `python tools/test_ima.py`（実機不要）。`main/hal/ima_adpcm.h` をホストのgccで同じ行のままコンパイルし、独立に書いた参照デコーダーとサンプル単位で照合し、正弦波の往復SNR（実測32.3dB）を測り、「ブロック単体のデコードが通しのデコードと一致する」——seekとresumeが立っている前提——を確認する。WAVのチャンク走査は `main/kobako/wav_scan.h` にあり、`tools/test_wav_scan.c`（WSL、ASan/UBSan）が `JUNK` チャンク・4KB先の `data`・奇数長のパディング・途中で切れたファイル・嘘のチャンク長・レートやチャンネル数の不一致を、メモリ上のファイルで検査する。**音そのものの正しさはソフトウェアだけでは確認できない**（`board_capture` はフレームバッファしか見えず、ES8311に何が届いたかは見えない）ので、実機での試聴は物理確認として別に依頼する。
 
 **未完了として残っているもの（引き継ぎ用）。**
 
@@ -729,7 +731,7 @@ Flash実測：app 2,008,416→**2,159,152**バイト（+150,736）、`tools/chec
 
 `limits.codecs` に **`opus/celt`** が増えた。名前が `opus` でないことが仕様である——下の「断るもの」を読むこと。
 
-**形は何も変わっていない。** `pocket.audio.player.open({source:'assets:/chime.pok'})` が
+**形は何も変わっていない。** `kobako.audio.player.open({source:'assets:/chime.pok'})` が
 WAVと同じ手順で開き、同じ `info/play/pause/seek/status/onState/close` を返し、同じ6,144
 バイトのリングへ流れる。**並行の経路を作っていない**——復号器が吐くのはPCM16なので、
 `main/hal/sound.c` の音声タスクは自分がコーデックの下流にいることを知らないし、
@@ -745,11 +747,11 @@ WAVと同じ手順で開き、同じ `info/play/pause/seek/status/onState/close`
 
 | タスク | 優先度 | やること |
 | --- | --- | --- |
-| ui / JS（`pocket_av_pump`） | 5 | ファイルを読み、**圧縮パケット**のリングへ published |
+| ui / JS（`kobako_av_pump`） | 5 | ファイルを読み、**圧縮パケット**のリングへ published |
 | `opusdec`（再生中だけ） | 6 | `opus_decode`、PCM16を既存のリングへ published |
 | `sfx`（既存） | 7 | 既存の `SOUND_STREAM_PCM16` の道 |
 
-**コンテナはOggではない。** 独自の `POK1`（`main/pocket/opus_feed.h` に配置図、
+**コンテナはOggではない。** 独自の `POK1`（`main/kobako/opus_feed.h` に配置図、
 `tools/make_opus_asset.c` が書く）で、ヘッダ＋索引＋`[u16 length][payload]` の並び。
 Oggを採らない理由は**この機体での費用**である: 4KBごとに27バイトのページヘッダとlacing表と
 CRC32が付き、**すでにこのファームで最も切迫しているタスクの中で**全バイトのCRCを回すことに
@@ -775,7 +777,7 @@ CELT・WB・20ms・monoについての値で、SILKやhybridに対しては**上
 | 項目 | 値 | 区分 |
 | --- | --- | --- |
 | libopusの静的DIRAM | **0バイト** | 実測（`idf.py size-components`、`libopus.a` の DIRAM/.bss/.data が全部0） |
-| glueの静的DIRAM | **+100バイト** | 実測（`pocket_av.c.obj` の `.bss` 190→266、`opus_feed.c.obj` +24） |
+| glueの静的DIRAM | **+100バイト** | 実測（`kobako_av.c.obj` の `.bss` 190→266、`opus_feed.c.obj` +24） |
 | libopusのFlash | **75,362バイト**（code 54,589＋rodata 20,773） | 実測。デコーダー限定のソース表で、ハーネスの全globより約4.2KB少ない |
 | 復号状態（heap、再生中だけ） | 18,436バイト、1ブロック | 実測（2026-09-07） |
 | 復号タスクのstack（heap、再生中だけ） | 14,336バイト | 実測10,420＋3,916 |
@@ -873,7 +875,7 @@ prime できない。**
 
 ### 9.1.3 MP3復号（実装、2026-09-09）
 
-`pocket.audio.player.open({source:"assets:/<name>.mp3"})` で通常のMP3を開ける
+`kobako.audio.player.open({source:"assets:/<name>.mp3"})` で通常のMP3を開ける
 （検証に使った `test-tone.mp3` 等の固定資産は apps/mp3play ごと削除済み。
 `docs/api/common-api.md` 9.1.3 の数字はその資産で測ったものとして残す）。
 `app:` と、既存のフォルダー権限を得た `sd:` も同じファイル読み出しを使う。
@@ -911,7 +913,7 @@ Apps末尾の **MP3 PLAYBACK** は3種類の合成音源を巡回し、交互に
 `audio.capture` を実装した。形は上の型のままで、変わったのは**サンプルレートだけ**。
 
 ```ts
-pocket.audio.capture.open({sampleRate:24000,channels:1}, options?):Promise<Recorder>;
+kobako.audio.capture.open({sampleRate:24000,channels:1}, options?):Promise<Recorder>;
 type Recorder = {read(maxFrames:number, options?:Options):Promise<Int16Array>; close():void};
 ```
 
@@ -948,23 +950,23 @@ analogはバケットごとに動く——声はそうなる。pdmは300msのあ
 
 **ただしレベルは条件付きの測定であって機体の性質ではない。** 同じレジスタで、5行のスイープ時は最大peak 8,395（フルスケールの26%）、その数分後の `miccheck` では 22,539 / 30,528 / 31,779（69% / 93% / 97%）だった。違いは話す距離と声量だけで、4倍動く。普通の声での3録音は peak 17,816 / 22,559 / 27,825（54/69/85%）で `clip=0`。**正確に言えば「普通に話す分には歪まない、声を張れば歪む」**で、「歪まない」ではない。単独のpeak値から「余裕がある」と結論してはいけない——それはこの一日に繰り返した失敗そのもの。動かす必要が出たら**下げる**方に倒す: このゲインは変換の後なので、下げて失うのはint16のレンジだけでS/Nは失わないが、上げると歪みで音そのものが壊れる。診断はUSBに `9` を送って動かす。
 
-ホストで確かめられる範囲——読み出しの時系列連続性、overflowが閉じること、close後がCLOSED、セッション終了でHALが戻ること、再生との排他、インジケータの点灯範囲——は `tools/test_pocket_capture.c` が実物のQuickJSと実物の `pocket_capture.c` / `pocket_api.c` をASan/UBSanで回して見る（`bash tools/build_pocket_capture_test.sh`）。マイクは計数ランプのfakeなので、「連続している」は判断ではなく引き算になる。
+ホストで確かめられる範囲——読み出しの時系列連続性、overflowが閉じること、close後がCLOSED、セッション終了でHALが戻ること、再生との排他、インジケータの点灯範囲——は `tools/test_kobako_capture.c` が実物のQuickJSと実物の `kobako_capture.c` / `kobako_api.c` をASan/UBSanで回して見る（`bash tools/build_kobako_capture_test.sh`）。マイクは計数ランプのfakeなので、「連続している」は判断ではなく引き算になる。
 
 全二重（録音しながら再生）は別capabilityで、DMAをもう1組と実測が要る。ここでは実装しない。
 
 ## 10. 外部I/Oと共有バス
 
 ```ts
-pocket.io.ports(): PortInfo[];
-pocket.io.i2c.open({port:string,address:number,hz:100000|400000}, options?:Options):Promise<I2cDevice>;
+kobako.io.ports(): PortInfo[];
+kobako.io.i2c.open({port:string,address:number,hz:100000|400000}, options?:Options):Promise<I2cDevice>;
 type I2cDevice = {transfer({write,readBytes}:{write:Uint8Array;readBytes:number},options?:Options):Promise<Uint8Array>;
                   close():void};
-pocket.io.spi.open({port:string,mode:0|1|2|3,hz:number},options?:Options):Promise<SpiDevice>;
+kobako.io.spi.open({port:string,mode:0|1|2|3,hz:number},options?:Options):Promise<SpiDevice>;
 type SpiDevice = {transfer(tx:Uint8Array,options?:Options):Promise<Uint8Array>;close():void};
-pocket.io.uart.open({port:string,baud:number},options?:Options):Promise<SerialPort>;
+kobako.io.uart.open({port:string,baud:number},options?:Options):Promise<SerialPort>;
 type SerialPort = {read(maxBytes:number,options?:Options):Promise<Uint8Array>;
                    write(data:Uint8Array,options?:Options):Promise<number>;close():void};
-pocket.io.gpio.open({port:string,mode:"input"|"output",initial?:0|1},options?:Options):Promise<Pin>;
+kobako.io.gpio.open({port:string,mode:"input"|"output",initial?:0|1},options?:Options):Promise<Pin>;
 type Pin = {read():0|1;write(value:0|1):void;
             watch({edge:"rising"|"falling"|"both",debounceMs:number},fn:(e:{value:0|1;timeMs:number;dropped:number})=>void):Subscription;
             close():void};
@@ -981,12 +983,12 @@ EXT SPIとSDはバス共有なので、CS・mode・clockをトランザクショ
 ## 11. Wi-FiとHTTP
 
 ```ts
-pocket.net.wifi.acquire({profileId:string}, options?:Options):Promise<WifiLease>;
-pocket.net.wifi.scan(options?:Options):Promise<{networks:{ssid:string;rssiDbm:number;secure:boolean}[];truncated:boolean}>;
+kobako.net.wifi.acquire({profileId:string}, options?:Options):Promise<WifiLease>;
+kobako.net.wifi.scan(options?:Options):Promise<{networks:{ssid:string;rssiDbm:number;secure:boolean}[];truncated:boolean}>;
 type WifiLease = {status():{state:"connecting"|"connected"|"disconnected";address:string|null};
                   onChange(fn:(state:ReturnType<WifiLease["status"]>)=>void):Subscription;
                   close():void};
-pocket.net.http.request({wifi,url,method,headers?,body?}:HttpRequest, options?:Options):Promise<HttpResponse>;
+kobako.net.http.request({wifi,url,method,headers?,body?}:HttpRequest, options?:Options):Promise<HttpResponse>;
 type HttpResponse = {status:number;headers:Record<string,string>;
                      read(maxBytes:number,options?:Options):Promise<Uint8Array|null>;
                      close():void};
@@ -1003,8 +1005,8 @@ Wi-Fi切断で保留HTTPをDISCONNECTEDにし、処理済みか不明な更新�
 ## 12. BLE
 
 ```ts
-pocket.ble.scan({serviceUuids?:string[],durationMs:number}, options?:Options):Promise<{devices:BleDeviceInfo[];truncated:boolean}>;
-pocket.ble.connect(deviceId:string, options?:Options):Promise<BleConnection>;
+kobako.ble.scan({serviceUuids?:string[],durationMs:number}, options?:Options):Promise<{devices:BleDeviceInfo[];truncated:boolean}>;
+kobako.ble.connect(deviceId:string, options?:Options):Promise<BleConnection>;
 type BleConnection = {
   discover(options?:Options):Promise<{services:BleServiceInfo[];truncated:boolean}>;
   read(characteristicId:string,options?:Options):Promise<Uint8Array>;
@@ -1021,12 +1023,12 @@ scanは最大10秒・16機器、discoverは最大8サービス・32 characterist
 
 pairing/bondはホスト画面と設定が所有する。接続ごとの暗号化要求は登録ポリシーで決め、要件を満たせない場合はAUTH_FAILED。無人の自動ペアリングを暗黙に開始しない。
 
-Peripheralは次段階。`pocket.ble.peripheral.open({name,services}, options) -> Promise<Peripheral>`を予定する。静的GATT定義、ホスト側の読取キャッシュ、write受信イベント、notify、closeを備える。BLE stackの同期read callbackでJSを待たない。BLE HIDキーボード、Mesh、長距離PHY、Central/Peripheral同時運用は別機能として検証する。
+Peripheralは次段階。`kobako.ble.peripheral.open({name,services}, options) -> Promise<Peripheral>`を予定する。静的GATT定義、ホスト側の読取キャッシュ、write受信イベント、notify、closeを備える。BLE stackの同期read callbackでJSを待たない。BLE HIDキーボード、Mesh、長距離PHY、Central/Peripheral同時運用は別機能として検証する。
 
 ## 13. USB・PC bridge
 
 ```ts
-pocket.bridge.connect({transport:"usb"|"wifi",peerId:string},options?:Options):Promise<Bridge>;
+kobako.bridge.connect({transport:"usb"|"wifi",peerId:string},options?:Options):Promise<Bridge>;
 type Bridge = {
   request(method:string,payload:unknown,options?:Options):Promise<unknown>;
   onEvent(topic:string,fn:(event:{sequence:number;payload:unknown})=>void):Subscription;
@@ -1073,7 +1075,7 @@ ESP32-S3はWi-FiとBLEでRF資源を共有し、IDFの共存機構にも組合�
 ## 15. アプリ例（実行可能。app/time/log/storage/ui/inputは実装済み）
 
 ```js
-const p = pocket;
+const p = kobako;
 let count = 0;
 let output;
 let input;
@@ -1113,7 +1115,7 @@ p.app.start({
 | A: 共通土台 | error、capabilities、session、cancel、lifecycle、input action、基本UI、time、cue、random | 実装済み |
 | B: 作る・残す | storage、TextSession、workspace、ログ、動的日本語表示 | 実装済み |
 | C: 本体を使う | IMU、電池、tone、IR、SD、外部I/O、録音 | 実装済み |
-| D: PC接続 | USB bridge | 実装済み（`pocket_bridge.c`、[apps/bridge](../../apps/bridge/README.md)） |
+| D: PC接続 | USB bridge | 実装済み（`kobako_bridge.c`、[apps/bridge](../../apps/bridge/README.md)） |
 | E: 無線 | Wi-Fi STA＋HTTP | 実装済み。BLE Centralは未実装（12節） |
 | F: 拡張 | BLE Peripheral/HID、無線共存、AP・WebSocket・TCP/UDP・ESP-NOW | 未着手。[docs/api/backlog.md](backlog.md) |
 
@@ -1143,7 +1145,7 @@ BLEスタック候補と共存の制約はIDF v6.0.1を基準に確認した。N
 ## 19. HoneとAyatsuriのフレームワークAPI
 
 この節では、統合後のAPIを呼び出し言語に依存しない形で定義する。C実装の対応範囲は19.5節に示す。
-既存のJS実装は `pocket.ayatsuri` とShikiにある。[既存の実装契約](../ayatsuri/character-lifecycle.md) · [Shiki API](../kasane/shiki-spec.md#9-js-api)
+既存のJS実装は `kobako.ayatsuri` とShikiにある。[既存の実装契約](../ayatsuri/character-lifecycle.md) · [Shiki API](../kasane/shiki-spec.md#9-js-api)
 
 Ayatsuriは、モデルと明示的な入力から姿勢や描画対象を求める。Honeは描画対象からフレームを作る。
 評価結果には、形状・座標系・材質の意味、参照範囲、有効期間を持たせる。利用者は評価結果だけを使える。

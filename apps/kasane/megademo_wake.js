@@ -1,4 +1,4 @@
-// MEGADEMO chunk: WAKE, the prologue, drawn with pocket.shapes. Tama
+// MEGADEMO chunk: WAKE, the prologue, drawn with kobako.shapes. Tama
 // peers in, backlit, in close-up (only eyes, ears, whiskers and part of
 // the outline show): the backdrop is the silhouette, the lit room the
 // fill. The head is 3D points on an ellipsoid seen in perspective, so a
@@ -27,7 +27,7 @@ const EAR = [-46, -22, 8, -52, -48, 2, -44, -74, -4, -25, -60, 8, -14, -40, 18],
 // points), whiskers 74 (2 each), eyes 86 (30 each: iris 12, pupil 12, lid
 // 4, highlight 2). Act I and TWIST reuse the arrays. QQ: this frame's
 // pose; EP: an ear's 5 points.
-const SH = pocket.shapes, WM = new Float32Array(3 * 146), WP = new Float32Array(2 * 146), WQ = new Float32Array(12);
+const SH = kobako.shapes, WM = new Float32Array(3 * 146), WP = new Float32Array(2 * 146), WQ = new Float32Array(12);
 const QQ = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], EP = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 const W_EAR = 28, W_CORE = 58, W_WH = 74, W_EYE = 86;
 // Colours: the lit room 0x218b, the glowing iris 0xbf9f, the magenta inner

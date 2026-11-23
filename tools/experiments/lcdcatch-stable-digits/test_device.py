@@ -14,10 +14,10 @@ int main(int argc,char **argv){''')
  hsrc=common.once(hsrc,'    printf("session 1: GAME A, pause, game over, GAME B, Back\\n");','''    if(argc>1){open_session();while(!lcd_diag_finished()&&frames_run<210)frame();CHECK(lcd_diag_valid(),"finite exact game composition");lcd_diag_finish(lcd_diag_valid()?"complete":"input_mismatch");FILE *p=fopen(getenv("LCD7_PANEL"),"wb");fwrite(panel,1,sizeof panel,p);fclose(p);close_session();return fails||exceptions||bad_present||!lcd_diag_valid();}
     printf("session 1: GAME A, pause, game over, GAME B, Back\\n");''')
  h=out/'device.c';h.write_text(hsrc)
- native=out/'pocket_input.c';native.write_text(prepare_device.input_source((R/'main/pocket/pocket_input.c').read_text()))
+ native=out/'kobako_input.c';native.write_text(prepare_device.input_source((R/'main/kobako/kobako_input.c').read_text()))
  build=out/'build';build.mkdir(parents=True,exist_ok=True)
  (build/'esp_heap_caps.h').write_text('#pragma once\n#include <stddef.h>\n#define MALLOC_CAP_INTERNAL 0\n#define MALLOC_CAP_8BIT 0\nstatic inline size_t heap_caps_get_free_size(unsigned flags){(void)flags;return 0;}\n')
- common.game.EXTRA=[str(native) if p=='main/pocket/pocket_input.c' else p for p in common.game.EXTRA]
+ common.game.EXTRA=[str(native) if p=='main/kobako/kobako_input.c' else p for p in common.game.EXTRA]
  binary=common.build(build,h);logs={};panels={}
  for mode,app in apps.items():
   app.write_text(app.read_text()+'\n'+(prepare_device.TEMPLATE/'workload.js').read_text());dest=out/(mode+'.panel')

@@ -1,6 +1,6 @@
 # DERBY WATCH: `ser()` を C に写す（S1b = N2 + N12）
 
-> **2026-11-13 の追記:** この倍精度の C は、整数の `ser()`（[derby-ser-division.md](derby-ser-division.md) §10）の A/B の B 側（`pocket.derby.mode(1)`、up キー）と範囲外の戻り道として残っている。既定の経路では「JS とビット単位で一致」の契約は、JS を幾何の参照にした許容差の照合に変わった（倍精度の経路の呼び出しは今もビット単位で照合する）。
+> **2026-11-13 の追記:** この倍精度の C は、整数の `ser()`（[derby-ser-division.md](derby-ser-division.md) §10）の A/B の B 側（`kobako.derby.mode(1)`、up キー）と範囲外の戻り道として残っている。既定の経路では「JS とビット単位で一致」の契約は、JS を幾何の参照にした許容差の照合に変わった（倍精度の経路の呼び出しは今もビット単位で照合する）。
 
 2026-10-01、ブランチ `vm/ser-native`（`vm/main` fac3552 から）。[derby-camera-history.md](derby-camera-history.md) のシナリオ S1b を実装する。目標は楕円コーナーの首振り WIDE 2 を 20 fps 以上にすること（今 実測 16.1 fps、MID）。**画素と結果は変えない。**
 
@@ -8,7 +8,7 @@
 
 ## 1. 境目（JS に残す分 / native に下ろす分）
 
-| | JS に残す | native に下ろす（`main/apps/derby/pocket_derby.c`） |
+| | JS に残す | native に下ろす（`main/apps/derby/kobako_derby.c`） |
 | --- | --- | --- |
 | コース | `OC`・`CH`・`pose()`（`wide`・`shot`・距離標・走者・大型画面が使う） | 同じ表の写し（レースの最初に 1 回渡す）と、その上の `pose()` の C |
 | 1 フレーム | カメラ `pc` の決定（`shot()`）、`zf`・`L` の決定、系列の呼び出し 5 回、大型画面・距離標・走者・HUD | 弦の端のカメラ座標 `VE` と視野に入る弦 `VC`（今の `pan()` の 82〜88 行） |
@@ -19,34 +19,34 @@
 
 ## 2. JS から見える入口
 
-DERBY のセッションにだけ注入する面（`pocket.pet` と同じ作り。[common-api.md](../api/common-api.md) §2「アプリ固有の面は共通 API に含めない」）。名前空間 `pocket.derby` は最初に読まれたときに作る（`pocket_api_lazy()`）。
+DERBY のセッションにだけ注入する面（`kobako.pet` と同じ作り。[common-api.md](../api/common-api.md) §2「アプリ固有の面は共通 API に含めない」）。名前空間 `kobako.derby` は最初に読まれたときに作る（`kobako_api_lazy()`）。
 
 ```js
 // レースのコースが決まったとき（enter('pad')）に 1 回。
 // ends: 弦の端の g（CH）。sections: 区間の表（OC）、直線は 0（pose は [g, w, 1, 0]）。dnr: DNR。
-pocket.derby.course(ends, sections, dnr)
+kobako.derby.course(ends, sections, dnr)
 // 首振りのフレームごとに 1 回、系列の前に。pc = [x, z, 向き x, 向き z, f, 先頭までの距離]。
 // t: シーンのフレーム数（L = 0 の系列だけが使う）。hl・crowd: スタンドの段と観客の plan のハンドル
 // （未登録は偽、描かない）。hlColor: KN[tier][0]、cells: KN[3][5]。
-pocket.derby.view(pc, zf, t, hl, crowd, hlColor, cells)
+kobako.derby.view(pc, zf, t, hl, crowd, hlColor, cells)
 // 系列 1 本 = 今の ser(n, w, s, g0, L, zf, a, b)。h: plan のハンドル（偽なら本体の draw を飛ばす。
 // hl・crowd は描く。今の dr() と同じ）。b を省くと芝（t0・t1）の式。
-pocket.derby.ser(h, w, s, g0, L, a, b)
+kobako.derby.ser(h, w, s, g0, L, a, b)
 ```
 
 - 1 フレームの境目の呼び出しは `view` 1 回 + `ser` 5 回（スタンド・外柵・芝 2・内柵）。描画の順（奥から手前、間に大型画面・距離標・走者）は今と同じで、JS が呼ぶ順で決まる。
-- `capability`: `derby.series`。**この面が入った firmware の DERBY のセッションでだけ** `pocket_api_register()` で登録し `supported: true`。ほかのセッションでは登録しないので `supported: false`。manifest（`app_registry.c`）の `local.derby` の optional に名前を足す（`pet.companion` と同じく、名前を挙げたセッションにだけ注入）。
+- `capability`: `derby.series`。**この面が入った firmware の DERBY のセッションでだけ** `kobako_api_register()` で登録し `supported: true`。ほかのセッションでは登録しないので `supported: false`。manifest（`app_registry.c`）の `local.derby` の optional に名前を足す（`pet.companion` と同じく、名前を挙げたセッションにだけ注入）。
 - `limits`（コードで強制する値だけ）: `maxEnds`（`course` の弦の端の数、32）、`maxSections`（区間の数、4）。DERBY は 19 と 3。
 
 ## 3. native が持つ状態
 
 - `course` で heap に 1 ブロック確保: 弦の端 n 個（double）、区間 m 行 × 7（double）、`dnr`、フレームごとの `VE`（4n double）と `VC`（n−1 バイト）。DERBY の楕円で約 0.95 KB、直線で約 0.1 KB（推定）。`course` の呼び直しで作り直す。
 - `view` の値（`pc` の 6 個、`zf`、`t`、2 つのハンドル、2 つの数）は静的な構造体（約 80 B の `.bss`。heap にまとめる案もあるが、`course` の前の `view` を BUSY にするのと同じ判定で足りる）。
-- **解放**: `pocket_derby_reset()` を `app_stop()` から `pocket_kasane_reset()` の直後に呼ぶ（heap のブロックを返し、状態を 0 に）。ゲストのコールバックも JS の値も持たないので、順序の条件は増えない（ハンドルは数として持つだけ）。
+- **解放**: `kobako_derby_reset()` を `app_stop()` から `kobako_kasane_reset()` の直後に呼ぶ（heap のブロックを返し、状態を 0 に）。ゲストのコールバックも JS の値も持たないので、順序の条件は増えない（ハンドルは数として持つだけ）。
 
 ## 4. 既存の `draw` の経路への接続
 
-`pocket_shiki_frame.c` の `draw_impl` を 2 つに分ける: 入力を読む前半（配列 / 数値引数）と、`float` の入力 8 個で VM を回して候補のフレームに足す後半。native 用に `pocket_proc_draw_numbers(ctx, handle, const double *in, n)` を足す。中身は JS の `H.draw(h, [...])` と同じ順の検査:
+`kobako_shiki_frame.c` の `draw_impl` を 2 つに分ける: 入力を読む前半（配列 / 数値引数）と、`float` の入力 8 個で VM を回して候補のフレームに足す後半。native 用に `kobako_proc_draw_numbers(ctx, handle, const double *in, n)` を足す。中身は JS の `H.draw(h, [...])` と同じ順の検査:
 
 1. `beginFrame` の中か（外なら `BUSY`「beginFrame required」）、再入でないか（`js_call_active`）。
 2. ハンドルの slot（無ければ `CLOSED`）。
@@ -77,13 +77,13 @@ paint → H.beginFrame → course() → pan(xs):
 
 ## 7. 見積もり（推定）
 
-- **ゲスト**: `ser`・`ou`・`lim`・`inr` と `pan()` の `VE`・`VC` の JS、トップレベルの名前 8 個（`ser`・`ou`・`lim`・`inr`・`Lo`・`Hi`・`VC`・`VE`）が消え、`S`（`pocket.derby`）1 個と関数オブジェクト 3 個が増える。survey の −3〜−6 KB の範囲を見込む。評価のピークも下がる側。
+- **ゲスト**: `ser`・`ou`・`lim`・`inr` と `pan()` の `VE`・`VC` の JS、トップレベルの名前 8 個（`ser`・`ou`・`lim`・`inr`・`Lo`・`Hi`・`VC`・`VE`）が消え、`S`（`kobako.derby`）1 個と関数オブジェクト 3 個が増える。survey の −3〜−6 KB の範囲を見込む。評価のピークも下がる側。
 - **native**: flash +2〜3 KB（C の `ser` と入口）、`.bss` 約 0.1 KB、DERBY の実行中の heap 約 1 KB（§3）。ほかのアプリは `.bss` 分だけ。
 - **時間**（w=−100、実機の尺度）: 系列 27.6 ms が、呼び出し 6 回（0.2〜0.4 ms）+ C の倍精度の算術（4〜8 ms の幅、survey）+ VM と線分（今と同じ約 1.8 ms）に。N12 で −0.3 ms。ターン 20.8〜24.8 ms → 23.4〜25.9 fps（survey）。
 
 ## 8. 試験の方法（host）
 
-- **oracle**（最強の検査）: `DERBY_SER_ORACLE=1` の harness は、今の JS の `ser()`・`ou()`・`lim()`・`inr()` と `VE`・`VC` の計算の写し（`tools/games/derby_ser_oracle.js`、vm/main fac3552 の JS から機械的に置き換えたもの）を、`pocket.derby.view`・`ser` の呼び出しのたびに先に回し、JS が出す `draw` の入力の列（ハンドルと倍精度の 8 個）を、native が `draw` に渡した列と**ビット単位で**比べる。あわせて、ランダムなカメラ・コース・w・s・L・色の組み合わせ（総当たりに近い数千ケース）を `draw` を走らせない検査モードで比べる。
+- **oracle**（最強の検査）: `DERBY_SER_ORACLE=1` の harness は、今の JS の `ser()`・`ou()`・`lim()`・`inr()` と `VE`・`VC` の計算の写し（`tools/games/derby_ser_oracle.js`、vm/main fac3552 の JS から機械的に置き換えたもの）を、`kobako.derby.view`・`ser` の呼び出しのたびに先に回し、JS が出す `draw` の入力の列（ハンドルと倍精度の 8 個）を、native が `draw` に渡した列と**ビット単位で**比べる。あわせて、ランダムなカメラ・コース・w・s・L・色の組み合わせ（総当たりに近い数千ケース）を `draw` を走らせない検査モードで比べる。
 - **端から端**: `run_derby.py`（ASan と `--m32`）の全構成で、着順・時計・種・デモ・R 再生・オッズ・保存の行と、全画素ハッシュが vm/main fac3552 と一致すること。
 
 ## 9. 結果（host、WSL）
@@ -92,7 +92,7 @@ paint → H.beginFrame → course() → pan(xs):
 - **基準（vm/main fac3552 を別の木に展開して同じ手順で走らせた）と、全 16 構成で着順・完走時刻（全桁）・種・デモ = 手のレース・R 再生・保存の行と全画素ハッシュが一致**（ASan と m32 の両方。楕円だけの構成も）。Newton の誤差の行も同じ（最大 0.0749 px）。`tune_derby.mjs`（直線・楕円）と `derby_corner.mjs app` は PASS。
 - **oracle**（§8）: ゲーム中の呼び出し 19,935 回（種の混在）・27,310 回（楕円のみ）、ランダムな 32,000 呼び出し × 6 回（draw 103,315 本ずつ）で、**不一致 0**。ASan/UBSan のエラーなし。
 - **m32 では oracle を回さない**: i386 は倍精度を x87 の 80 ビットで計算し、C（式を registers に保つ）とインタプリタ（演算ごとに格納）で末尾 1 ビットがずれる（最初の試行で 27,721 件、どれも 1〜2 ulp）。実機（soft-float の IEEE）と 64bit host（SSE2）には無い性質なので、判定は 64bit の build で行う。m32 でも画素ハッシュは全構成一致（入力は float に丸めて VM に渡るため）。
-- N12（数値引数の `draw`）単独: 全行・全画素一致。`run_pocket_proc_qjs.py`（O2・O0）PASS（配列と数値で同じフレーム、誤りの場合）。
+- N12（数値引数の `draw`）単独: 全行・全画素一致。`run_kobako_proc_qjs.py`（O2・O0）PASS（配列と数値で同じフレーム、誤りの場合）。
 
 ### ゲスト（host、TLSF モデル）
 
@@ -107,7 +107,7 @@ N12 の列は harness の包み（数値引数を読む分）が評価前に +64
 
 ## 10. 実機（COM3、2026-10-02）
 
-- image: 同じ firmware（この枝の C、`-DKASANE_MEGADEMO_TRACE=ON -DKASANE_BGCOST_TRACE=ON -DPOCKET_KEYTEST=ON`、`-DSDKCONFIG` 分離）に、`apps/derby` だけを差し替えた 4 構成（基準 = fac3552 の JS / 今回、それぞれ WIDE 2 の楕円用 w = −100 / −3）。**デモの種は `HW = 0x2545f492` に固定**（`vm/trig-device` の derby-camera-history.md と同じ値。保存は race=18 で、デモは直線 1・楕円 4、今回の構成は 420 秒で 6 本目の直線まで進む）。bin に入った JS（`S.view(`・`function ser(`・w・`HW`）を確かめた。
+- image: 同じ firmware（この枝の C、`-DKASANE_MEGADEMO_TRACE=ON -DKASANE_BGCOST_TRACE=ON -DKOBAKO_KEYTEST=ON`、`-DSDKCONFIG` 分離）に、`apps/derby` だけを差し替えた 4 構成（基準 = fac3552 の JS / 今回、それぞれ WIDE 2 の楕円用 w = −100 / −3）。**デモの種は `HW = 0x2545f492` に固定**（`vm/trig-device` の derby-camera-history.md と同じ値。保存は race=18 で、デモは直線 1・楕円 4、今回の構成は 420 秒で 6 本目の直線まで進む）。bin に入った JS（`S.view(`・`function ser(`・w・`HW`）を確かめた。
 - 手順は [`tools/games/ovalcost/ser_device.py`](../../tools/games/ovalcost/ser_device.py)（書き込み → 6 秒後に DERBY → キーを押さずにデモ 420 秒。HEAVY はパドックで tab を 1 回押して 330 秒）。集計は切り替わりの後 3 ターンを捨てた中央値。**MID は 3 回の中央値（3 回の差は 0.1 fps・0.2 ms 以内）、HEAVY は 1 回。**
 - 全 run で `LOADSTALL`・`FRAMEFAIL`・`LOADFAIL`・`DEMOFAIL`・OOM なし。**レースごとの `FINISH`（着順・完走時刻の全桁）は 4 構成・全 15 run で同じ**（race 1000001〜1000005）。
 
@@ -150,7 +150,7 @@ N12 の列は harness の包み（数値引数を読む分）が評価前に +64
 | --- | ---: |
 | DIRAM（`.bss`） | **+96 B**（`view` の状態とコースのポインタ） |
 | IRAM | 0 |
-| flash `.text` | +9,624 B（`pocket_derby.c` の `.text` 11,254 B のうち `js_ser` 5,027 B。`-O2`） |
+| flash `.text` | +9,624 B（`kobako_derby.c` の `.text` 11,254 B のうち `js_ser` 5,027 B。`-O2`） |
 | flash `.rodata` | −3,488 B（埋め込みの JS が縮んだ） |
 | image 全体 | +6,136 B |
 | DERBY の実行中の heap | コースのブロック約 1.0 KB（楕円）/ 約 0.1 KB（直線）。推定（構造体と double の数から） |

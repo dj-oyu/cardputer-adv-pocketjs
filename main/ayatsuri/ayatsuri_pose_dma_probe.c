@@ -23,7 +23,7 @@
 #ifdef CONFIG_AYATSURI_LIVE_DMA_PROBE
 #include "hone/hone_frame.h"
 #include "ayatsuri_live_model_fixture_api.h"
-#include "pocket/wifi_time.h"
+#include "kobako/wifi_time.h"
 #include "ayatsuri_exact_damage.h"
 #include "strip_copy_s3.h"
 #include "pet/pet_hub.h"

@@ -22,6 +22,6 @@ for hz,key_int in [(100,11),(1000,11),(100,-1),(1000,-1)]:
  binary=out/f'keyboard-probe-{hz}-int{key_int}'
  flags=['-O1','-fsanitize=address,undefined','-fno-omit-frame-pointer','-fno-pie','-no-pie'] if a.sanitize else ['-O2']
  subprocess.run([os.environ.get('CC','gcc'),'-std=c11','-Wall','-Wextra','-Werror',*flags,
-     f'-DconfigTICK_RATE_HZ={hz}',f'-DCONFIG_POCKET_KEY_INT_GPIO={key_int}','-I'+str(out/'include'),'-Itools/hostshim','-Imain/hal',
+     f'-DconfigTICK_RATE_HZ={hz}',f'-DCONFIG_KOBAKO_KEY_INT_GPIO={key_int}','-I'+str(out/'include'),'-Itools/hostshim','-Imain/hal',
      'tools/board_test/test_keyboard_probe.c','main/hal/keyboard_probe.c','-o',str(binary)],cwd=R,check=True)
  subprocess.run([str(binary)],cwd=R,check=True)

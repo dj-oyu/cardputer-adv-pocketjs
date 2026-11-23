@@ -43,11 +43,11 @@ int main(void){""")
                         str(source), "-o", str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
 
-    pocket = (root / "tools/test_pocket_kasane.c").read_text()
-    pocket = '#include <assert.h>\n#include "pocket_shiki_frame.h"\n' + pocket
+    kobako = (root / "tools/test_kobako_kasane.c").read_text()
+    kobako = '#include <assert.h>\n#include "kobako_shiki_frame.h"\n' + kobako
     boundary = "static uint16_t *get_strip(void *opaque)"
-    assert boundary in pocket
-    pocket = pocket.replace(boundary, """
+    assert boundary in kobako
+    kobako = kobako.replace(boundary, """
 static uint16_t dma_tx[240*8];
 static uint16_t dma_y,dma_rows;
 static bool dma_pending,dma_candidate;
@@ -57,63 +57,63 @@ static void dma_flush(void){
 }
 static ksn_result dma_finish(void *ctx){
     (void)ctx;
-    if(dma_candidate)assert(pocket_proc_pending());
+    if(dma_candidate)assert(kobako_proc_pending());
     dma_flush();return KSN_OK;
 }
 """ + boundary)
     original = "memcpy(panel_pixels+y*240,pixels,rows*240*sizeof(*pixels));"
-    assert original in pocket
-    pocket = pocket.replace(original, """dma_flush();
+    assert original in kobako
+    kobako = kobako.replace(original, """dma_flush();
     memcpy(dma_tx,pixels,rows*240*sizeof(*pixels));
     dma_y=y;dma_rows=rows;dma_pending=true;""")
-    original = "return pocket_kasane_present(&port,stats);"
-    assert original in pocket
-    pocket = pocket.replace(original, """
-    dma_candidate=pocket_proc_pending();
+    original = "return kobako_kasane_present(&port,stats);"
+    assert original in kobako
+    kobako = kobako.replace(original, """
+    dma_candidate=kobako_proc_pending();
     const ksn_display_completion completion={NULL,dma_finish};
-    ksn_result result=pocket_kasane_present_complete(&port,&completion,stats);
+    ksn_result result=kobako_kasane_present_complete(&port,&completion,stats);
     assert(!dma_pending);dma_candidate=false;return result;""")
     # Unused surface families are not exercised by this retained harness.
     # Keep their stubs explicit; the procedural implementation remains real.
-    pocket += """
-esp_err_t pocket_grid_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
-esp_err_t pocket_video_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
-esp_err_t pocket_pixel_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
-void pocket_grid_reset(void){}
-void pocket_video_reset(void){}
-void pocket_pixel_reset(void){}
-bool pocket_grid_pending(void){return false;}
-bool pocket_video_pending(void){return false;}
-bool pocket_pixel_pending(void){return false;}
-void pocket_grid_present_result(ksn_result r){(void)r;}
-void pocket_video_present_result(ksn_result r){(void)r;}
-void pocket_pixel_present_result(ksn_result r){(void)r;}
-void pocket_grid_source_invalidated(uint32_t r){(void)r;}
+    kobako += """
+esp_err_t kobako_grid_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+esp_err_t kobako_video_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+esp_err_t kobako_pixel_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void kobako_grid_reset(void){}
+void kobako_video_reset(void){}
+void kobako_pixel_reset(void){}
+bool kobako_grid_pending(void){return false;}
+bool kobako_video_pending(void){return false;}
+bool kobako_pixel_pending(void){return false;}
+void kobako_grid_present_result(ksn_result r){(void)r;}
+void kobako_video_present_result(ksn_result r){(void)r;}
+void kobako_pixel_present_result(ksn_result r){(void)r;}
+void kobako_grid_source_invalidated(uint32_t r){(void)r;}
 """
-    pocket = pocket.replace("    repair_tests();", """
+    kobako = kobako.replace("    repair_tests();", """
     repair_tests();
-    pocket_kasane_reset();
+    kobako_kasane_reset();
     /* The frame functions live on kasane.shiki since Shiki v2.0; this harness
      * has no Shiki engine, so they go on a plain object and the one-pixel
-     * line goes in through the native path pocket.shapes uses. */
+     * line goes in through the native path kobako.shapes uses. */
     {
         JSValue g=JS_GetGlobalObject(ctx),dp=JS_NewObject(ctx);
-        check(pocket_proc_frame_install(ctx,dp)==ESP_OK,"DMA frame functions install");
+        check(kobako_proc_frame_install(ctx,dp)==ESP_OK,"DMA frame functions install");
         JS_SetPropertyStr(ctx,g,"dp",dp);JS_FreeValue(ctx,g);
     }
-    pocket_proc_mark dma_mark;
+    kobako_proc_mark dma_mark;
     bool dma_ok=run("dp.beginFrame(0);");
-    dma_ok=dma_ok&&!JS_IsException(pocket_proc_native_begin(ctx,"dma",&dma_mark));
-    dma_ok=dma_ok&&!JS_IsException(pocket_proc_native_line(ctx,"dma",10,10,10,10,65535));
+    dma_ok=dma_ok&&!JS_IsException(kobako_proc_native_begin(ctx,"dma",&dma_mark));
+    dma_ok=dma_ok&&!JS_IsException(kobako_proc_native_line(ctx,"dma",10,10,10,10,65535));
     check(dma_ok&&run("dp.commit();"),"DMA native procedural candidate submits");
-    check(pocket_proc_pending(),"DMA native candidate remains pending before transfer");
-    check(present(&stats)==KSN_OK&&!pocket_proc_pending()&&panel_pixels[10*240+10]==65535,
+    check(kobako_proc_pending(),"DMA native candidate remains pending before transfer");
+    check(present(&stats)==KSN_OK&&!kobako_proc_pending()&&panel_pixels[10*240+10]==65535,
           "DMA finish precedes native procedural promotion and panel equality");
 """)
-    source = temp / "pocket.c"
-    source.write_text(pocket)
-    env = dict(os.environ, TEST_SOURCE=str(source), OUT=str(temp / "pocket"),
+    source = temp / "kobako.c"
+    source.write_text(kobako)
+    env = dict(os.environ, TEST_SOURCE=str(source), OUT=str(temp / "kobako"),
                CACHE=str(temp / "qjs"),
                CFLAGS="-O1 -g -fsanitize=address,undefined -DKASANE_DMA_OVERLAP=1")
     subprocess.run(["bash", "tools/build_kasane_test.sh"], cwd=root, env=env, check=True)
-    subprocess.run([str(temp / "pocket")], cwd=root, check=True)
+    subprocess.run([str(temp / "kobako")], cwd=root, check=True)

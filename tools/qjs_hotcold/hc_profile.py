@@ -4,7 +4,7 @@
     python hc_profile.py merge <profile.json> <run.json>... --asm <X.c.obj.hc0.s> [--asm ...] [--hot 0.5]
 
 `run` reads a QEMU `-d exec,nochain,in_asm` log of an r5sim image built with
--DPOCKET_QJS_HOTCOLD=gen (hc_asm.py gen: a symbol in front of every basic
+-DKOBAKO_QJS_HOTCOLD=gen (hc_asm.py gen: a symbol in front of every basic
 block) and counts, per block, the turns that ran it. A turn is what r5sim
 brackets with r5_turn_begin / r5_turn_end (the guest's frame() plus its jobs
 plus end_turn; the same window as tools/r5sim/icache.py). The log is read as

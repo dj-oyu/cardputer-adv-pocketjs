@@ -1,8 +1,8 @@
-// pocket.kasane.shiki (spec v1.3 sec.9) self-check: README.md. The same file
-// runs in the host harness (tools/kasane_contract/run_pocket_shiki_api_qjs.py).
+// kobako.kasane.shiki (spec v1.3 sec.9) self-check: README.md. The same file
+// runs in the host harness (tools/kasane_contract/run_kobako_shiki_api_qjs.py).
 'use strict';
-globalThis.shikiApiTest = function (pocket, log) {
-  const S = pocket.kasane.shiki;
+globalThis.shikiApiTest = function (kobako, log) {
+  const S = kobako.kasane.shiki;
   let pass = 0, fail = 0;
   const code = e => e && (e.code || String(e.message).split(' ')[0]);
   const ok = (name, c) => { if (c) pass++; else { fail++; log('SA FAIL ' + name); } };
@@ -24,7 +24,7 @@ globalThis.shikiApiTest = function (pocket, log) {
     code.forEach((i, k) => { const o = body + 12 * k; b.set(i.slice(0, 4), o); dv.setInt32(o + 4, i[4] || 0, true); dv.setUint16(o + 8, i[5] || 0, true); });
     return b;
   };
-  const caps = pocket.capabilities && pocket.capabilities.get && pocket.capabilities.get('kasane.shiki');
+  const caps = kobako.capabilities && kobako.capabilities.get && kobako.capabilities.get('kasane.shiki');
   if (caps) ok('capability', caps.supported === true && caps.available === true && caps.limits.maxRecords === 65535 && caps.limits.maxDrawsPerCall === 256 && caps.limits.maxLists === 8);
   // Frames and the engine's state are taken on the first draw and kept: warm
   // them up so the heap's baseline holds them.
@@ -70,7 +70,7 @@ globalThis.shikiApiTest = function (pocket, log) {
   throws('fixed', 'TypeError', () => w.buffer.transferToFixedLength());
   ok('kept', w.length === 16 && w[8] === 11);
   // The float VM's namespace is gone (v2.0).
-  ok('no procedural', pocket.kasane.procedural === undefined);
+  ok('no procedural', kobako.kasane.procedural === undefined);
   S.unregister(h);
   throws('stale', 'CLOSED', () => S.unregister(h));
   S.release(w);
@@ -197,15 +197,15 @@ globalThis.shikiApiTest = function (pocket, log) {
   S.unregister(plot); S.unregister(spin);
   throws('bad program', 'INVALID_ARGUMENT', () => S.register(new Uint8Array([1, 2, 3])));
   throws('no built-in', 'INVALID_ARGUMENT', () => S.register('derby.none'));
-  ok('shared', ['beginFrame', 'commit', 'resource', 'createSurface'].every(n => typeof S[n] === 'function') && (!pocket.kasane.grid.fold || ['fold', 'index', 'view'].every(n => typeof pocket.kasane.grid[n] === 'function')));
+  ok('shared', ['beginFrame', 'commit', 'resource', 'createSurface'].every(n => typeof S[n] === 'function') && (!kobako.kasane.grid.fold || ['fold', 'index', 'view'].every(n => typeof kobako.kasane.grid[n] === 'function')));
   return [pass, fail];
 };
-if (typeof pocket !== 'undefined' && pocket.kasane && pocket.kasane.shiki) {
+if (typeof kobako !== 'undefined' && kobako.kasane && kobako.kasane.shiki) {
   let done = false;
   globalThis.frame = function () {
     if (done) return;
     done = true;
-    const [p, f] = shikiApiTest(pocket, s => console.log(s));
+    const [p, f] = shikiApiTest(kobako, s => console.log(s));
     console.log('SA END pass=' + p + ' fail=' + f);
   };
 }

@@ -27,49 +27,53 @@ idf_component_register(
 # (docs/vm/interpreter-stages.md sec.4.1).
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     QUICKJS_NG_BUILD
+    # F2 (docs/vm/builtin-floor-plan.md): the kobako.* surfaces keep their
+    # function lists in flash. The fork defaults it off since its PR #11 (a
+    # target with RAM to spare); this one has none to spare.
+    QJS_LEAN_LAZY_BUILTINS=1
     QJS_DISABLE_DUMPS
     _GNU_SOURCE
 )
 
-# Measurement build (main/Kconfig.projbuild POCKET_GC_STATS): the firmware
-# supplies pocket_gc_clock and reads JS_PocketGCStats / JS_PocketGCTime.
-if(CONFIG_POCKET_GC_STATS)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_GC_STATS=1)
+# Measurement build (main/Kconfig.projbuild QJS_LEAN_GC_STATS): the firmware
+# supplies lean_gc_clock and reads JS_LeanGCStats / JS_LeanGCTime.
+if(CONFIG_KOBAKO_GC_STATS)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE QJS_LEAN_GC_STATS=1)
 endif()
 
 # Hot/cold layout of quickjs.c (docs/vm/qjs-hotcold.md).
-# main/Kconfig.projbuild POCKET_VM_QJS_HOTCOLD (default y since the device A/B,
+# main/Kconfig.projbuild KOBAKO_QJS_HOTCOLD (default y since the device A/B,
 # qjs-hotcold.md §7) lays the basic blocks of its hot functions out by
 # tools/qjs_hotcold/profile.json. Not a line of QuickJS changes:
 # tools/qjs_hotcold/hc_cc.py stands in front of the compiler for this
 # component, and for quickjs.c alone compiles to assembly, moves the blocks
 # (hc_asm.py, which also verifies the result against GCC's output), and
 # assembles that.
-#   -DPOCKET_QJS_HOTCOLD=use|gen|off   overrides the Kconfig (tools/r5sim has
+#   -DKOBAKO_QJS_HOTCOLD=use|gen|off   overrides the Kconfig (tools/r5sim has
 #       none, so there it is off unless given); `gen` only adds a symbol per
 #       block, for training
-#   -DPOCKET_QJS_HOTCOLD_PROFILE=<file>   another profile
-#   -DPOCKET_QJS_HOTCOLD_PAD=<bytes>   shift the hot code (measurement)
+#   -DKOBAKO_QJS_HOTCOLD_PROFILE=<file>   another profile
+#   -DKOBAKO_QJS_HOTCOLD_PAD=<bytes>   shift the hot code (measurement)
 # A device A/B through a builder that only takes the default Kconfig: a
-# `measure:` commit sets POCKET_VM_QJS_HOTCOLD's default (or the pad below).
+# `measure:` commit sets KOBAKO_QJS_HOTCOLD's default (or the pad below).
 set(_qjs_hc "")
 set(_qjs_hc_pad 0)
-if(DEFINED POCKET_QJS_HOTCOLD)
-    if(POCKET_QJS_HOTCOLD STREQUAL "use" OR POCKET_QJS_HOTCOLD STREQUAL "gen")
-        set(_qjs_hc "${POCKET_QJS_HOTCOLD}")
+if(DEFINED KOBAKO_QJS_HOTCOLD)
+    if(KOBAKO_QJS_HOTCOLD STREQUAL "use" OR KOBAKO_QJS_HOTCOLD STREQUAL "gen")
+        set(_qjs_hc "${KOBAKO_QJS_HOTCOLD}")
     endif()
-elseif(CONFIG_POCKET_VM_QJS_HOTCOLD)
+elseif(CONFIG_KOBAKO_QJS_HOTCOLD)
     set(_qjs_hc "use")
 endif()
-if(POCKET_QJS_HOTCOLD_PAD)
-    set(_qjs_hc_pad "${POCKET_QJS_HOTCOLD_PAD}")
+if(KOBAKO_QJS_HOTCOLD_PAD)
+    set(_qjs_hc_pad "${KOBAKO_QJS_HOTCOLD_PAD}")
 endif()
 if(_qjs_hc)
     include("${CMAKE_CURRENT_LIST_DIR}/../../tools/qjs_hotcold/hotcold.cmake")
-    if(NOT POCKET_QJS_HOTCOLD_PROFILE)
-        set(POCKET_QJS_HOTCOLD_PROFILE "${POCKET_HOTCOLD_DIR}/profile.json")
+    if(NOT KOBAKO_QJS_HOTCOLD_PROFILE)
+        set(KOBAKO_QJS_HOTCOLD_PROFILE "${KOBAKO_HOTCOLD_DIR}/profile.json")
     endif()
-    pocket_hotcold(NAME quickjs-ng MODE "${_qjs_hc}" PROFILE "${POCKET_QJS_HOTCOLD_PROFILE}" PAD "${_qjs_hc_pad}"
+    kobako_hotcold(NAME quickjs-ng MODE "${_qjs_hc}" PROFILE "${KOBAKO_QJS_HOTCOLD_PROFILE}" PAD "${_qjs_hc_pad}"
         ONLY quickjs.c SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/quickjs-ng/quickjs.c"
         KEEP_OUT "${CMAKE_CURRENT_LIST_DIR}/../../main/vm/helper_iram8.lf")
 endif()

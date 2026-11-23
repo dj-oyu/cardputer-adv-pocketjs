@@ -2,7 +2,7 @@
 //
 // The assembly cannot assemble off-Xtensa, so this file implements the same
 // contract in C: eight outputs, the same arithmetic-shift floor and the same
-// clamp, one sixteen-bit result per lane. Running main/pocket/mp3_decode.c's
+// clamp, one sixteen-bit result per lane. Running main/kobako/mp3_decode.c's
 // block path on the host is the point: the two arms of g_mp3_fir_pie must emit
 // the same samples bit for bit, which is what tools/test_mp3.c compares.
 //

@@ -1,18 +1,18 @@
 # DERBY WATCH — 観戦主体の競馬（1000 m 直線・ナイター）
 
-2026-09-29、ブランチ `vm/game-derby`（`vm/main` 026e8c7 から）。対象は [apps/derby/derby_watch.js](../../apps/derby/derby_watch.js)（APPS の DERBY WATCH、`local.derby`）。コードの隣の設計メモは [apps/derby/README.md](../../apps/derby/README.md)。**この文書の数値は断りのない限り host の実測**（実物の QuickJS・`pocket.kasane`・`pocket.input.keys`・Kasane レンダラ。m32 は i386 で実機と同じ 8 B の JSValue）。実機は使っていない（fps・ネイティブ heap・見え方は「実機で調整・確認する項目」）。計算値・推定値はその旨を書く。美的な評価はしない。
+2026-09-29、ブランチ `vm/game-derby`（`vm/main` 026e8c7 から）。対象は [apps/derby/derby_watch.js](../../apps/derby/derby_watch.js)（APPS の DERBY WATCH、`local.derby`）。コードの隣の設計メモは [apps/derby/README.md](../../apps/derby/README.md)。**この文書の数値は断りのない限り host の実測**（実物の QuickJS・`kobako.kasane`・`kobako.input.keys`・Kasane レンダラ。m32 は i386 で実機と同じ 8 B の JSValue）。実機は使っていない（fps・ネイティブ heap・見え方は「実機で調整・確認する項目」）。計算値・推定値はその旨を書く。美的な評価はしない。
 
 旧 derby-corner-model.md・derby-lane-offset.md・derby-pan-depth-order.md・derby-venue-map.md を末尾の各節に吸収した（楕円のカーブ補正とオッズ／馬ごとの横位置／首振りの描画順／場内マップ）。首振りカメラの経緯は [derby-camera-history.md](derby-camera-history.md)。
 
 ## 結論
 
 - **2026-09-30 追記（6）: オッズを較正し直した**（同じブランチ）。乱数なしの 1 走の完走時間の softmax をやめ、パドックの能力値の Luce モデル（重みは Monte Carlo の最尤推定）に大穴の裾の補正を掛けた。賭けの期待値は、どの勝率の区間・人気順でも 0.75〜0.86（旧 0.61〜1.18。1 番人気 1.18 → 0.81）。パドックの 9 フレームの計算が無くなり、評価の余裕は変わらない。末尾の「オッズの較正」。
-- **2026-09-30 追記（5）: レースの種を起動ごとのハードウェアの乱数から作る**（ブランチ `vm/derby-seed`）。`pocket.random.seed()` を 1 回引き、保存のレース番号と混ぜた基準にレース番号を足す。再生は全桁一致のまま、デモはプレイヤーの種の列を進めない。実機で 10 回の起動の種が全部違い、評価の余裕は変わらない（詰め物 80 文で起動、100 文で OOM）。末尾の「レースの種をハードウェアの乱数から」。
+- **2026-09-30 追記（5）: レースの種を起動ごとのハードウェアの乱数から作る**（ブランチ `vm/derby-seed`）。`kobako.random.seed()` を 1 回引き、保存のレース番号と混ぜた基準にレース番号を足す。再生は全桁一致のまま、デモはプレイヤーの種の列を進めない。実機で 10 回の起動の種が全部違い、評価の余裕は変わらない（詰め物 80 文で起動、100 文で OOM）。末尾の「レースの種をハードウェアの乱数から」。
 - **2026-09-30 追記（4）: デモへの移行と復帰に幕を足した**（ブランチ `vm/derby-dissolve`）。放置のパドックが 0.5 秒で黒へ溶け、黒の間にデモへ切り替わり、0.3 秒で溶けて戻る。キーで抜けたときは状態をそのフレームで戻し、画だけが 0.3 秒で戻る。全画面の黒い rect 1 つの α（パドックの ref は 32/32）。中央の見出し（`DEMO PLAY`）は実機の評価の余裕を割ったので入れなかった。実機の余裕は 3.8〜5.6 KB のまま、幕の間 29.7〜30.1 fps。末尾の「デモの幕」。
 - **2026-09-30 追記（3）: デモと大型画面を統合した**（ブランチ `vm/derby-merge`）。統合したソースは実機で起動しなかったので直した。原因は 2 つ: **デモの `GK = [...'adesr1,/', 'tab']`（文字列の spread）が実機の評価中にゲスト heap を使い切っていた**（`vm/main` のデモ単体も実機で起動しない。host では起きない）のと、統合でコンパイルのピークが +7.5 KB 増えたこと。spread を `split` に替え、見た目・着順を 1 画素・1 桁も変えずにピークを 4.1 KB 下げた。実機の評価の余裕は **3.8〜5.6 KB**（詰め物で測った）。デモのレースは監督のカメラ（VISION・HEAD ON を含む）と大型画面を通って完走する。末尾の「デモと大型画面の統合（2026-09-30）」。
 - **2026-09-30 追記（`vm/derby-demo`）: デモ（アトラクト）モードを足した。** パドックで 15 秒（壁時計）キーが無いと、ゲームが通常と同じ経路で 1 レースを走らせ、右下に `DEMO` が点滅する。どのキーでも戻り、プレイヤーの持ち点・レース番号・次の種・保存は変わらない。下の「デモモード」。host の検証のみだった（実機では起動しなかった。統合の節）。
 - **2026-09-30 追記（2）: 大型画面（ターフビジョン）と演出カメラを足した**（ブランチ `vm/derby-vision`）。コースの向こう側にワールド固定の大型画面が立ち、その中に先頭集団を追う中継映像が映る。レースは監督がカメラを自動で切り替え（手動キーは 5 秒だけ優先）、新しい角度として低い横位置（VISION）と正面（HEAD ON）を足した。**画面は面を 2 枚にせず、面0の中に塗りと映像を描いた**（面1のフレームが実機で確保できなかった）。設計と実測は末尾の「大型画面と演出カメラ（2026-09-30）」。
-- **2026-09-30 追記: 実機で起動に失敗していたのを直した**（`EVAL_ERROR InternalError: interrupted`）。原因はソースの評価中に `pocket.memory.info().internalFreeBytes` が `null` で、起動時の登録ループが終わらなかったこと。実機の数値は下の「実機での測定（2026-09-30）」。以下の本文は host の実測（初版のまま）。
+- **2026-09-30 追記: 実機で起動に失敗していたのを直した**（`EVAL_ERROR InternalError: interrupted`）。原因はソースの評価中に `kobako.memory.info().internalFreeBytes` が `null` で、起動時の登録ループが終わらなかったこと。実機の数値は下の「実機での測定（2026-09-30）」。以下の本文は host の実測（初版のまま）。
 - **題材は馬、コースは 1000 m の直線、夜のレース。** 横から追うカメラなら奥行きごとの投影が「拡大＋平行移動」になり、割り算の無い VM で柵・観客席・刈り目を ADD の繰り返しで描ける。コースと直交する線（芝の刈り目・ゲート・決勝線）は消失点 (120, 地平線) に集まる。
 - **遊びはパドックで1頭選んで賭けるだけ**（A/D で選択、E/S で賭け金、`1` で決定、オッズ表示）。レース中は `,` `/` でカメラ（WIDE／CLOSE／FIELD）を切り替える。ゴール前 20 m からスロー（FINISH カメラ）、写真判定（決勝線に沿って見る静止画を 2 倍に拡大）、結果（着順・着差・持ち点）、`R` で同じレースを再生、`1` で次のレース。
 - **固定の種で完全に再現する。** レースは四則演算と比較だけで書いたので、同じ種なら処理系に依らない: レース 3〜6 の最終状態（完走時刻と位置の全桁）が V8（Node）と QuickJS（32 bit・64 bit）で一致した。host の台本では、カメラを 3 回切り替えた 1 回目と、切り替えない再生（`R`）で着順・完走時刻が一致した（種 `DAAA4EE2`: 4-5-6-3-7-2-1-8、着差 1/2 LENGTH）。
@@ -83,7 +83,7 @@
 
 ## 使ったプリミティブ
 
-### 手続き描画（`pocket.kasane.procedural`）
+### 手続き描画（`kobako.kasane.procedural`）
 
 | プリミティブ | 使った所 |
 | --- | --- |
@@ -104,13 +104,13 @@
 | `LINE_COLOR_REG` | 柵（色を入力から、向こう正面と手前で共有）、刈り目（2 色交互）、騎手の勝負服（色を入力から、8 頭で共有）、紙吹雪 |
 | `CUBIC` | スタンドの屋根の弧、決勝柱の円盤（上下 2 本）、騎手の帽子 |
 
-### view（`pocket.kasane`）
+### view（`kobako.kasane`）
 
 `replace`（場面ごと）、`patch`（毎フレーム）、`tx.background`、`tx.image`（手続き面の資源、`sourceWidth/Height`）、`tx.rect`（半透明の帯・選択枠・能力の棒・勝負服の色見本）、`tx.text`（`caption`・`display`、`capacity`）、`ref.setText`、`ref.setRect`（能力の棒、選択枠、写真判定の拡大）。**HUD を最小にする方針で、`gradient`・`roundRect`・`strokeRect`・`animate`・`group`・`cache`・`pixel`・`grid` は使っていない**（見せ場は手続き面の線。view を増やすと合成の時間が増える）。
 
 ### 入力・音・保存
 
-`pocket.input.keys.pressed()`（1 フレーム 1 回の読み取り）、`pocket.audio.tone`（1 声の正弦波、1 音ずつ列で鳴らす）と `audio.cue('move'/'accept')`、`pocket.storage.get/set`（`derby.v1`）、`pocket.memory.info()`（登録の門）、`pocket.capabilities.get('audio.tone')`。歓声（雑音）は tone では出せないので、観客の点の明滅で代える。マニフェスト（`app_registry.c` の `local.derby` 行）は変えていない（`audio.tone` は既に optional、`storage.kv` はマニフェストに依らず入る）。
+`kobako.input.keys.pressed()`（1 フレーム 1 回の読み取り）、`kobako.audio.tone`（1 声の正弦波、1 音ずつ列で鳴らす）と `audio.cue('move'/'accept')`、`kobako.storage.get/set`（`derby.v1`）、`kobako.memory.info()`（登録の門）、`kobako.capabilities.get('audio.tone')`。歓声（雑音）は tone では出せないので、観客の点の明滅で代える。マニフェスト（`app_registry.c` の `local.derby` 行）は変えていない（`audio.tone` は既に optional、`storage.kv` はマニフェストに依らず入る）。
 
 ## 動的 plan の登録位置
 
@@ -126,7 +126,7 @@ host の全台本（MID、2 レース＋再生）: 登録 42、解除 30、同�
 
 ## host の検証
 
-`python3 tools/games/run_derby.py`（WSL）。`tools/games/test_derby_host.c` を実物の QuickJS・`pocket.kasane`（view と procedural）・`pocket.input.keys`（`keymap_poll()` と `keystate` 経由でキーの押下・解放を注入）・Kasane レンダラで組む。
+`python3 tools/games/run_derby.py`（WSL）。`tools/games/test_derby_host.c` を実物の QuickJS・`kobako.kasane`（view と procedural）・`kobako.input.keys`（`keymap_poll()` と `keystate` 経由でキーの押下・解放を注入）・Kasane レンダラで組む。
 
 | 検査 | 内容 | 結果 |
 | --- | --- | --- |
@@ -204,7 +204,7 @@ host の全台本（MID、2 レース＋再生）: 登録 42、解除 30、同�
 
 ## ネイティブ heap（計算）
 
-`sizeof` は xtensa の計算値（plan 872 B は plan-sized-alloc.md、フレーム 10,246 B は [surface-segment-cap.md](../kasane/surface-segment-cap.md)、VM 996 B は旧 procedural-ir-experiment.md、リポジトリ履歴）、点列は `pocket_shiki_frame.c` の `points_bytes()`。**実測ではない。**
+`sizeof` は xtensa の計算値（plan 872 B は plan-sized-alloc.md、フレーム 10,246 B は [surface-segment-cap.md](../kasane/surface-segment-cap.md)、VM 996 B は旧 procedural-ir-experiment.md、リポジトリ履歴）、点列は `kobako_shiki_frame.c` の `points_bytes()`。**実測ではない。**
 
 | 場面 | 内訳 | 合計 |
 | --- | --- | --- |
@@ -218,15 +218,15 @@ host の全台本（MID、2 レース＋再生）: 登録 42、解除 30、同�
 
 | 項目 | 値 | 種別 |
 | --- | --- | --- |
-| `idf.py -B build_gamederby build`（ESP-IDF v6.0.1、`tools/prepare_dependencies.py` の後） | 成功、`cardputer_pocketjs.bin` 2,200,304 B、SHA-256 `2dd2e7d17f3dd0e19fc7c1d1154fe612148ed7d13c6566e900064bb6abcf79e9` | 実測 |
-| `tools/memlog.py --map build_gamederby/cardputer_pocketjs.map` | DIRAM 172,204 B、**+0**（026e8c7 から） | 実測（map） |
+| `idf.py -B build_gamederby build`（ESP-IDF v6.0.1、`tools/prepare_dependencies.py` の後） | 成功、`cardputer_kobako.bin` 2,200,304 B、SHA-256 `2dd2e7d17f3dd0e19fc7c1d1154fe612148ed7d13c6566e900064bb6abcf79e9` | 実測 |
+| `tools/memlog.py --map build_gamederby/cardputer_kobako.map` | DIRAM 172,204 B、**+0**（026e8c7 から） | 実測（map） |
 | JS の置き場所 | `_binary_derby_watch_js_start` = 0x3c1cb2d7、終わりとの差 23,535 B（ソース＋NUL）。flash の rodata | 実測（map） |
 
 C を変えていないので DIRAM が動かないのは期待どおり。
 
 ## 実機での測定（2026-09-30）
 
-ブランチ `vm/derby-start`（`vm/main` d4c20fd から）。**この節の数値は実機の実測**（断りのあるものを除く）。診断は `Date.now()` の時刻と `pocket.memory.info()` を `console.log` に出す一時的な JS（コミットしていない、ソース +457 B）と、キー注入のために `POCKET_KEYTEST=ON` にした image で取った。fps・起動時間・MEM は診断なしの通常 image でも確かめた。
+ブランチ `vm/derby-start`（`vm/main` d4c20fd から）。**この節の数値は実機の実測**（断りのあるものを除く）。診断は `Date.now()` の時刻と `kobako.memory.info()` を `console.log` に出す一時的な JS（コミットしていない、ソース +457 B）と、キー注入のために `KOBAKO_KEYTEST=ON` にした image で取った。fps・起動時間・MEM は診断なしの通常 image でも確かめた。
 
 ### 起動に失敗していた原因
 
@@ -239,7 +239,7 @@ C を変えていないので DIRAM が動かないのは期待どおり。
 | `enter('pad')` | 11 ms |
 | `while (queue.length && reg < 3) load();` | **期限まで終わらない**（打ち切りを入れた診断で 1,180 ms に 2,749 周、登録 0 本） |
 
-評価中の `pocket.memory.info()` は `internalFreeBytes: null`、`guestUsedBytes: 0` だった。ネイティブ heap の標本は `app_session.c` の `sample_memory_pressure()` がターンの始めに採り、`pocket_memory_install()` がそれを空にしてから評価が始まるので、**評価中は一度も採られていない**。`load()` の門 `internalFreeBytes < 22528` は `null < 22528`（真）で毎回そこで戻り、`reg` が増えないのでループが終わらない。値はターンの中で変わらないので、評価中でなくても「門が開くまで回す」ループは終わらない。host の台本は `internalFreeBytes` に固定値 40,000 を返していたので通っていた。仮説のうちオッズの計算（a）・plan の解読（b）・view の構築（c）・コンパイル（d）はどれも支配的でなく、原因は（e）の無限ループだった。
+評価中の `kobako.memory.info()` は `internalFreeBytes: null`、`guestUsedBytes: 0` だった。ネイティブ heap の標本は `app_session.c` の `sample_memory_pressure()` がターンの始めに採り、`kobako_memory_install()` がそれを空にしてから評価が始まるので、**評価中は一度も採られていない**。`load()` の門 `internalFreeBytes < 22528` は `null < 22528`（真）で毎回そこで戻り、`reg` が増えないのでループが終わらない。値はターンの中で変わらないので、評価中でなくても「門が開くまで回す」ループは終わらない。host の台本は `internalFreeBytes` に固定値 40,000 を返していたので通っていた。仮説のうちオッズの計算（a）・plan の解読（b）・view の構築（c）・コンパイル（d）はどれも支配的でなく、原因は（e）の無限ループだった。
 
 ### 直したこと（JS のみ）
 
@@ -273,7 +273,7 @@ C を変えていないので DIRAM が動かないのは期待どおり。
 | --- | --- |
 | タイトル | **パドック（`scene === 'pad'`）をタイトルとみなす。** このアプリには独立したタイトル画面が無く、起動直後に最初に出る待機状態がパドック（馬をまだ選んでいない）。次のレースのパドックも同じ扱い |
 | 放置の判定 | パドックで `DEMO_IDLE_S = 15` 秒、キーが無いこと。計時をやり直すのは、キーを押している間（`input.keys.down()` が空でない）、フレームの外で押して離したゲームのキー（`A D E S 1 R , / tab` の `pressed()`）、`frame(buttons)` のパッドのビット、パドック以外の場面 |
-| 時計 | `pocket.time.now()`（`esp_timer` の単調なミリ秒。`pocket_app_install()` が全アプリに入れる面）。**フレーム数ではなく壁時計**で数えるので、fps が落ちても 15 秒 |
+| 時計 | `kobako.time.now()`（`esp_timer` の単調なミリ秒。`kobako_app_install()` が全アプリに入れる面）。**フレーム数ではなく壁時計**で数えるので、fps が落ちても 15 秒 |
 | 1 周 | 15 秒の放置 → デモのパドック（オッズが出たら A/D で 12 フレームに 1 歩、決めたら `1`）→ ゲート → レース（キーは送らず、カメラは監督の自動切替。大型画面との統合（2026-09-30）までは 240 フレームごとに `/`）→ 写真判定（通常どおり 110 フレームで先へ）→ 結果 150 フレーム（`DEMO_RES`）→ パドックへ戻る → また 15 秒 |
 | 走らせる馬 | 奇数回目のデモは 1 番人気、偶数回目は 2 番人気（オッズ順、同率は枠の若い方）。A/D は近い方向へ。賭け金は 100 固定 |
 | 抜け方 | デモ中のキー（`down()` に新しく入ったキー、フレームの外で押して離したゲームのキー、`frame(buttons)` のパッドのビット）で、**そのフレームのうちに**パドックへ戻る。押したキーはデモの終了にだけ使い、ゲームの操作としては読まない。Back は通常どおり終了 |
@@ -296,7 +296,7 @@ C を変えていないので DIRAM が動かないのは期待どおり。
 | 音 | デモ中は `A = null`（`A` も退避）。`tone` も `cue` も呼ばれない。終わりで残りの音符を捨てる |
 | plan | 途中で抜けたときは走者・`map`・`gate`・`photo` を解除し（`drop(RUN)`、`drop(['photo'])`）、パドックの 12 本に戻す。`conf` は `enter('pad')` が解除する |
 
-**音を止める理由**: 放置された機械が勝手に鳴るとアトラクトモードとして困る。加えて、最初の `tone` はホームから流れているプレイヤーの音楽を止める（`pocket_av_background_stop("tone")`）ので、デモが鳴らすと、音楽を聴きながら放置していた人の音楽がデモの開始で止まる。
+**音を止める理由**: 放置された機械が勝手に鳴るとアトラクトモードとして困る。加えて、最初の `tone` はホームから流れているプレイヤーの音楽を止める（`kobako_av_background_stop("tone")`）ので、デモが鳴らすと、音楽を聴きながら放置していた人の音楽がデモの開始で止まる。
 
 ### `DEMO` の位置とノード
 
@@ -307,7 +307,7 @@ C を変えていないので DIRAM が動かないのは期待どおり。
 
 ### host の検証（`python3 tools/games/run_derby.py`、ASan/UBSan と `--m32` の両方で PASS）
 
-MID の台本の最初（保存済みの持ち点 1500・レース 3 を読んだ直後のパドック）に、デモの検査を足した。時計は host が `pocket.time.now()` として渡す値で、1 フレーム 33.3 ms（100 ms にして fps の低下、1 回で 15 秒進めて早送り）。
+MID の台本の最初（保存済みの持ち点 1500・レース 3 を読んだ直後のパドック）に、デモの検査を足した。時計は host が `kobako.time.now()` として渡す値で、1 フレーム 33.3 ms（100 ms にして fps の低下、1 回で 15 秒進めて早送り）。
 
 | 検査 | 結果 |
 | --- | --- |
@@ -348,7 +348,7 @@ host の prelude（時計・計数）が 1,888 B 増えたので、変更前の�
 
 ### ファームのビルド
 
-`idf.py -B build_derbydemo build`（ESP-IDF v6.0.1、`tools/prepare_dependencies.py` の後）は成功、`cardputer_pocketjs.bin` 2,231,920 B（実測）。`tools/memlog.py --map build_derbydemo/cardputer_pocketjs.map` は DIRAM 172,204 B、**+0**（964f634 から、実測）。C は変えておらず、JS は flash の rodata に埋め込まれるので DIRAM は動かない（期待どおり）。ビルドが書き換えた `dependencies.lock` はコミットしていない。
+`idf.py -B build_derbydemo build`（ESP-IDF v6.0.1、`tools/prepare_dependencies.py` の後）は成功、`cardputer_kobako.bin` 2,231,920 B（実測）。`tools/memlog.py --map build_derbydemo/cardputer_kobako.map` は DIRAM 172,204 B、**+0**（964f634 から、実測）。C は変えておらず、JS は flash の rodata に埋め込まれるので DIRAM は動かない（期待どおり）。ビルドが書き換えた `dependencies.lock` はコミットしていない。
 
 ### 却下した案
 
@@ -385,7 +385,7 @@ host の prelude（時計・計数）が 1,888 B 増えたので、変更前の�
 1. **fps。** 場面・カメラ・段階ごとに `KASANE_PAINT` の窓で測る。見積もりの根拠: MEGADEMO の TWIST（線分 566、ラスタ 19k、draw 7）が 29.8 fps、JS 10 ms。このアプリの MID は線分が少ない（最大 491）が、draw が 15〜16 本と倍あり、JS は毎フレーム 8 頭のシミュレーション・16 本の入力配列・HUD の `setText` 5 回を作る。**JS の時間が最も読めない**（`frame()` の JS を `MDT` 相当の診断で測る）。30 fps を割るなら、まず `KN` を LIGHT 側へ、次に `hud()` の毎フレームの `setText` を変化したときだけにする。HEAVY を既定にできるかもここで決める。
 2. **plan 登録のフレーム。** パドックの最初の 9 フレームとゲートの 10 フレームは 1 フレーム 1 本の登録（JS の解読が MEGADEMO の実測で 1 本 12〜20 ms）とオッズの計算（1 フレーム 30 ステップ×8 頭）が重なる。ゲートで馬が入るのが引っかかって見えるか。レース中は登録しない。
 3. **ゲスト heap。** 評価に通るか（host の最小上限 143,890 B、推定の実機要求 144〜150 KB、上限 160 KiB）。`tools/memlog.py --port` の `app_free`／`app_largest` と、MEGADEMO の診断 image の方法（ゲストの上限を下げて起動）で余裕を測る。
-4. **ネイティブ heap。** 計算で 44〜53 KB。`pocket.memory.info()` の門（22,528 B）でゲートが止まらないか（止まると 300 フレームで `GO LOADSTALL`、そろわない馬は描かれない）。
+4. **ネイティブ heap。** 計算で 44〜53 KB。`kobako.memory.info()` の門（22,528 B）でゲートが止まらないか（止まると 300 フレームで `GO LOADSTALL`、そろわない馬は描かれない）。
 5. **見え方（人が見る）。** 線の馬が 30 fps で走って見えるか（遠景は脚 4 本の開閉、大写しは 6 コマ）、夜の配色、刈り目の消失点、CLOSE カメラで手前の柵が馬に重なる絵、写真判定の 2 倍拡大、先頭交代が読めるか。
 6. **音。** 音符の間に 1 フレーム程度の隙間が入る（Promise の完了を次のフレームで拾う）。ファンファーレと鐘の聞こえ方。ミュート中は無音。最初の tone がホームの音楽を止める。
 7. **Back の保存。** `frame(0x2000)` の `storage.set` がセッションの終了までに書き終わるか（結果のときにも保存しているので、失われても 1 レース分）。
@@ -393,7 +393,7 @@ host の prelude（時計・計数）が 1,888 B 増えたので、変更前の�
 
 ## 確信の低い点
 
-- **ゲスト heap の余裕（約 20 KB、12%）。** 実機のゲストには host に無い `pocket.*` の構築状態がある一方、host には計数用の prelude がある。MEGADEMO の実機との差（+1〜6 KB）を当てはめた推定で、実機で評価に失敗する可能性は残る。そのときはソースをさらに削る（場面の処理と HUD が大きい）。
+- **ゲスト heap の余裕（約 20 KB、12%）。** 実機のゲストには host に無い `kobako.*` の構築状態がある一方、host には計数用の prelude がある。MEGADEMO の実機との差（+1〜6 KB）を当てはめた推定で、実機で評価に失敗する可能性は残る。そのときはソースをさらに削る（場面の処理と HUD が大きい）。
 - **fps。** 実機の JS の時間を測っていない。draw の数（15〜16）が MEGADEMO の TWIST の倍ある。
 - **オッズの較正。** 本命側で予測より実際が強い（50% 以上の区間で 59.6% 予測に対し 78.3%）。softmax の裾の形の問題で、ゲームとしては許容したが、賭けの損得は本命買いが有利になる。（2026-09-30 に直した: 末尾の「オッズの較正」。）
 - **レースのモデルの「競り合い」項**は接戦を作るための項で、競馬の物理ではない。
@@ -431,7 +431,7 @@ host の prelude（時計・計数）が 1,888 B 増えたので、変更前の�
 
 | 試したこと | 結果 |
 | --- | --- |
-| 面1のフレームを評価中に確保（MEGADEMO の方式: `createSurface` → `resource` → `beginFrame(0, 面1)` → `beginFrame(0)`） | `EVAL_ERROR PocketError: frame allocation failed`（評価中の `beginFrame`）で起動に失敗 |
+| 面1のフレームを評価中に確保（MEGADEMO の方式: `createSurface` → `resource` → `beginFrame(0, 面1)` → `beginFrame(0)`） | `EVAL_ERROR KobakoError: frame allocation failed`（評価中の `beginFrame`）で起動に失敗 |
 | 評価中は面0だけ、面1は最初のフレームから毎フレーム試す（診断） | 評価直後の `MEM free=56,696 largest=10,240`。以後のフレームでも最大連続は 10,240 B のままで、一度も確保できなかった（ゲートで `FRAMEFAIL`） |
 | 参考: 修正前（ソース 23,491 B）の評価直後 | 空き 67,804 B・最大連続 31,744 B（2026-09-30 の前の節） |
 
@@ -516,7 +516,7 @@ host の prelude（時計・計数）が 1,888 B 増えたので、変更前の�
 
 ### 実機での測定（2026-09-30）
 
-**この節の数値は実機の実測**。image は 3 種: 診断（`-DKASANE_MEGADEMO_TRACE=ON -DPOCKET_KEYTEST=ON`、1 ターン 1 行の `MDT`）、キー注入だけ（`-DPOCKET_KEYTEST=ON`、fps とキャプチャ）、通常（回帰と最後の書き込み）。USB からキーを送って APPS の 12 行目を起動し、パドックで `1`、レース・写真判定・結果、`R` で再生、`1` で次のレース、Back。
+**この節の数値は実機の実測**。image は 3 種: 診断（`-DKASANE_MEGADEMO_TRACE=ON -DKOBAKO_KEYTEST=ON`、1 ターン 1 行の `MDT`）、キー注入だけ（`-DKOBAKO_KEYTEST=ON`、fps とキャプチャ）、通常（回帰と最後の書き込み）。USB からキーを送って APPS の 12 行目を起動し、パドックで `1`、レース・写真判定・結果、`R` で再生、`1` で次のレース、Back。
 
 #### fps と時間（MID、最終のソース、診断 image の MDT。2 レース＝本番と再生）
 
@@ -597,7 +597,7 @@ view は画像 1・HUD の text 5・画面の文字 3（text 2、rect 1）で、
 | `tools/test_app_resume.py --port COM3` | `TEST_APP_RESUME_OK` |
 | LCD CATCH（11 行目）・BIG WAVE（13 行目）・MEGADEMO（8 行目）の起動 | 3 本とも `RUN ... ESP_OK`、`EVAL_ERROR`・`START_FAILED` なし |
 | DERBY WATCH の起動 | `RUN 29675 bytes -> ESP_OK`、パドック 30 fps |
-| `tools/memlog.py --map build_derbyvision/cardputer_pocketjs.map` | DIRAM 172,204 B（+0）。C は変えていない |
+| `tools/memlog.py --map build_derbyvision/cardputer_kobako.map` | DIRAM 172,204 B（+0）。C は変えていない |
 | host `run_derby.py`（ASan）・`--m32` | 8 通りすべて `DERBY_HOST PASS` |
 
 ### 却下した案
@@ -651,7 +651,7 @@ view は画像 1・HUD の text 5・画面の文字 3（text 2、rect 1）で、
 | 同、IIFE の先頭で `throw` | 25,240 | — | `EVAL_ERROR PARSED`（解析は通る） |
 | 同、`const DEMO_IDLE_S …` の直前で `throw` | 25,239 | — | その `throw` で止まる（ここまでは実行できる） |
 | 同、`let dm …` の直後で `throw` | 25,239 | — | **OOM**（間の文は `GK = [...'adesr1,/', 'tab']` と `let` だけ） |
-| 統合（マージ直後） | 31,384 | +120,976 | `EVAL_ERROR PocketError: frame allocation failed`（2 回） |
+| 統合（マージ直後） | 31,384 | +120,976 | `EVAL_ERROR KobakoError: frame allocation failed`（2 回） |
 | 統合＋`GK` を `split` に | 31,394 | +120,972 | 起動。ただし評価直後の最大連続 10,240 B |
 | 削減したが `GK` は spread のまま | 31,840 | +116,872 | OOM（`first_req=30`） |
 | **最終（削減＋`split`）** | 31,980 | +116,880 | 起動。評価直後 空き 57,852・最大連続 11,264・ゲスト 119,756 |
@@ -724,7 +724,7 @@ host（m32）で 1 つずつ測った。数値はコンパイルのピークの�
 
 ### 実機での測定（2026-09-30）
 
-image は 2 種: 診断（`-DKASANE_MEGADEMO_TRACE=ON -DPOCKET_KEYTEST=ON`、`build_derbymerge_diag`、1 ターン 1 行の `MDT`）と通常（`build_derbymerge`）。USB からキーを送って 12 行目を起動し、放置 → デモ 1 周 → 次のデモのレース中に `D` → 手で 1 レース → `R` で再生 → `1` で次のレース → Back → 再起動。
+image は 2 種: 診断（`-DKASANE_MEGADEMO_TRACE=ON -DKOBAKO_KEYTEST=ON`、`build_derbymerge_diag`、1 ターン 1 行の `MDT`）と通常（`build_derbymerge`）。USB からキーを送って 12 行目を起動し、放置 → デモ 1 周 → 次のデモのレース中に `D` → 手で 1 レース → `R` で再生 → `1` で次のレース → Back → 再起動。
 
 | 場面・カメラ（MID） | ターン | fps | JS 中央値 / p95（ms） | 空き（最小） | ターン内の最小 | ゲスト（最大） |
 | --- | ---: | ---: | --- | ---: | ---: | ---: |
@@ -762,7 +762,7 @@ image は 2 種: 診断（`-DKASANE_MEGADEMO_TRACE=ON -DPOCKET_KEYTEST=ON`、`bu
 | `tools/smoke_device.py --port COM3 --cycles 20`（APPS のカーソルを先頭に戻してから） | `SMOKE_OK 20` |
 | `tools/test_app_resume.py --port COM3` | `TEST_APP_RESUME_OK` |
 | LCD CATCH（11 行目）・BIG WAVE（13 行目）・MEGADEMO（8 行目）の起動 | 3 本とも `RUN ... ESP_OK` |
-| `tools/memlog.py --map build_derbymerge/cardputer_pocketjs.map` | DIRAM 172,428 B、bb512b5 から +0（C は変えていない） |
+| `tools/memlog.py --map build_derbymerge/cardputer_kobako.map` | DIRAM 172,428 B、bb512b5 から +0（C は変えていない） |
 
 ### 確信の低い点
 
@@ -782,7 +782,7 @@ image は 2 種: 診断（`-DKASANE_MEGADEMO_TRACE=ON -DPOCKET_KEYTEST=ON`、`bu
 ### 結論
 
 - **幕は全画面の黒い rect 1 つ（`R.fd`）の不透明度**。色の α を `setColor` で毎フレーム決め、α = 0 のときは `setVisible(false)`（描かない。デモ中の通常のフレームに負荷を足さない）。`DEMO` のテキストだけが幕の上に残る。
-- **時間は壁時計だけで決まる**（`pocket.time.now()`）。ゲームのロジックは幕を読まない。デモの着順・退避・無音・保存・種は変わらない（host で全桁と全画素ハッシュが変更前と一致）。
+- **時間は壁時計だけで決まる**（`kobako.time.now()`）。ゲームのロジックは幕を読まない。デモの着順・退避・無音・保存・種は変わらない（host で全桁と全画素ハッシュが変更前と一致）。
 - **キーの反応は遅らせない**: 抜ける処理はそのフレームのうち（従来どおり）。幕はそのフレームで黒、0.3 秒で消える（計算: α は 8 段なので 281 ms で 0）。その間のキーは通常どおりゲームに効く。
 - **見出しカード（中央の `DEMO PLAY`）は入れなかった**。実機の評価の余裕が 3.8 KB を割ったため（下の「却下した案」。4 通り試して全部だめ）。黒の間は右下の `DEMO` が点滅する。
 - **実機の評価の余裕は 3.8〜5.6 KB のまま**（詰め物 60・80 文で起動、100 文で OOM。変更前と同じ幅）。host のコンパイルのピークは +116,888 → **+116,132 B（−756）**、ソースは 31,980 → **32,574 B（+594）**。
@@ -860,7 +860,7 @@ image は 2 種: 診断（`-DKASANE_MEGADEMO_TRACE=ON -DPOCKET_KEYTEST=ON`、`bu
 
 ### 実機での測定（2026-09-30、COM3）
 
-image は診断（`-DKASANE_MEGADEMO_TRACE=ON -DPOCKET_KEYTEST=ON`、`build_derbydissolve_diag`）と通常（`build_derbydissolve`）。USB から 12 行目を起動し、放置 → デモ 1 周 → 次のデモのレース 6 秒目に `D`（USB のキー注入）→ `1` で 1 レース → `R` で再生 → `1` → Back → 再起動。窓は各イベントのターンの開始時刻から（MDT の `t`）。
+image は診断（`-DKASANE_MEGADEMO_TRACE=ON -DKOBAKO_KEYTEST=ON`、`build_derbydissolve_diag`）と通常（`build_derbydissolve`）。USB から 12 行目を起動し、放置 → デモ 1 周 → 次のデモのレース 6 秒目に `D`（USB のキー注入）→ `1` で 1 レース → `R` で再生 → `1` → Back → 再起動。窓は各イベントのターンの開始時刻から（MDT の `t`）。
 
 | 窓 | ターン | fps | 最大間隔 | JS 中央値 | 描画 中央値 / 最大 |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -916,16 +916,16 @@ C は変えていない（JS は flash の rodata）。ビルドが書き換え�
 ### 結論
 
 - **これまでの種は `0x3e1b7 + raceNo·φ` で、レース番号だけから決まっていた。** 同じ番号のレースはいつも同じ顔ぶれ・同じ展開で、保存を消せば同じレースが再現し、結果を覚えられた。
-- **起動ごとに `pocket.random.seed()`（ESP32-S3 の `esp_random()`）を 1 回引き、保存済みのレース番号（通算カウンタ）と混ぜてセッションの基準にする。** レースの種は基準とレース番号から作る: `base = rng(HW ^ sn·φ)()·2³²`（mulberry32 の最初の出力＝ハッシュ）、`seed = (base + raceNo·φ) mod 2³²`。`sn` は読み込んだ保存のレース番号（保存が無ければ 0）。
+- **起動ごとに `kobako.random.seed()`（ESP32-S3 の `esp_random()`）を 1 回引き、保存済みのレース番号（通算カウンタ）と混ぜてセッションの基準にする。** レースの種は基準とレース番号から作る: `base = rng(HW ^ sn·φ)()·2³²`（mulberry32 の最初の出力＝ハッシュ）、`seed = (base + raceNo·φ) mod 2³²`。`sn` は読み込んだ保存のレース番号（保存が無ければ 0）。
 - **再生（`R`）は同じ `F`（同じ種）を走らせるので全桁一致のまま。デモは `raceNo = 1e6+n` のまま**で、種はレース番号の純関数なのでプレイヤーの列を進めも使いもしない。
-- **実機**: 同じ image で 10 回起動して、保存のレース 9 のパドックの種が 10 回とも違った（下の表）。リセット直後の最初の起動の種も 4 回とも違った。評価は 224〜226 ms（期限 2 秒）、`EVAL_ERROR`・`START_FAILED` なし。**マニフェストは変えていない**（`pocket.random` は `app_session.c` が全アプリに無条件で入れる。`app_registry_wants()` を読むのは `pet.companion` だけ）。評価中の `pocket.random.seed()` も動いた（同期のネイティブ呼び出し）。
+- **実機**: 同じ image で 10 回起動して、保存のレース 9 のパドックの種が 10 回とも違った（下の表）。リセット直後の最初の起動の種も 4 回とも違った。評価は 224〜226 ms（期限 2 秒）、`EVAL_ERROR`・`START_FAILED` なし。**マニフェストは変えていない**（`kobako.random` は `app_session.c` が全アプリに無条件で入れる。`app_registry_wants()` を読むのは `pet.companion` だけ）。評価中の `kobako.random.seed()` も動いた（同期のネイティブ呼び出し）。
 - **評価の余裕は変わらない**: 詰め物 60・80 文で起動、100 文で OOM（`first_req=5166`）。種だけの版も詰め物 60 文で 3/3 起動。
 
 ### 設計
 
 | 項目 | 決めたこと | 理由 |
 | --- | --- | --- |
-| ハードウェアの乱数 | 起動時（ソースの評価中）に 1 回だけ `pocket.random.seed()` | §8.1 の使い方（初期化で 1 回）。連続呼び出しは待ちが入る |
+| ハードウェアの乱数 | 起動時（ソースの評価中）に 1 回だけ `kobako.random.seed()` | §8.1 の使い方（初期化で 1 回）。連続呼び出しは待ちが入る |
 | 通算カウンタ | **保存済みのレース番号**（`sn = raceNo = v.race`）。保存の形式（`{v:1, pts, race}`）は変えない | RF が止まっていて `esp_random()` が起動ごとに同じ値を返しても、保存のレース番号が違えば基準が変わる。別の起動回数を保存に足す案は host のコンパイルのピークが +348 B（`n` の読み書き）で、評価の余裕を食う（下の「却下した案」） |
 | 基準の混ぜ方 | `rng(HW ^ sn·φ)()`、アプリの mulberry32 を 1 回だけ回してハッシュに使う | 新しい関数を足さない（クロージャ 1 つでピーク約 0.3〜0.5 KB）。`HW` が同じでも `sn` が違えば無関係な基準になる |
 | レースの種 | `base + raceNo·φ`（加算） | レース同士の列の距離が `base` に依らなくなるので、列の重なりを全セッションについて 1 回の計算で言える（下の「乱数の質」） |
@@ -938,7 +938,7 @@ C は変えていない（JS は flash の rodata）。ビルドが書き換え�
 
 ### host の代役と検査
 
-`tools/games/test_derby_host.c` の `pocket.random.seed()` は固定値（`DERBY_HW`、既定 `0x2545F491`）を返す。台本は決定的なまま。
+`tools/games/test_derby_host.c` の `kobako.random.seed()` は固定値（`DERBY_HW`、既定 `0x2545F491`）を返す。台本は決定的なまま。
 
 | 検査（`python3 tools/games/run_derby.py`） | 結果 |
 | --- | --- |
@@ -1057,7 +1057,7 @@ mulberry32 は状態が `G = 0x6D2B79F5` ずつ進むカウンタ型なので、
 | 評価の余裕（詰め物、通常 image） | 60 文 3/3・80 文 3/3 起動、100 文 3/3 OOM（`first_req=5166 used=163,396〜163,412`）。`vm/main` のときと同じ境目 |
 | 評価直後のゲスト | `js=119,524〜119,612`（`vm/main` の JS を同じファームで 120,544〜120,548。乱数なしの 1 走の状態が無くなった分）。最大連続 20,480（`vm/main` の JS は 10,240） |
 | パドックの最初の 30 フレームのターン平均（`KASANE_PAINT`） | `vm/main` の JS 18.84・18.51・17.17 ms → 12.05・11.09・11.95 ms。その後はどちらも 8.5 ms、描画 12.5 ms（30 fps） |
-| 一通りの進行（キー注入 image `-DPOCKET_KEYTEST=ON`） | `LOADED points=6610 race=9` → `1`（`PICK 1 odds=11.2`）→ ゲート → レース → 写真 → 結果（2 着、−100）→ `R` 再生（`FINISH` 全桁一致）→ `1` で race 10 → 15.0 秒放置で `DEMO START`（デモのパドックで 1 番人気 `odds=1.1` を選び、レースへ）→ デモのレース 6 秒目に `D` で `DEMO END`、戻ったパドックは同じ `seed=D868C55A` → Back で `SAVE points=6510 race=10` → 再起動で `LOADED points=6510 race=10`。`FRAMEFAIL`・`LOADFAIL`・`LOADSTALL` なし |
+| 一通りの進行（キー注入 image `-DKOBAKO_KEYTEST=ON`） | `LOADED points=6610 race=9` → `1`（`PICK 1 odds=11.2`）→ ゲート → レース → 写真 → 結果（2 着、−100）→ `R` 再生（`FINISH` 全桁一致）→ `1` で race 10 → 15.0 秒放置で `DEMO START`（デモのパドックで 1 番人気 `odds=1.1` を選び、レースへ）→ デモのレース 6 秒目に `D` で `DEMO END`、戻ったパドックは同じ `seed=D868C55A` → Back で `SAVE points=6510 race=10` → 再起動で `LOADED points=6510 race=10`。`FRAMEFAIL`・`LOADFAIL`・`LOADSTALL` なし |
 
 ![実機のパドック（キー注入 image の board_capture、転送前の RGB565）](derby-watch-seed-device.png)
 
@@ -1068,7 +1068,7 @@ mulberry32 は状態が `G = 0x6D2B79F5` ずつ進むカウンタ型なので、
 | `tools/smoke_device.py --port COM3 --cycles 20` | `SMOKE_OK 20` |
 | `tools/test_app_resume.py --port COM3` | `TEST_APP_RESUME_OK` |
 | LCD CATCH（11 行目）・BIG WAVE（13）・MEGADEMO（8）・DERBY WATCH（12） | 4 本とも `RUN ... ESP_OK` |
-| `idf.py -B build_derbyseed build`、`tools/memlog.py` | 成功、`cardputer_pocketjs.bin` 2,244,416 B。DIRAM 172,524 B、**+0**（C は変えていない） |
+| `idf.py -B build_derbyseed build`、`tools/memlog.py` | 成功、`cardputer_kobako.bin` 2,244,416 B。DIRAM 172,524 B、**+0**（C は変えていない） |
 | host `run_derby.py`（ASan）・`--m32` | 両方で全 13 回 `DERBY_HOST PASS`、`DERBY_SEEDS PASS`、`ODDS_CHECK PASS` |
 
 ### 人が確かめること
@@ -1085,7 +1085,7 @@ mulberry32 は状態が `G = 0x6D2B79F5` ずつ進むカウンタ型なので、
 
 ## チャンクへの分割（2026-09-30、ブランチ `vm/derby-chunks`）
 
-`vm/main` e15e6eb から。1 本の IIFE だった `derby_watch.js` を、`pocket.app.load`（[eval-peak](../vm/eval-peak.md) §7、[共通 API](../api/common-api.md) §5.1）のチャンクに分けた。目的は、評価の余裕（3.8〜5.6 KB、上の各節）を広げること。数値の種別を明記する（実機の実測／host の実測（m32 は実機と同じ 8 B の JSValue）／計算）。
+`vm/main` e15e6eb から。1 本の IIFE だった `derby_watch.js` を、`kobako.app.load`（[eval-peak](../vm/eval-peak.md) §7、[共通 API](../api/common-api.md) §5.1）のチャンクに分けた。目的は、評価の余裕（3.8〜5.6 KB、上の各節）を広げること。数値の種別を明記する（実機の実測／host の実測（m32 は実機と同じ 8 B の JSValue）／計算）。
 
 ### 結論
 
@@ -1098,7 +1098,7 @@ mulberry32 は状態が `G = 0x6D2B79F5` ずつ進むカウンタ型なので、
 
 | 名前 | ファイル | バイト | 中身 | 読む時点 |
 | --- | --- | ---: | --- | --- |
-| 入口 | `derby_watch.js` | 3,901 | レースのモデル（`rng`〜`odds`）と `globalThis.derby`。`pocket` があれば 4 つを読む | 起動 |
+| 入口 | `derby_watch.js` | 3,901 | レースのモデル（`rng`〜`odds`）と `globalThis.derby`。`kobako` があれば 4 つを読む | 起動 |
 | `prog` | `derby_prog.js` | 6,733 | plan のプログラムの文字列 `T`、`prog`・`spec`、大写しの馬、HEAD ON の線画 | 入口の評価中 |
 | `view` | `derby_view.js` | 7,285 | plan の登録・音・状態・保存・カメラ・`course()` | 同 |
 | `scene` | `derby_scene.js` | 7,035 | `enter`・`build`・`hud`・`at`・`settle`・`paint` | 同 |
@@ -1106,15 +1106,15 @@ mulberry32 は状態が `G = 0x6D2B79F5` ずつ進むカウンタ型なので、
 | `demo` | `derby_demo.js` | 738 | `demo()` と自動操縦 `pilot()`（元の `attract()` の後半） | デモが初めて始まるフレーム |
 
 - 境目はトップレベルの関数・宣言の単位で、元のソースの順のまま（中身は 1 文字も変えず、字下げを 2 つ減らしただけ。`attract()` の 2 か所と `pilot()` の切り出しを除く）。静的 `import` に移るときも、この単位でモジュールにできる（ただし A 案では可変の共有状態をオブジェクトに移す必要がある。eval-peak §8）。
-- 入口にモデルを残したのは、`tools/games/tune_derby.mjs` が `pocket` の無い Node で入口だけを評価して `globalThis.derby` を読むため。`typeof pocket` を見て分岐する形は元の `return` と同じ。
+- 入口にモデルを残したのは、`tools/games/tune_derby.mjs` が `kobako` の無い Node で入口だけを評価して `globalThis.derby` を読むため。`typeof kobako` を見て分岐する形は元の `return` と同じ。
 - `globalThis.frame` は評価の終わりに1度だけ読まれるので、最後に評価中に読む `play` に置いた。
 - **`demo` だけを遅らせた理由**: 他の部分はどれも毎レース使うので、遅らせても最初のレースで読まれ、手放せない（API に手放しが無い）。デモは放置したときにしか使われず、幕が黒のフレームで読めるので、読み込みの停止が見えない。遅らせて減るのは約 1.5 KB（実機: `used=122,792>124,272>125,568`）で、目的（評価のピーク）への寄与は小さい。
 
 ### 読み込みの失敗
 
-- `attract()` が `pocket.app.load('demo')` を try/catch で呼ぶ。失敗したら `DEMOFAIL <エラー>` を記録し、放置の計時を今に戻して戻る（次のフレームで幕が上がり、15 秒後にもう一度試す）。`OUT_OF_MEMORY`（retryable）でも他の失敗でも同じ扱い。デモの状態（`dm` など）は触らないので、ゲームは止まらない。解析の失敗は再試行でき、実行の途中の失敗は同じ名前が `CORRUPT_DATA` を返し続ける（そのときはデモが出なくなるだけ）。
+- `attract()` が `kobako.app.load('demo')` を try/catch で呼ぶ。失敗したら `DEMOFAIL <エラー>` を記録し、放置の計時を今に戻して戻る（次のフレームで幕が上がり、15 秒後にもう一度試す）。`OUT_OF_MEMORY`（retryable）でも他の失敗でも同じ扱い。デモの状態（`dm` など）は触らないので、ゲームは止まらない。解析の失敗は再試行でき、実行の途中の失敗は同じ名前が `CORRUPT_DATA` を返し続ける（そのときはデモが出なくなるだけ）。
 - 評価中の 4 つの失敗は捕まえない（起動できないので `EVAL_ERROR` で止まるのが正しい）。
-- 実機で失敗の経路は起こしていない（heap を詰めた試験はしていない）。host の `pocket.app.load` の試験（`tools/build_app_load_test.sh`）が OOM からの再試行を持つ。
+- 実機で失敗の経路は起こしていない（heap を詰めた試験はしていない）。host の `kobako.app.load` の試験（`tools/build_app_load_test.sh`）が OOM からの再試行を持つ。
 
 ### 実機（2026-09-30、COM3）
 
@@ -1123,7 +1123,7 @@ mulberry32 は状態が `G = 0x6D2B79F5` ずつ進むカウンタ型なので、
 | 起動（`APP_ID` → `RUN 3901 bytes -> ESP_OK`） | 187 ms（分割前の記録 222〜224 ms）。各チャンクの解析＋実行: `prog` 23.0＋2.1、`view` 35.6＋8.2、`scene` 37.0＋1.0、`play` 26.6＋11.8 ms |
 | 評価直後のゲスト | 116,216 B（分割前 119,776、同じ `heapprobe` の最小上限での値） |
 | デモの読み込み（frame の中） | 解析 5.5 ms＋実行 0.7 ms（738 B）。そのターンの JS は 41.9 ms（うち約 30 ms は従来からあるデモのパドックの準備、オッズの計算）。ターンの期限 250 ms の内側で、幕は黒 |
-| 一巡（診断 image、`-DKASANE_MEGADEMO_TRACE=ON -DPOCKET_KEYTEST=ON`） | 放置 15.0 秒でデモ → 1 周（`DEMO END 6510,10,0,100` が開始と一致）→ 2 回目のデモのレース中に `D` で抜ける → 手で 1 レース → `R` 再生 → `1` 次のレース → Back（`SAVE points=6770 race=11`）→ 再起動（`LOADED points=6770 race=11`）。`DEMOFAIL`・`FRAMEFAIL`・`LOADFAIL`・`LOADSTALL`・`START_FAILED` なし |
+| 一巡（診断 image、`-DKASANE_MEGADEMO_TRACE=ON -DKOBAKO_KEYTEST=ON`） | 放置 15.0 秒でデモ → 1 周（`DEMO END 6510,10,0,100` が開始と一致）→ 2 回目のデモのレース中に `D` で抜ける → 手で 1 レース → `R` 再生 → `1` 次のレース → Back（`SAVE points=6770 race=11`）→ 再起動（`LOADED points=6770 race=11`）。`DEMOFAIL`・`FRAMEFAIL`・`LOADFAIL`・`LOADSTALL`・`START_FAILED` なし |
 | 回帰（通常 image） | `smoke_device.py --cycles 20` `SMOKE_OK 20`、`test_app_resume.py` `TEST_APP_RESUME_OK`、`stress_app.py` `STRESS_APP_PASS`、LCD CATCH（11）・DERBY WATCH（12）・BIG WAVE（13）・MEGADEMO（8）の起動 `RUN … ESP_OK` |
 
 一巡の場面ごと（診断 image、MID、1 回の実行。レースは種が毎回違う）:
@@ -1154,13 +1154,13 @@ mulberry32 は状態が `G = 0x6D2B79F5` ずつ進むカウンタ型なので、
 
 ### host の検証
 
-- `tools/games/test_derby_host.c` が、ファームと同じ `apps/derby/chunks.txt` を `tools/hostshim/app_chunks_host.c` で読み、本物の `pocket_app_load.c`・`app_registry.c` で `pocket.app.load` を入れる（eval-peak §7.4 の手順）。前置きの `pocket` に `app` を足した。`run_derby.py` のリンクに 3 ファイルを足した。
+- `tools/games/test_derby_host.c` が、ファームと同じ `apps/derby/chunks.txt` を `tools/hostshim/app_chunks_host.c` で読み、本物の `kobako_app_load.c`・`app_registry.c` で `kobako.app.load` を入れる（eval-peak §7.4 の手順）。前置きの `kobako` に `app` を足した。`run_derby.py` のリンクに 3 ファイルを足した。
 - `DERBY_COMPILE_ONLY=1` は入口しか解析しない（チャンクは評価のときに読まれる）ので、分割後はピークの目安にならない。評価のピークは `DERBY_EVAL_ONLY=1`（読み込みを含む）か、実機の `heapprobe` の二分探索で見る。
 - host のゲスト heap（m32、デモの後の GC 後）: 136,4xx → 130,9xx B（−5.5 KB。デモを含むので `demo` の分は読まれている）。
 
 ### heapprobe の変種
 
-`POCKET_HEAPPROBE` の `derby-spread`・`-flat`・`-split3/4`・`-load3/4`・`-bc` は 1 本のソースから作る試作。以前は分割前のソースを `apps/heapprobe/derby_v0/derby_watch.js`（e15e6eb の blob そのまま）に凍結して使っていたが、それは float の VM で描いていたので、Shiki v2.0 で VM と一緒に消した。今は configure の時に `tools/heapprobe_derby.py` が出荷の DERBY（入口と `chunks.txt` のチャンク。prog チャンクは build と同じく `@shiki` を抜く）を 1 本の関数に包んだスクリプトにし、`main/CMakeLists.txt` がそこから各変種を作る（2026-11-02。host の DERBY 検査を、この 1 本で通した）。`derby`（索引 29）は出荷の入口（チャンクを含む）を評価する。
+`KOBAKO_HEAPPROBE` の `derby-spread`・`-flat`・`-split3/4`・`-load3/4`・`-bc` は 1 本のソースから作る試作。以前は分割前のソースを `apps/heapprobe/derby_v0/derby_watch.js`（e15e6eb の blob そのまま）に凍結して使っていたが、それは float の VM で描いていたので、Shiki v2.0 で VM と一緒に消した。今は configure の時に `tools/heapprobe_derby.py` が出荷の DERBY（入口と `chunks.txt` のチャンク。prog チャンクは build と同じく `@shiki` を抜く）を 1 本の関数に包んだスクリプトにし、`main/CMakeLists.txt` がそこから各変種を作る（2026-11-02。host の DERBY 検査を、この 1 本で通した）。`derby`（索引 29）は出荷の入口（チャンクを含む）を評価する。
 
 ### 確信の低い点
 
@@ -1212,7 +1212,7 @@ mulberry32 は状態が `G = 0x6D2B79F5` ずつ進むカウンタ型なので、
 
 ### 代わりの案（どれも未実装）
 
-1. **ネイティブで、面ごとに表示待ちの候補を持つ**（`pocket_shiki_frame.c` の `any_pending()` を面ごとにし、1 回の表示で 2 面の候補を ACK する）。そうすれば中継ターンが無くなり、面0と面1を同じターンで `commit()` できる。面0ターンの測定値（MID VISION の JS 11.71 ms・描画 10.78 ms・転送 7.36 ms）に中継の draw 1〜2 ms を足すと、NF = 2〜4 でも 1 フレーム 31〜32 ms で 30 fps に収まる見込み（推定）。変更は `begin_impl` の門、`present_result` の ACK の配り方、repair の扱いで、D2 の host 契約試験（`test_pocket_proc_turn_qjs.c` の 2 面の場合）の作り直しが要る。メモリは今回と同じ約 6 KB 減る。
+1. **ネイティブで、面ごとに表示待ちの候補を持つ**（`kobako_shiki_frame.c` の `any_pending()` を面ごとにし、1 回の表示で 2 面の候補を ACK する）。そうすれば中継ターンが無くなり、面0と面1を同じターンで `commit()` できる。面0ターンの測定値（MID VISION の JS 11.71 ms・描画 10.78 ms・転送 7.36 ms）に中継の draw 1〜2 ms を足すと、NF = 2〜4 でも 1 フレーム 31〜32 ms で 30 fps に収まる見込み（推定）。変更は `begin_impl` の門、`present_result` の ACK の配り方、repair の扱いで、D2 の host 契約試験（`test_kobako_proc_turn_qjs.c` の 2 面の場合）の作り直しが要る。メモリは今回と同じ約 6 KB 減る。
 2. **面0のまま、合成の 1 ms を払わずに JS を削る**: 今回の面0ターンの差（中継の組み立て 2.9〜3.3 ms）が上限。以前試した「中継を数フレームに 1 回組み立てて入力をずらす」は +1 fps だった（上の「大型画面と演出カメラ」）。HEAVY WIDE（25.7 fps）と MID FIELD（27.3 fps）の画面ありが最も遅いので、効くのはこの 2 つ。
 3. **演出の幅**（中継カメラを本編と独立にする）は、面0のままでも `course()` の中継の呼び出しに渡すカメラを替えるだけでできる（中継カメラは既に本編カメラと独立に `[85·z, 3, …]` を使っている）。面1は前提ではない。
 
@@ -1230,7 +1230,7 @@ mulberry32 は状態が `G = 0x6D2B79F5` ずつ進むカウンタ型なので、
 - **段階 2（8da3fe7）**: `CAMS` を 1 台 1 行 `[f, 高さ, 地平線, lead, 平滑, lo, hi]` の表にし、`shot()` の WIDE／FINISH／PHOTO／VISION の分岐を表の読み取りにした（`cx = clamp(lo, hi, 平滑 ? 追従 : 先頭 − lead/f)`）。
 - **host**（`run_derby.py`、ASan と `--m32`）: 段階 1・2 とも全 13 回 PASS。着順・完走時刻（全桁）・デモ・種・オッズ・全画素ハッシュの行が基準 00a7c26 と一致（違うのはゲスト heap の数値だけ）。host m32 の評価後のゲストは 107,112 → 108,160（段階 1）→ 108,244 B（段階 2）。
 - **実機の評価の余裕**（`heapprobe` の `derby` 変種、256 B 刻みの二分探索、上限 163,840 B）: 基準 00a7c26 は 133,871 B で評価でき 133,700 で OOM（余裕 29,969 B）。段階 1・2 はどちらも 135,070 B で評価でき 134,898 で OOM（余裕 28,770 B、−1.2 KB。大半は `pose`）。
-- **基準の実機の値**（2026-09-30、診断 image `-DKASANE_MEGADEMO_TRACE=ON -DKASANE_BGCOST_TRACE=ON -DPOCKET_KEYTEST=ON`、MID と HEAVY のデモ各 3 レース）: 評価直後のゲスト 115,124 B、ゲストの最大 128,736 B、ターン境界の空きの最小 22,520 B、ターン内の最小 13,256 B、`LOADSTALL` なし（plan 25 本）。fps（レース）: MID の横見 WIDE 29.7・FIELD 29.5・VISION 26.7、HEAVY の WIDE 29.2・FIELD 28.0・VISION 25.5。段階 3（首振り WIDE）の判定の基準にした。
+- **基準の実機の値**（2026-09-30、診断 image `-DKASANE_MEGADEMO_TRACE=ON -DKASANE_BGCOST_TRACE=ON -DKOBAKO_KEYTEST=ON`、MID と HEAVY のデモ各 3 レース）: 評価直後のゲスト 115,124 B、ゲストの最大 128,736 B、ターン境界の空きの最小 22,520 B、ターン内の最小 13,256 B、`LOADSTALL` なし（plan 25 本）。fps（レース）: MID の横見 WIDE 29.7・FIELD 29.5・VISION 26.7、HEAVY の WIDE 29.2・FIELD 28.0・VISION 25.5。段階 3（首振り WIDE）の判定の基準にした。
 
 ## 首振りカメラ（段階 3、2026-10-01、ブランチ `vm/pan-stage3`）
 
@@ -1343,7 +1343,7 @@ q24 の段階 3。WIDE を、コースの手前に立つ 3 台の首振りカメ
 - **着順・完走時刻（全桁）・種・デモ・R 再生・オッズ・保存の行は main と全行一致**（host、ASan 16 構成と m32 11 構成）。画素ハッシュは意図どおり変わった。
 - **費用（host m32 実測、main fb424aa 比）**: ソース +662 B、評価のピーク +1,544 B、評価後 +1,252 B、GC 後の生存ピーク MID +1,684 B・LIGHT/HEAVY +2,800 B、レース 1 フレームの確保 +9.8 回・+781 B（`zo.sort`）。
 - **費用を下げた手順**: 舵を `frame()` の中に入れると評価のピークが +6,284 B（`frame()` が数十バイト増えるだけで `compute_stack_size` の作業領域が +3.4 KB 跳ねる）。別関数 +3,900、`at()` の中（新ステップのときだけ）+3,016、さらに `lw`→`rs.l`・`mk`→`F.k` でグローバル 2 つに減らして +1,544。グローバルの `let` は 4 つで評価のピークが約 +1.6 KB。`frame()` には 1 バイトも足していない。
-- **実機の推定（未測定）**: ゲスト最大 134.1〜134.8 KB が約 135.8〜137.6 KB（線 140,000 B まで 2.4〜4.2 KB）、評価の余裕 28.9 KB が約 27.4 KB（線 20 KB）。越えたら最初に `CONFIG_POCKET_VM_STRIP_DEBUG` ON（約 −3 KB）。追加の 1 フレームは `pow` 8・`sin` 8・8 要素 sort 1 で 0.2〜0.4 ms の見込み（推定）。実機で確かめること: `gu`・評価の余裕・`LOADSTALL` が無いこと・WIDE 2 の fps。
+- **実機の推定（未測定）**: ゲスト最大 134.1〜134.8 KB が約 135.8〜137.6 KB（線 140,000 B まで 2.4〜4.2 KB）、評価の余裕 28.9 KB が約 27.4 KB（線 20 KB）。越えたら最初に `CONFIG_QJS_LEAN_STRIP_DEBUG` ON（約 −3 KB）。追加の 1 フレームは `pow` 8・`sin` 8・8 要素 sort 1 で 0.2〜0.4 ms の見込み（推定）。実機で確かめること: `gu`・評価の余裕・`LOADSTALL` が無いこと・WIDE 2 の fps。
 - **2026-10-17 の回帰修正（cloud、実機未検証）**: `at(u)` が自身を補間位置 `px + (x−px)·u` で描くのに、sway の先頭位置だけ `max(rs.x)`（ステップ終了位置）を使っていたため、スロー中に先頭が揺れた（等速の直線で u=0 に +0.018 m）。既存の配列 `a` に補間位置を入れてその最大値を先頭にする修正（scene +35 B）。舵の目標・上限・レースモデルは不変。テスト（`test_derby_lanes.mjs` など）は 2026-11-02 に整数化（[derby-integer.md](derby-integer.md)）とともに廃止し、挙動は `run_derby.py` が検査する。
 
 ## 首振りカメラの馬の描画順（2026-10-17）

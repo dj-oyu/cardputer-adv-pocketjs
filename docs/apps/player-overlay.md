@@ -5,7 +5,7 @@
 ## 仕組み
 
 - `app_session.c`がoverlayセッションにも`fs`/`av`をinstallする。無線・マイク・バスはoverlayに無い。
-- `app_overlay_tick()`が`pocket_overlay_pump()` / `pocket_fs_pump()` / `pocket_av_pump()`を`app_tick()`と同じ順で回す。
+- `app_overlay_tick()`が`kobako_overlay_pump()` / `kobako_fs_pump()` / `kobako_av_pump()`を`app_tick()`と同じ順で回す。
 - 3つのモーダル（ピッカー等）は`ui_task`が配送し、**モーダルがoverlayに勝つ**。
 - `REGISTERED[]`（`main/ui/overlay.c`）は現在2行: DESK CLOCK / MUSIC。Settingsの3択で切り替える。
 - `shell_draw()`はoverlayが立っているとき`menu_layout()`を呼ばず、XMBのラベルも描かない。
@@ -21,9 +21,9 @@
 
 ## 実装済みの機能
 
-**音量。** Settingsに`VOLUME`行（QUIET/LOW/MID/HIGH/LOUD）と、ホーム画面のどこでも効く`-`/`=`キー（シェルが取る。プレイヤーは所有しない）。ES8311のレジスタ`0x32`を書く機器プロパティで、`pocket.audio`には出していない——アプリが自分で音量を上げられると、誰も見ていない間に上げられてしまう。変更は右上に1.5秒表示し、NVSへ保存する。
+**音量。** Settingsに`VOLUME`行（QUIET/LOW/MID/HIGH/LOUD）と、ホーム画面のどこでも効く`-`/`=`キー（シェルが取る。プレイヤーは所有しない）。ES8311のレジスタ`0x32`を書く機器プロパティで、`kobako.audio`には出していない——アプリが自分で音量を上げられると、誰も見ていない間に上げられてしまう。変更は右上に1.5秒表示し、NVSへ保存する。
 
-**曲の長さ。** Xing/Info/VBRIタグから総フレーム数を読む（`pocket_mp3_total_frames`）。無ければ`durationMs`は`null`のままで、推測しない。バーは長さが分かるときだけ描き、分からないときは位置を主張しない光の演出に切り替える。`tools/test_mp3_duration.c`がホストで検査する。
+**曲の長さ。** Xing/Info/VBRIタグから総フレーム数を読む（`kobako_mp3_total_frames`）。無ければ`durationMs`は`null`のままで、推測しない。バーは長さが分かるときだけ描き、分からないときは位置を主張しない光の演出に切り替える。`tools/test_mp3_duration.c`がホストで検査する。
 
 ## 制約として残っているもの
 

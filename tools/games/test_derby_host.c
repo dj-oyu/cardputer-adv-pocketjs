@@ -1,18 +1,18 @@
 /* apps/derby/derby_watch.js as the firmware runs it, on the host: the real
- * QuickJS, the real pocket.kasane (view + shiki) and the real renderer
+ * QuickJS, the real kobako.kasane (view + shiki) and the real renderer
  * presenting into a 240x135 panel after every frame(), with key edges fed
- * through the real keymap_poll() and keystate into pocket.input.keys.
+ * through the real keymap_poll() and keystate into kobako.input.keys.
  *
  * A scripted game: paddock (pick #3, bet, cycle the load tier), gate, race
  * with camera changes, slow motion, photo, result, a replay of the same race
  * with no camera changes (must finish identically: the camera cannot change
  * the race), the next race, and the Back turn (frame(0x2000) saves).
  *
- * Every Shiki draw (shiki.draw, drawMany, and pocket.derby's native draws
- * through pocket_proc_draw_hook) is replayed here through the same engine
+ * Every Shiki draw (shiki.draw, drawMany, and kobako.derby's native draws
+ * through kobako_proc_draw_hook) is replayed here through the same engine
  * into a frame of our own, and at each commit that frame (rendered whole)
  * must equal, pixel for pixel, the frame the adapter committed (read back in
- * 8-row bands through pocket_proc_backdrop): no draw reaches the panel
+ * 8-row bands through kobako_proc_backdrop): no draw reaches the panel
  * unseen, so the screen checks below see everything that was drawn. Every
  * op of the built-in Shiki table must be drawn at least once, at most one
  * program may be registered per frame, and per-frame statistics are written.
@@ -20,7 +20,7 @@
  * with Shiki v2.0; the engine's own correctness is the Shiki contract's.)
  *
  * The demo (attract) mode, before the scripted game at MID: the idle clock
- * is pocket.time.now(), which this harness drives (33.3 ms a frame, 100 ms
+ * is kobako.time.now(), which this harness drives (33.3 ms a frame, 100 ms
  * to stand for dropped frames, or one jump), so 14.9 s and 15 s are exact.
  * Three whole demos, then one cut short by a key in each scene, and a Back
  * during a demo at the end; the player's points, race, pick, stake, next
@@ -57,21 +57,21 @@
  *      keys: the director alone), DERBY_PICK=<0..7>,
  *      DERBY_NORMAL=<race>,<pick> (play that race by hand with that pick and
  *      stop at the result: the reference a demo race must match),
- *      DERBY_HW=<uint32> (what pocket.random.seed() returns; fixed by default).
+ *      DERBY_HW=<uint32> (what kobako.random.seed() returns; fixed by default).
  */
-#include "pocket_kasane.h"
-#include "pocket_shiki_frame.h"
-#include "pocket_derby.h"
-#include "pocket_input.h"
-#include "pocket_api.h"
-#include "pocket_av.h"
+#include "kobako_kasane.h"
+#include "kobako_shiki_frame.h"
+#include "kobako_derby.h"
+#include "kobako_input.h"
+#include "kobako_api.h"
+#include "kobako_av.h"
 #include "keymap.h"
 #include "app_chunks_host.h"
 #include "app_registry.h"
 #include "ksn_shiki.h"
 #include "shiki_heap.h"
-#include "pocket_shiki_api.h"   /* the windows go before the guest */
-#include "pocket_app_load.h"
+#include "kobako_shiki_api.h"   /* the windows go before the guest */
+#include "kobako_app_load.h"
 #include "system/sys_device.h"
 #include "ui/kasane/ksn_render.h"
 #include "text/ksn_font.h"
@@ -82,7 +82,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include "pocket_sub_impl.inc"
+#include "kobako_sub_impl.inc"
 
 /* ---- the guest allocator as the device charges it (TLSF lengths), as in
  * tools/kasane_contract/test_megademo_app_host.c. */
@@ -126,8 +126,8 @@ static const JSMallocFunctions PEAK_MF={pk_calloc,pk_malloc,pk_free,pk_realloc,p
 
 /* ---- stubs, as tools/test_keytest_app.c */
 void host_capabilities_clear(void);
-int32_t pocket_av_ui_current_player(void){return 0;}
-bool pocket_av_ui_read(int32_t id,pocket_av_ui_snapshot *out){(void)id;(void)out;return false;}
+int32_t kobako_av_ui_current_player(void){return 0;}
+bool kobako_av_ui_read(int32_t id,kobako_av_ui_snapshot *out){(void)id;(void)out;return false;}
 bool sys_device_clock_read(sys_clock_state *out){(void)out;return false;}
 void sound_stream_set_observer(sound_stream_observer_fn o){(void)o;}
 void sound_stream_set_observer_interval(sound_stream_observer_fn o,uint32_t n){(void)o;(void)n;}
@@ -135,21 +135,21 @@ void *__real_calloc(size_t count,size_t size);
 void __real_free(void *ptr);
 void __wrap_free(void *ptr){__real_free(ptr);}
 void *__wrap_calloc(size_t count,size_t size){return __real_calloc(count,size);}
-bool pocket_text_active(void){return false;}
+bool kobako_text_active(void){return false;}
 int64_t esp_timer_get_time(void){return 0;}
-esp_err_t pocket_grid_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
-void pocket_grid_reset(void){}
-bool pocket_grid_pending(void){return false;}
-void pocket_grid_present_result(ksn_result r){(void)r;}
-void pocket_grid_source_invalidated(uint32_t id){(void)id;}
-esp_err_t pocket_video_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
-void pocket_video_reset(void){}
-bool pocket_video_pending(void){return false;}
-void pocket_video_present_result(ksn_result r){(void)r;}
-esp_err_t pocket_pixel_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
-void pocket_pixel_reset(void){}
-bool pocket_pixel_pending(void){return false;}
-void pocket_pixel_present_result(ksn_result r){(void)r;}
+esp_err_t kobako_grid_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void kobako_grid_reset(void){}
+bool kobako_grid_pending(void){return false;}
+void kobako_grid_present_result(ksn_result r){(void)r;}
+void kobako_grid_source_invalidated(uint32_t id){(void)id;}
+esp_err_t kobako_video_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void kobako_video_reset(void){}
+bool kobako_video_pending(void){return false;}
+void kobako_video_present_result(ksn_result r){(void)r;}
+esp_err_t kobako_pixel_install(JSContext *c,JSValueConst k){(void)c;(void)k;return ESP_OK;}
+void kobako_pixel_reset(void){}
+bool kobako_pixel_pending(void){return false;}
+void kobako_pixel_present_result(ksn_result r){(void)r;}
 
 static board_keyevent_t fifo[16];
 static unsigned fifo_n,fifo_at;
@@ -285,7 +285,7 @@ static void tagged(unsigned tag,const double *in64,const ksn_proc_frame *fp){
              g[2].x1==a&&g[2].y1==d&&g[3].x1==a&&g[3].y1==b))bezel_bad++;
     }
 }
-/* pocket.derby's draws (pocket_shiki_frame.c calls this after each one that
+/* kobako.derby's draws (kobako_shiki_frame.c calls this after each one that
  * succeeded): replayed like the app's shiki.draw, tagged as the JS wrapper
  * tags them (__nt: -2 the screen's face, -3 a panning unit's hl, else -1).
  * (ser() draws with integer inputs only: the hook below.) */
@@ -295,23 +295,23 @@ static unsigned ser_n;
 static bool ser_overflow;
 static unsigned long ser_calls,ser_fuzz_calls,ser_draws,ser_fuzz_draws;
 static void sdraw_run(sspec *s,const double *in,const int32_t *fx,unsigned n,unsigned tag);
-void pocket_proc_draw_hook(uint32_t handle,const double *in,unsigned n){
-    if(pocket_proc_hook_dry)return;
+void kobako_proc_draw_hook(uint32_t handle,const double *in,unsigned n){
+    if(kobako_proc_hook_dry)return;
     JSValue g=JS_GetGlobalObject(ctx),fn=JS_GetPropertyStr(ctx,g,"__nt"),h=JS_NewInt32(ctx,(int32_t)handle);
     JSValue r=JS_Call(ctx,fn,g,1,&h);
     REQ(!JS_IsException(r));
     const double f=num(r);
     JS_FreeValue(ctx,r);JS_FreeValue(ctx,fn);JS_FreeValue(ctx,g);
     const unsigned tag=f==-2?1u:f==-3&&n>7&&in[7]==10565?3u:0u;
-    /* pocket_proc_draw_numbers takes Shiki handles only (v2.0). */
+    /* kobako_proc_draw_numbers takes Shiki handles only (v2.0). */
     sspec *ss=sfind((int)handle);REQ(ss);
     sdraw_run(ss,in,NULL,n,tag);
 }
-/* pocket.derby.runners' draws (pocket_proc_draw_fixed): integer inputs, as
+/* kobako.derby.runners' draws (kobako_proc_draw_fixed): integer inputs, as
  * the app's drawMany with an Int32Array, replayed untagged as those were. */
-void pocket_proc_draw_fixed_hook(uint32_t handle,const int32_t *fx,unsigned n){
+void kobako_proc_draw_fixed_hook(uint32_t handle,const int32_t *fx,unsigned n){
     REQ(n<=KSN_SHIKI_INPUTS);
-    /* The integer ser()'s draws (pocket.derby.ser): the raw Q values,
+    /* The integer ser()'s draws (kobako.derby.ser): the raw Q values,
      * turned into numbers by __sercmp, which knows the plan. */
     if(ser_oracle){
         if(ser_n+9<=sizeof ser_buf/sizeof ser_buf[0]){
@@ -319,7 +319,7 @@ void pocket_proc_draw_fixed_hook(uint32_t handle,const int32_t *fx,unsigned n){
             for(unsigned i=0;i<8;i++)ser_buf[ser_n++]=i<n?fx[i]:0;
         }else ser_overflow=true;
     }
-    if(pocket_proc_hook_dry)return;
+    if(kobako_proc_hook_dry)return;
     double in[KSN_SHIKI_INPUTS];
     for(unsigned i=0;i<n;i++)in[i]=fx[i];
     sspec *ss=sfind((int)handle);REQ(ss);
@@ -332,7 +332,7 @@ static JSValue js_serbegin(JSContext *c,JSValueConst self,int argc,JSValueConst 
 }
 static JSValue js_serdry(JSContext *c,JSValueConst self,int argc,JSValueConst *argv){
     (void)c;(void)self;(void)argc;
-    pocket_proc_hook_dry=JS_ToBool(ctx,argv[0]);
+    kobako_proc_hook_dry=JS_ToBool(ctx,argv[0]);
     return JS_UNDEFINED;
 }
 /* The integer path's tolerance (docs/apps/derby-ser-division.md sec.5.1 and
@@ -539,7 +539,7 @@ static JSValue js_cap_commit(JSContext *c,JSValueConst self,int argc,JSValueCons
     for(unsigned i=0;i<240*135;i++)pix_cand[i]=cur_bg;
     REQ(ksn_proc_render_band(&cand,pix_cand,0,135));
     if(!cur_surface){
-        for(unsigned y=0;y<135;y+=8)REQ(pocket_proc_backdrop(NULL,(uint16_t)y,(uint16_t)(y+8<=135?8:135-y),pix_dev+y*240)==KSN_OK);
+        for(unsigned y=0;y<135;y+=8)REQ(kobako_proc_backdrop(NULL,(uint16_t)y,(uint16_t)(y+8<=135?8:135-y),pix_dev+y*240)==KSN_OK);
         if(memcmp(pix_cand,pix_dev,sizeof pix_cand)){
             unsigned d=0;for(unsigned i=0;i<240*135;i++)d+=pix_cand[i]!=pix_dev[i];
             FAIL("tick %u scene %s: the replayed frame (%u segments) differs from the committed one in %u px",tick,scene,cand.count,d);
@@ -681,7 +681,7 @@ static bool eval(const char *src,size_t n,const char *name){
     }
     JS_FreeValue(ctx,v);
     JSContext *cc;while(JS_ExecutePendingJob(rt,&cc)>0){}
-    pocket_kasane_end_turn();
+    kobako_kasane_end_turn();
     return ok;
 }
 /* KSN_STRIP_ROWS=4: the port of design 0 (docs/platform/lcd-dma-driver.md
@@ -702,13 +702,13 @@ static ksn_result send_strip(void *o,uint16_t y,uint16_t rows,const uint16_t *p)
     (void)o;memcpy(panel+y*240,p,rows*240*sizeof *p);return KSN_OK;
 }
 static void present(uint64_t now_us){
-    pocket_kasane_set_animation_time(now_us);
-    (void)pocket_kasane_advance(now_us);
+    kobako_kasane_set_animation_time(now_us);
+    (void)kobako_kasane_advance(now_us);
     ksn_display_port port={.strip=get_strip,.present=send_strip,.width=240,.height=135,.strip_rows=strip_rows_arm,.text=&ksn_font_port};
     ksn_render_stats st;
-    if(pocket_kasane_present(&port,&st)!=KSN_OK)bad_present++;
+    if(kobako_kasane_present(&port,&st)!=KSN_OK)bad_present++;
     else{
-        pocket_kasane_animations_presented(now_us);
+        kobako_kasane_animations_presented(now_us);
         for(size_t i=0;i<240u*135u;i++){strip_panel_digest^=panel[i];strip_panel_digest*=16777619u;}
     }
 }
@@ -808,7 +808,7 @@ static JSValue js_probe(JSContext *c,JSValueConst self,int argc,JSValueConst *ar
 
 /* One turn: pump keys, frame(buttons), present. */
 static void frame(unsigned buttons){
-    pocket_input_pump(0);
+    kobako_input_pump(0);
     frame_regs=0;
     frame_ms=round(now_ms*1000)/1000;   /* what the guest reads (%.3f) */
     char call[512];snprintf(call,sizeof call,"__turn=1;__now=%.3f;%s__churn(1);frame(%u);__churn(0);__probe([].concat.apply([],__ov.map(r=>"
@@ -838,10 +838,10 @@ static void frame(unsigned buttons){
     {size_t g=heap_used();for(unsigned i=0;i<5;i++)if(!strcmp(scene,CHURN_SCENE[i]))churn[i].gc+=h>g?h-g:0;}
     h=heap_used();if(h>heap_live_peak)heap_live_peak=h;
     tick++;scene_t++;
-#ifdef POCKET_DERBY_SER_PROBE
+#ifdef KOBAKO_DERBY_SER_PROBE
     /* The device's DERBY_SER line, every 30 turns (KSN_HOST_CFLAGS=
-     * -DPOCKET_DERBY_SER_PROBE; the host's cycles read 0). */
-    if(!(tick%30u)){printf("[tick %u %s] ",tick,scene);pocket_derby_ser_probe_log(30);putchar('\n');}
+     * -DKOBAKO_DERBY_SER_PROBE; the host's cycles read 0). */
+    if(!(tick%30u)){printf("[tick %u %s] ",tick,scene);kobako_derby_ser_probe_log(30);putchar('\n');}
 #endif
 }
 static void tap(const char *k){edge(k,true);frame(0);edge(k,false);frame(0);}
@@ -1001,7 +1001,7 @@ static const char PRELUDE[]=
     "S.unregister=function(h){SU.call(S,h);__sunreg(h)};"
     /* data(): the window remembers its shape, for __sreg's regions. */
     "const SA=S.data;S.data=function(d){const w=SA.call(S,d);w.__d=[d.type==='i16'?0:d.type==='u16'?1:2,d.q,d.record,d.records];return w};"
-    /* pocket.derby's native draws (pocket_proc_draw_hook): -2 the screen's
+    /* kobako.derby's native draws (kobako_proc_draw_hook): -2 the screen's
      * face (vis), -3 a panning unit's hl (its bezel when the colour is
      * 10565), else -1. */
     "globalThis.__nt=h=>{const L=globalThis.derby&&derby.L;return !L?-1:h===L.vis?-2:h===L.hl?-3:-1};"
@@ -1027,7 +1027,7 @@ static const char PRELUDE[]=
     "K.patch=function(f){return PA.call(K,t=>{wrap(t);return f(t)})};})();"
     "globalThis.__turn=0;globalThis.__now=0;globalThis.__sets=0;globalThis.__cues=0;"
     "globalThis.__store={'derby.v1':{v:1,pts:1500,race:__race}};"
-    "globalThis.pocket={kasane:globalThis.kasane,input:globalThis.input,app:globalThis.app,derby:(()=>{const d=globalThis.__pd,o={};for(const n of Object.getOwnPropertyNames(d))o[n]=typeof d[n]==='function'?function(){__ftag(2,n,arguments);return d[n].apply(d,arguments)}:d[n];return o})(),time:{now:()=>__now},"
+    "globalThis.kobako={kasane:globalThis.kasane,input:globalThis.input,app:globalThis.app,derby:(()=>{const d=globalThis.__pd,o={};for(const n of Object.getOwnPropertyNames(d))o[n]=typeof d[n]==='function'?function(){__ftag(2,n,arguments);return d[n].apply(d,arguments)}:d[n];return o})(),time:{now:()=>__now},"
     /* The device samples the native heap at the start of a turn, so while the
      * source evaluates internalFreeBytes is null (2026-09-30: a startup loop
      * waiting on it spun into the 2 s evaluation deadline). Same here. */
@@ -1044,8 +1044,8 @@ int main(int argc,char **argv){
     if(getenv("KSN_TEXT_EXTENT"))g_ksn_text_extent=atoi(getenv("KSN_TEXT_EXTENT"));
     if(getenv("KSN_TEXT_RUNS"))g_ksn_text_runs=atoi(getenv("KSN_TEXT_RUNS"));
     if(getenv("KSN_PLAIN_WALK"))g_ksn_proc_plain_walk=atoi(getenv("KSN_PLAIN_WALK"));
-    if(getenv("KSN_BAND_BITS"))g_pocket_proc_band_bits=atoi(getenv("KSN_BAND_BITS"));
-    {extern int g_pocket_proc_ranges;if(getenv("KSN_PROC_RANGES"))g_pocket_proc_ranges=atoi(getenv("KSN_PROC_RANGES"));}
+    if(getenv("KSN_BAND_BITS"))g_kobako_proc_band_bits=atoi(getenv("KSN_BAND_BITS"));
+    {extern int g_kobako_proc_ranges;if(getenv("KSN_PROC_RANGES"))g_kobako_proc_ranges=atoi(getenv("KSN_PROC_RANGES"));}
     /* DERBY_APP_DIR: the app as the firmware build embeds it, its @plan
      * functions lowered (tools/games/run_derby.py makes the copy with
      * tools/kasane_ir/lower_plans.mjs); apps/derby itself does not run. */
@@ -1060,30 +1060,30 @@ int main(int argc,char **argv){
     if(getenv("DERBY_TIER"))tier_env=atoi(getenv("DERBY_TIER"));
     if(getenv("DERBY_CSV"))csv=fopen(getenv("DERBY_CSV"),"w");
     if(csv)fprintf(csv,"tick,scene,surface,screen,draws,segments,raster,draw_raster_max,draw_steps_max,frame_steps,live_plans,points,instr_max,registered,cm,fh\n");
-    /* The game's chunks (pocket.app.load), read from the list the firmware
+    /* The game's chunks (kobako.app.load), read from the list the firmware
      * build reads; the entry is still the file named above. */
     if(app_chunks_host_read(list))return 2;
     atexit(app_chunks_host_clear);
     app_registry_select("local.derby");
     if(getenv("DERBY_ALLOC_TRACE"))alloc_trace=fopen(getenv("DERBY_ALLOC_TRACE"),"w");
     rt=JS_NewRuntime2(&PEAK_MF,NULL);ctx=JS_NewContext(rt);
-    // As pocketjs_guest_create: apps run hardened (docs/vm/harden.md).
-    // POCKET_NO_HARDEN=1 skips it, for host A/B only.
-    if(!ctx||(!getenv("POCKET_NO_HARDEN")&&JS_PocketHarden(ctx)<0)){fprintf(stderr,"JS_PocketHarden failed\n");abort();}
+    // As kobako_guest_create: apps run hardened (docs/vm/harden.md).
+    // KOBAKO_NO_HARDEN=1 skips it, for host A/B only.
+    if(!ctx||(!getenv("KOBAKO_NO_HARDEN")&&JS_LeanHarden(ctx)<0)){fprintf(stderr,"JS_LeanHarden failed\n");abort();}
     host_capabilities_clear();
     const char *lim=getenv("DERBY_HEAP_LIMIT");
     if(lim){size_t l=(size_t)strtoul(lim,NULL,0);JS_SetMemoryLimit(rt,l);if(l/2<JS_GetGCThreshold(rt))JS_SetGCThreshold(rt,l/2);}
     /* The Shiki heap, as app_session.c takes it for an app naming
-     * kasane.shiki (DERBY does): pocket.kasane then has shiki. */
+     * kasane.shiki (DERBY does): kobako.kasane then has shiki. */
     REQ(shiki_heap_begin(0));
-    pocket_kasane_install(ctx,NULL);
-    {   /* pocket.derby (the firmware's lazy namespace, built here at once). */
+    kobako_kasane_install(ctx,NULL);
+    {   /* kobako.derby (the firmware's lazy namespace, built here at once). */
         JSValue g=JS_GetGlobalObject(ctx),ns=JS_NewObject(ctx);
-        REQ(pocket_derby_fill(ctx,ns,NULL)==ESP_OK);
+        REQ(kobako_derby_fill(ctx,ns,NULL)==ESP_OK);
         JS_SetPropertyStr(ctx,g,"__pd",ns);JS_FreeValue(ctx,g);
     }
-    pocket_input_install(ctx,NULL);
-    if(pocket_app_load_install(ctx)!=ESP_OK)return 2;
+    kobako_input_install(ctx,NULL);
+    if(kobako_app_load_install(ctx)!=ESP_OK)return 2;
     JSValue g=JS_GetGlobalObject(ctx);
     static const struct {const char *n;JSCFunction *f;int a;} fns[]={
         {"__log",js_log,1},{"__hr",js_hr,0},{"__begin",js_cap_begin,2},
@@ -1094,7 +1094,7 @@ int main(int argc,char **argv){
     /* DERBY_NORMAL=<race>,<pick>: the stored race is the demo's, played by hand. */
     unsigned normal_race=0,normal_pick=0;
     if(getenv("DERBY_NORMAL")&&sscanf(getenv("DERBY_NORMAL"),"%u,%u",&normal_race,&normal_pick)!=2)return 2;
-    /* DERBY_HW: what pocket.random.seed() returns. The device reads the
+    /* DERBY_HW: what kobako.random.seed() returns. The device reads the
      * hardware RNG; here it is fixed so every run of the script is the same
      * game (and a demo race can be played again by hand). */
     const unsigned hw=getenv("DERBY_HW")?(unsigned)strtoul(getenv("DERBY_HW"),NULL,0):0x2545f491u;
@@ -1141,7 +1141,7 @@ int main(int argc,char **argv){
      * (the up key's B side; docs/apps/derby-ser-division.md sec.13) instead of
      * the PIE kernels' (here their scalar reference, DERBY_SERPIE_HOST):
      * run_derby.py requires the same pixels. */
-    if(getenv("DERBY_SER_SCALAR")){const char *m="pocket.derby.mode(1)";REQ(eval(m,strlen(m),"mode.js"));}
+    if(getenv("DERBY_SER_SCALAR")){const char *m="kobako.derby.mode(1)";REQ(eval(m,strlen(m),"mode.js"));}
     /* DERBY_SER_ORACLE=1: the JS ser() of vm/main beside the C on every call,
      * then DERBY_SER_FUZZ random cases (default 4000) before the game. */
     if(getenv("DERBY_SER_ORACLE")){
@@ -1165,7 +1165,7 @@ int main(int argc,char **argv){
         run_until("res",4000);
         printf("NORMAL_FINISH %s\nNORMAL_PICK %s\nNORMAL_RESULT %s\n",finish[0],last_pick,last_result);
         bool ok=!exceptions&&!bad_present&&!framefails&&finishes==1;
-        pocket_input_reset();pocket_shiki_api_reset();pocket_kasane_reset();pocket_derby_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+        kobako_input_reset();kobako_shiki_api_reset();kobako_kasane_reset();kobako_derby_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
         printf("%s\n",ok?"DERBY_HOST PASS":"DERBY_HOST FAIL");
         return ok?0:1;
     }
@@ -1327,14 +1327,14 @@ int main(int argc,char **argv){
     printf("finish: %s\n",finishes?finish[0]:"-");
     if(finishes>1)printf("replay: %s\n",finish[1]);
     printf("pixels hash %016llx\n",(unsigned long long)pixel_hash);
-#ifdef POCKET_PROC_VISIT_STATS
-    {extern unsigned long long pocket_proc_visits[3][2];
+#ifdef KOBAKO_PROC_VISIT_STATS
+    {extern unsigned long long kobako_proc_visits[3][2];
      printf("proc visits 8-row: all=%llu B=%llu A=%llu | 4-row: all=%llu B=%llu A=%llu\n",
-            pocket_proc_visits[0][0],pocket_proc_visits[1][0],pocket_proc_visits[2][0],
-            pocket_proc_visits[0][1],pocket_proc_visits[1][1],pocket_proc_visits[2][1]);
-     extern unsigned pocket_proc_visit_frames,pocket_proc_list_max[2],pocket_proc_entries_max;
-     printf("proc frames=%u entries_max=%u list_max 8-row=%u 4-row=%u\n",pocket_proc_visit_frames,
-            pocket_proc_entries_max,pocket_proc_list_max[0],pocket_proc_list_max[1]);}
+            kobako_proc_visits[0][0],kobako_proc_visits[1][0],kobako_proc_visits[2][0],
+            kobako_proc_visits[0][1],kobako_proc_visits[1][1],kobako_proc_visits[2][1]);
+     extern unsigned kobako_proc_visit_frames,kobako_proc_list_max[2],kobako_proc_entries_max;
+     printf("proc frames=%u entries_max=%u list_max 8-row=%u 4-row=%u\n",kobako_proc_visit_frames,
+            kobako_proc_entries_max,kobako_proc_list_max[0],kobako_proc_list_max[1]);}
 #endif
     printf("strip_rows=%u panel_digest=%08x\n",(unsigned)strip_rows_arm,(unsigned)strip_panel_digest);
     printf("guest heap (TLSF model, %zu-bit host): before eval %zu, peak during eval %zu (+%zu), after eval %zu, "
@@ -1373,14 +1373,14 @@ int main(int argc,char **argv){
     }
     /* The integer series' invariants (every run; sec.5.2). */
     {
-        derby_ser_stats st;pocket_derby_ser_stats(&st);
+        derby_ser_stats st;kobako_derby_ser_stats(&st);
         printf("ser integers: chords %u (drawn %u), draws %u, saturated %u, skipped %u, newton start %u step %u, counts %u, "
                "joins %u (over 1 px %u, worst %.4f px)\n",st.chords,st.drawn,st.draws,st.sat,st.bad,st.newton_start,
                st.newton_step,st.count_range,st.joins,st.join_bad,st.join_worst);
         pass=pass&&!st.sat&&!st.bad&&!st.newton_start&&!st.newton_step&&!st.count_range&&!st.join_bad&&
              (!getenv("DERBY_PAN")||st.draws>0);
     }
-    pocket_input_reset();pocket_shiki_api_reset();pocket_kasane_reset();pocket_derby_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
+    kobako_input_reset();kobako_shiki_api_reset();kobako_kasane_reset();kobako_derby_reset();JS_FreeContext(ctx);JS_FreeRuntime(rt);
     printf("%s\n",pass?"DERBY_HOST PASS":"DERBY_HOST FAIL");
     return pass?0:1;
 }

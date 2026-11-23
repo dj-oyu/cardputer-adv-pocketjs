@@ -104,6 +104,9 @@ jobs:
           build_head=$(git rev-parse HEAD)
           idf.py -B build_result -D SDKCONFIG="$PWD/build_result/sdkconfig" -D IDF_TARGET=esp32s3 -D PROJECT_VER="${build_head:0:12}" build
           ccache -s || true
+          # A base from before the kobako rename (f4eb867) names its image cardputer_pocketjs.*
+          # and its options POCKET_*; copy the image to the new names and accept either prefix.
+          for f in build_result/cardputer_pocketjs.*; do if [ -e "$f" ]; then cp "$f" "${f/cardputer_pocketjs/cardputer_kobako}"; fi; done
           idf.py -B build_result size > build_result/size.log
           python3 -B - '${{ matrix.mode }}' "$build_head" '${{ matrix.profile }}' <<'PY'
           import hashlib,json,os,subprocess,sys
@@ -120,9 +123,9 @@ jobs:
           assert 'CONFIG_LOG_DEFAULT_LEVEL_INFO=y' in config
           assert 'CONFIG_COMPILER_OPTIMIZATION_SIZE=y' in config
           cache=(b/'CMakeCache.txt').read_text().splitlines()
-          for key in ('POCKET_DERBY_COURSE_CACHE','POCKET_DERBY_PROJECT_BATCH','KASANE_MEGADEMO_TRACE'):
-              assert key+':BOOL=OFF' in cache,key
-          names=['cardputer_pocketjs.bin','cardputer_pocketjs.elf','cardputer_pocketjs.map','bootloader/bootloader.bin','partition_table/partition-table.bin','sdkconfig','CMakeCache.txt','flasher_args.json']
+          for key in ('KOBAKO_DERBY_COURSE_CACHE','KOBAKO_DERBY_PROJECT_BATCH','KASANE_MEGADEMO_TRACE'):
+              assert key+':BOOL=OFF' in cache or key.replace('KOBAKO_','POCKET_',1)+':BOOL=OFF' in cache,key
+          names=['cardputer_kobako.bin','cardputer_kobako.elf','cardputer_kobako.map','bootloader/bootloader.bin','partition_table/partition-table.bin','sdkconfig','CMakeCache.txt','flasher_args.json']
           images={n:dict(bytes=(b/n).stat().st_size,sha256=hashlib.sha256((b/n).read_bytes()).hexdigest()) for n in names}
           (b/'experiment.json').write_text(json.dumps(dict(mode=sys.argv[1],source_head=sys.argv[2],experiment_head=os.environ['SOURCE_HEAD'],idf='6.0.1',diagnostic=diagnostic,hardware_tested=False,workload='lcdcatch-natural-120-v1' if diagnostic else None,images=images),indent=2)+'\n')
           (b/'SHA256SUMS').write_text(''.join(v['sha256']+'  '+n+'\n' for n,v in images.items()))
@@ -131,7 +134,7 @@ jobs:
           if test '${{ matrix.profile }}' = product; then git diff --exit-code; fi
           python "$IDF_PATH/components/partition_table/gen_esp32part.py" -q --offset 0x8000 --flash-size 8MB partitions.csv build_result/expected-partition.bin
           cmp build_result/expected-partition.bin build_result/partition_table/partition-table.bin
-          python3 -c 'from pathlib import Path; assert b"Application information:" in Path("build_result/cardputer_pocketjs.elf").read_bytes(); c=Path("build_result/sdkconfig").read_text(); assert not any(k+"=y" in c for k in ("CONFIG_SECURE_BOOT","CONFIG_SECURE_BOOT_V2_ENABLED","CONFIG_SECURE_FLASH_ENC_ENABLED","CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK"))'
+          python3 -c 'from pathlib import Path; assert b"Application information:" in Path("build_result/cardputer_kobako.elf").read_bytes(); c=Path("build_result/sdkconfig").read_text(); assert not any(k+"=y" in c for k in ("CONFIG_SECURE_BOOT","CONFIG_SECURE_BOOT_V2_ENABLED","CONFIG_SECURE_FLASH_ENC_ENABLED","CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK"))'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

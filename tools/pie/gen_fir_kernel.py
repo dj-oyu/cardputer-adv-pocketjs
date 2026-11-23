@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Emit main/pocket/fir_pie.c and fir_pie.h: the MP3 downsample FIR as an eight-output PIE kernel.
+"""Emit main/kobako/fir_pie.c and fir_pie.h: the MP3 downsample FIR as an eight-output PIE kernel.
 
 The tap loop is unrolled because a 32-tap window walk is not loop-shaped. It is
 written out by this script rather than by hand so the tap order, the coefficient
@@ -128,7 +128,7 @@ void fir8_pie(const int16_t *window, const int16_t *h, int16_t *out);
 
 HEAD = r'''/* The MP3 downsample FIR as an eight-output PIE kernel.
  *
- * main/pocket/mp3_decode.c runs one output per decoded sample:
+ * main/kobako/mp3_decode.c runs one output per decoded sample:
  *
  *     sum = sum(history[(cursor-k) and 31] * filter[k], k=0..31);
  *     sample = sum >> 14;  clamp to int16
@@ -194,7 +194,7 @@ void fir8_pie(const int16_t *window, const int16_t *h, int16_t *out) {
 hdr = HDR.replace('@@TAPS@@', str(TAPS))
 src = HEAD.replace('@@BODY@@', '\n'.join(body))
 for name, text in (('fir_pie.h', hdr), ('fir_pie.c', src)):
-    path = os.path.join(HERE, 'main', 'pocket', name)
+    path = os.path.join(HERE, 'main', 'kobako', name)
     with open(path, 'w', encoding='utf-8') as fh:
         fh.write(text)
     print(f'wrote {path}')

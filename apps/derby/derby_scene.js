@@ -4,7 +4,7 @@
 function enter(s) {
   scene = s; t = 0; need = 1;
   if (s === 'pad') { drop(['conf', 'band']); want(PAD); replay = 0; F = field(add(rng(HW ^ M.imul(sn, 0x9e3779b9))(), M.imul(raceNo, 0x9e3779b9))); F.h.forEach((h, i) => { CO[i] = h.coat; CO[8 + i] = SILK[i]; }); log('ODDS ' + (od = odds(F.h, F.o)).map(ot) + (F.o ? ' OVAL' : ''));
-    // The oval's bend in 16 chords (pocket.derby's series).
+    // The oval's bend in 16 chords (kobako.derby's series).
     CRS = F.o ? OC : 0; CH = [-655360000];
     if (F.o) for (let j = 0; j <= 16; ++j) CH.push(OB + j * 1544156);
     CH.push(655360000); S.course(CH, CRS, 720896);
@@ -134,7 +134,7 @@ function settle() {
 // and its feed) for camera c, or HEAD ON; then extra ([plan, inputs] or null).
 const VR = new Int32Array(4), RW = {14: 4681, 20: 3277, 60: 1092};
 function paint(c, xs, close, gate, extra) {
-  // Its face on this camera (pocket.derby.screen), or null out of view or
+  // Its face on this camera (kobako.derby.screen), or null out of view or
   // over the map (y < 13): fill, bezel, feed and lettering use these px.
   if (scene === 'race' && cm !== 6) {
     if (!pc) S.side(c[0], c[1], c[2], cx, 0, 0);
@@ -152,7 +152,7 @@ function paint(c, xs, close, gate, extra) {
   else course(c, cx, xs, close, gate);
   for (let j = 0, f = t - e[20], d = e[17] * f - (q ? 0 : (cx - e[21] >> 4) * (c[0] >> 16)), r = q ? 0 : e[14] * f; j < (q < 0 ? 0 : 3); ++j) {
     // HEAD ON: a still camera 12 m past the line, 2.2 m up, looks back
-    // down the course; each horse scaled by its own 1/z (pocket.derby.runners),
+    // down the course; each horse scaled by its own 1/z (kobako.derby.runners),
     // the last (farthest) first.
     if (j === 1 && q && live.frl && live.frb) S.runners(xs, lz, ro, CO, live.frl, live.frb, 2, -1, 255, 0);
     const w = e[q + 4 + j];

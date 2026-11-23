@@ -13,7 +13,7 @@ requested-allocation ledgers remain enabled. The real production QuickJS and
 
 A test-only app adapter maps frame IDs to explicit milliseconds, evaluates three
 additive sine-wave channels, checks them against analytic expectations, and feeds
-`pocket.ayatsuri.compose` mesh-local joint globals into existing `evaluateSkin`.
+`kobako.ayatsuri.compose` mesh-local joint globals into existing `evaluateSkin`.
 The public fixture has six vertices and two joints. Its inverse bind offset and
 existing immutable native Model remain unchanged. Keys are constant: this is
 wave/channel integration, not new coverage of arbitrary key interpolation.

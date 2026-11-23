@@ -1,6 +1,6 @@
 // Diagnostic-only ordinary APP. Two nodes share one logical pixel frame.
 (() => {
-  const view = pocket.kasane;
+  const view = kobako.kasane;
   const pixel = view.pixel;
   const resource = pixel.open(112, 63);
   const params = new Uint16Array(8);

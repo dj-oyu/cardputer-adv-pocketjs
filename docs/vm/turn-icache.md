@@ -21,7 +21,7 @@ COM3 を使えない間に進めたので、実機の代わりに QEMU で命令
 
 ### 1.1 道具（`tools/r5sim/`）
 
-- **`r5sim` イメージ**: STRESS を画面なしで回す ESP-IDF のプロジェクト。quickjs コンポーネントは実機と共有、Kasane・pocket の側は `tools/test_stress_app.c` と同じソースを実機のコンパイラ設定（`-Os` ほか）で組む。frame() は `app_tick` と同じく `JS_Call` → ジョブの消化 → `pocket_kasane_end_turn`。ターンの前後で `r5_turn_begin` / `r5_turn_end` を呼び、ログ上の番地で区切る。
+- **`r5sim` イメージ**: STRESS を画面なしで回す ESP-IDF のプロジェクト。quickjs コンポーネントは実機と共有、Kasane・kobako の側は `tools/test_stress_app.c` と同じソースを実機のコンパイラ設定（`-Os` ほか）で組む。frame() は `app_tick` と同じく `JS_Call` → ジョブの消化 → `kobako_kasane_end_turn`。ターンの前後で `r5_turn_begin` / `r5_turn_end` を呼び、ログ上の番地で区切る。
 - **QEMU**: Espressif 版（`esp_develop_9.2.2_20250817`、`-machine esp32s3`）。プラグインは無効のビルドなので、`-d exec,nochain,in_asm -dfilter 0x42000000..0x43ffffff` で flash 上の基本ブロックの実行順と中身を記録する（120 フレームで約 1 GB）。
 - **`icache.py`**: `extract` がログから対象ターンの基本ブロック列だけを抜き、`model` がそれを任意のファームの ELF の番地に写して 8-way・32 KiB・32 B ラインの LRU に流す。関数の目的コードは両イメージで同一で、リンク後のサイズがずれる（最大 1.3%）のはリンカの呼び出し緩和なので、関数内のオフセットは比例で写す。ファームで IRAM にある関数はキャッシュを通らないものとして扱う。
 - **`gen_hot_lf.py`**: 関数の一覧と map から ESP-IDF のリンカ断片を作る（flash 内の並べ替え、または `--noflash` で IRAM）。
@@ -69,7 +69,7 @@ flash 120 MHz（ESP-IDF では実験的機能。ミスの回数ではなく値�
 
 #### 1.3.4 実機の確認（2026-09-27、実測）
 
-8 KiB 版を計装付き（`CONFIG_POCKET_VM_TURNPERF`、QIO）で組み、基準 → 8 KiB 版 → 基準の順に STRESS を各段 60 秒。書き込みは esptool でビルド済みのイメージを直接書いた（`idf.py flash` は書く前に組み直すので、断片を登録したままのツリーでは基準まで IRAM 入りになる。最初の 3 回はそれで全部 8 KiB 版を測っていて、捨てた）。
+8 KiB 版を計装付き（`CONFIG_KOBAKO_TURNPERF`、QIO）で組み、基準 → 8 KiB 版 → 基準の順に STRESS を各段 60 秒。書き込みは esptool でビルド済みのイメージを直接書いた（`idf.py flash` は書く前に組み直すので、断片を登録したままのツリーでは基準まで IRAM 入りになる。最初の 3 回はそれで全部 8 KiB 版を測っていて、捨てた）。
 
 | STRESS | 基準 1 | 8 KiB 版 | 基準 2 |
 | --- | --- | --- | --- |
@@ -93,7 +93,7 @@ flash 120 MHz（ESP-IDF では実験的機能。ミスの回数ではなく値�
 
 ## 2. 1 ターンの作業集合を部品ごとに分ける（旧 turn-working-set.md、2026-10-23）
 
-段つきのインタプリタ（V8 のように段を分け、機械語は生成しない、[interpreter-stages.md](interpreter-stages.md)）の予算の下調べ。設計の規則は「どの段でも、1 ターンが触るコードが予算に収まる」で、予算の案は**インタプリタの取り分が約 14 KiB、native との境界（Kasane の提出・`pocket.*`・アロケータ）が約 12 KiB**。部品ごとの集計に `tools/r5sim/turnset.py` を足した。数字はすべて模型の推定か、ELF・コードから読んだ値。
+段つきのインタプリタ（V8 のように段を分け、機械語は生成しない、[interpreter-stages.md](interpreter-stages.md)）の予算の下調べ。設計の規則は「どの段でも、1 ターンが触るコードが予算に収まる」で、予算の案は**インタプリタの取り分が約 14 KiB、native との境界（Kasane の提出・`kobako.*`・アロケータ）が約 12 KiB**。部品ごとの集計に `tools/r5sim/turnset.py` を足した。数字はすべて模型の推定か、ELF・コードから読んだ値。
 
 ### 2.0 結論
 
@@ -111,7 +111,7 @@ flash 120 MHz（ESP-IDF では実験的機能。ミスの回数ではなく値�
 
 - STRESS LV1、ターン 61〜120 の 60 ターン（§1 と同じ）。QEMU の終了行はどちらも `frames=120 oom=0 fail=0 bad_present=0`。
 - **配置**: 模型は各 case の `r5sim.elf` 自身の番地に写した（ファームの ELF は使っていない）。**触る行数（KiB）は配置にほとんど依存しない**が、8-way のミス回数は配置で大きく動く（A では 8-way の warm 1,326 に対して完全連想 1,044）。A と B の差は完全連想の列で読む。
-- 区切りは `r5_turn_begin`/`r5_turn_end`。ターンは `JS_Call` ＋ ジョブの消化 ＋ `pocket_kasane_end_turn`。描画（`present()`）はターンの外。
+- 区切りは `r5_turn_begin`/`r5_turn_end`。ターンは `JS_Call` ＋ ジョブの消化 ＋ `kobako_kasane_end_turn`。描画（`present()`）はターンの外。
 
 ### 2.2 部品ごとの作業集合
 
@@ -143,7 +143,7 @@ flash 120 MHz（ESP-IDF では実験的機能。ミスの回数ではなく値�
 
 読み方:
 
-- 予算と並べると（B）: インタプリタ（core＋helpers）**21.3 KiB 対 14 KiB**。native の側は Kasane・`pocket.*`・r5sim の糊が 8.5 KiB で、アロケータまで含めるなら object/alloc/GC の 5.65 KiB を足して **14.2 KiB 対 12 KiB**。builtins の 6.1 KiB（libm を含む）はどちらの予算にも入っていない。合計 41.8 KiB 対 26 KiB。
+- 予算と並べると（B）: インタプリタ（core＋helpers）**21.3 KiB 対 14 KiB**。native の側は Kasane・`kobako.*`・r5sim の糊が 8.5 KiB で、アロケータまで含めるなら object/alloc/GC の 5.65 KiB を足して **14.2 KiB 対 12 KiB**。builtins の 6.1 KiB（libm を含む）はどちらの予算にも入っていない。合計 41.8 KiB 対 26 KiB。
 - cold のミスが触る行より多い（B で 1,467 > 1,337、完全連想でも）。1 ターンの中でもすでに容量が足りず、同じ行を 2 回取り込んでいる。
 - 全ターンの和集合（約 60 KiB）は 1 ターン（約 42 KiB）よりずっと大きい。STRESS は段階でコードが入れ替わるので、予算は「1 ターン」で切るのが正しく、アプリ全体の和で切ると過大になる。
 - 試作の効果（完全連想の warm）: core 153 → 129、helpers 343 → 327。builtins は `js_call_math_fast`（0.27 KiB）の分だけ増えた。3 つの寄与を個別には測っていない。
@@ -160,9 +160,9 @@ flash 120 MHz（ESP-IDF では実験的機能。ミスの回数ではなく値�
 | 2 | `JS_SetPropertyInternal2` | interp-helpers | 0.81 | 1,162 | 21 / 34 |
 | 3 | `core_change`（ksn_core.c） | native boundary | 0.75 | 1,188 | 20 / 28 |
 | 4 | `js_array_every` | builtins | 0.66 | 951 | 21 / 21 |
-| 5 | `run_build`（pocket_kasane.c） | native boundary | 0.63 | 867 | 11 / 22 |
+| 5 | `run_build`（kobako_kasane.c） | native boundary | 0.63 | 867 | 11 / 22 |
 | 6 | `apply_placement`（ksn_cache.c） | native boundary | 0.62 | 689 | 22 / 23 |
-| 7 | `parse_placement`（pocket_kasane.c） | native boundary | 0.53 | 554 | 17 / 17 |
+| 7 | `parse_placement`（kobako_kasane.c） | native boundary | 0.53 | 554 | 17 / 17 |
 | 8 | `js_binary_arith_slow` | interp-helpers | 0.50 | 1,386 | 18 / 22 |
 | 9 | `js_relational_slow` | interp-helpers | 0.50 | 731 | 9 / 16 |
 | 10 | `JS_NewObjectFromShape` | object/alloc/GC | 0.47 | 578 | 3 / 15 |
@@ -222,7 +222,7 @@ python tools/r5sim/lineuse.py turns.pkl.gz <dir>/r5sim.elf <dir>/r5sim.map --nm 
 1. **模型が行を水増ししていた（`icache.py`、重大）。** 基本ブロックの最後の命令の「+2 バイト」（3 バイト命令の最後のバイト）を常に取り込みとして写していた。最後の命令が 2 バイトで関数の終わりにあると、+2 は関数の外になり、「未知のコード」として存在しない行になる。1 ターン約 93 本増え、ミスも増える。A の同じ記録で、修正前 1,456 行・warm 2,008・cold 2,524（8-way、自己配置）→ 修正後 **1,361 行・1,326・1,865**。R5 の「1,457 行（45.5 KiB）」は修正前の値と一致する。修正: +2 が関数の外に出るときは +1 を使う。
 2. 同名の static 関数（`get_u16`、`JS_NewString`×3、`utf8_decode`×3 など 21 名）を名前だけで写していた。k 番目の同名を `name#k` にして区別した（自己配置ではほぼ影響なし。ファームへ写すときに効く）。
 3. `-dfilter` を IRAM・ROM に広げたとき、それらを行として数えないようにした。
-4. r5sim が組めなくなっていた: `pocket_kasane.c` が proc/grid/video/pixel の面を呼ぶようになったのに r5sim はそれらを持たない。STRESS は使わないので stub した。新しいビルドディレクトリでは対象が esp32 になったので `CONFIG_IDF_TARGET="esp32s3"` を `tools/r5sim/sdkconfig.defaults` に書いた。
+4. r5sim が組めなくなっていた: `kobako_kasane.c` が proc/grid/video/pixel の面を呼ぶようになったのに r5sim はそれらを持たない。STRESS は使わないので stub した。新しいビルドディレクトリでは対象が esp32 になったので `CONFIG_IDF_TARGET="esp32s3"` を `tools/r5sim/sdkconfig.defaults` に書いた。
 
 #### 2.5.2 注意
 
@@ -236,7 +236,7 @@ r5sim の QuickJS は `JS_NewRuntime` の既定の確保（`malloc` → tlsf）�
 | object/alloc/GC | `tlsf_*`・`heap_caps_*`・`multi_heap_*`・`malloc`/`free` 類。`quickjs.c.obj` の `js_malloc*`/`js_calloc*`/`js_free*`/`js_realloc*`・`JS_NewObject*`・`JS_NewArray*`・形（`js_new_shape*`、`add_property` など）・`free_*`・`*_finalizer`・`gc_*`/`mark_*`・`js_closure*`・文字列の生成と連結 |
 | builtins | `quickjs.c.obj` の `js_math_*`・`js_call_math_fast`・`js_array_*`・`js_string_*`・`js_object_*`・`js_function_*`・`js_promise_*`・`js_typed_array*` ほか組み込みの接頭辞。`libregexp`/`libunicode`。libm |
 | interp-helpers | 上に当たらない `quickjs.c.obj` の全部（プロパティ、atom、遅延名、`js_*_slow`、変換、`js_call_c_function`、`JS_Call*`、`js_vm_stack_*`、`JS_FreeValue*`）と `dtoa.c`・`cutils.c` |
-| native boundary | 目的ファイル名が `pocket_*`・`ksn_*`・`app_*`・`r5sim`・`jpfont`・`pet_*` のもの |
+| native boundary | 目的ファイル名が `kobako_*`・`ksn_*`・`app_*`・`r5sim`・`jpfont`・`pet_*` のもの |
 | libc/other | 残り（newlib、FreeRTOS、ドライバ） |
 | IRAM/ROM | 番地で判定。行として数えない（§2.2.3） |
 
@@ -267,7 +267,7 @@ B で触った 394 関数の部品は helpers 156、native boundary 107、alloc 
 | 配置 | r5sim 自身の番地。8-way 32 KiB LRU |
 | 照合 | `turnset.py` で 1,305 行/ターン・warm 942・cold 1,496。§2.2.2 の B（1,337 行）と近い |
 
-記録は [logs/turn-line-use-20261105.txt](logs/turn-line-use-20261105.txt)。この後 r5sim は QuickJS を `CONFIG_POCKET_VM_ROM_INTRINSICS` 付きで組むようになった（[qjs-pgo.md](qjs-pgo.md) §1.1）。この節の数字はその前の r5sim（変更後は 1 ターン 1,281 行、使用率 58.1%）。
+記録は [logs/turn-line-use-20261105.txt](logs/turn-line-use-20261105.txt)。この後 r5sim は QuickJS を `CONFIG_QJS_LEAN_ROM_INTRINSICS` 付きで組むようになった（[qjs-pgo.md](qjs-pgo.md) §1.1）。この節の数字はその前の r5sim（変更後は 1 ターン 1,281 行、使用率 58.1%）。
 
 ### 3.2 結果
 
@@ -339,7 +339,7 @@ B で触った 394 関数の部品は helpers 156、native boundary 107、alloc 
 
 ### 4.1 自動の先読みの A/B（実測）
 
-道具: `CONFIG_POCKET_ICACHE_AB`（既定 n、`main/hal/icache_ab.c`）。区画 0 を `_instruction_reserved_start`〜`_end`（flash のコード）にし、`KASANE_PAINT` の窓（30 フレーム）ごとにモードを off → miss0 → miss3 → both0 と回す。`miss`/`both` は先読みのきっかけ（外れ／当たりと外れ）、数字は ROM の `autoload_config.size`（`CACHE_AUTOLOAD_STEP`）。flash への書き込みは起動時の設定で先読みを戻すので、ターンの前に毎回モードを当て直す（DERBY で 1 回あった、`resets=1`）。測定用のコミット `6e2dea0`（sdkconfig で有効にしただけ、`eccfd15` で revert）。
+道具: `CONFIG_KOBAKO_ICACHE_AB`（既定 n、`main/hal/icache_ab.c`）。区画 0 を `_instruction_reserved_start`〜`_end`（flash のコード）にし、`KASANE_PAINT` の窓（30 フレーム）ごとにモードを off → miss0 → miss3 → both0 と回す。`miss`/`both` は先読みのきっかけ（外れ／当たりと外れ）、数字は ROM の `autoload_config.size`（`CACHE_AUTOLOAD_STEP`）。flash への書き込みは起動時の設定で先読みを戻すので、ターンの前に毎回モードを当て直す（DERBY で 1 回あった、`resets=1`）。測定用のコミット `6e2dea0`（sdkconfig で有効にしただけ、`eccfd15` で revert）。
 
 STRESS LV1（`icab-stress-1`、窓 24〜73、各モード 12〜13 窓の中央値）:
 

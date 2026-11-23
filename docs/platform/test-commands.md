@@ -26,26 +26,26 @@ wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -O2 -Wall 
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/test_sfx.py"   # 焼き込んだ効果音表と旧合成の差（WSLのみ。gccはWindows側に無い）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/make_font.py /tmp/cegen && gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=address,undefined -I /tmp/cegen -I tools/hostshim -I main/hal -I main/ui -I main/text tools/test_codeedit.c tools/hostshim/hostshim.c main/ui/codeedit.c main/ui/paint.c main/ui/vimcmd.c main/text/jslex.c -o /tmp/t && /tmp/t"   # エディタの差分再描画と全面再描画が同じピクセルか（WSLのみ）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_net_autosync_test.sh"   # 自動時刻同期の方針・試行と net_service の参照カウントを、偽の無線と偽の時計でASanで（WSLのみ、docs/platform/wifi-autostart.md）
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_pocket_text_test.sh && /tmp/test-pocket-text"   # pocket.input.text のセッション寿命を実物のQuickJSごとASanで（WSLのみ。番号を渡すと1件だけ）
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_app_load_test.sh"   # pocket.app.load（チャンクの読み込み）の全メソッド・全エラー・解放を実物のQuickJSとpocket_api.cでASanで（WSLのみ、docs/vm/eval-peak.md §7）
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_kobako_text_test.sh && /tmp/test-kobako-text"   # kobako.input.text のセッション寿命を実物のQuickJSごとASanで（WSLのみ。番号を渡すと1件だけ）
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_app_load_test.sh"   # kobako.app.load（チャンクの読み込み）の全メソッド・全エラー・解放を実物のQuickJSとkobako_api.cでASanで（WSLのみ、docs/vm/eval-peak.md §7）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_app_import_test.sh"   # 静的import（.mjsの入口とチャンク）: 解決・断る場合とfile:line・動的import()とTLAの拒否・heap不足・単一/load/importの最小heap上限の比較をASanで（WSLのみ、docs/vm/eval-peak.md §9）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_keystate_test.sh"   # 物理キーの押下集合（keystate）を1書き手・2読み手でASanとTSanに（WSLのみ）
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_input_test.sh && /tmp/test-pocket-input"   # pocket.input（onAction/held と input.keys）を実物のkeymap_poll・QuickJSで（WSLのみ）
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_keytest_app_test.sh && /tmp/test-keytest-app"   # KEY TEST（apps/keytest）を実物のQuickJS・pocket.kasane・input.keysで、同時押し・タップ・FIFOあふれの台本（WSLのみ）
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_input_test.sh && /tmp/test-kobako-input"   # kobako.input（onAction/held と input.keys）を実物のkeymap_poll・QuickJSで（WSLのみ）
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_keytest_app_test.sh && /tmp/test-keytest-app"   # KEY TEST（apps/keytest）を実物のQuickJS・kobako.kasane・input.keysで、同時押し・タップ・FIFOあふれの台本（WSLのみ）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && gcc -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined -Itools/motion_shim -Itools/hostshim -Ithird_party/bmi270 -Imain/hal tools/test_motion_demand.c -lm -o /tmp/tmd && /tmp/tmd"   # IMUの読み手の需要: 読み手が無ければI2Cを読まない・ホームの期限・休止明けに古いサンプルを出さない・gyroの要求（WSLのみ、third_party/bmi270 要）
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && tools/vmtest/cfunc_join.sh"   # QuickJS のネイティブ関数の join の印: ファームが作った関数（関数表・getter・入れ子・実行中に作った関数を含む）だけがフックを呼ぶ（docs/perf/two-core-pipeline.md §7.2、WSLのみ）
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/test_key_int_gate.py"   # キーボードのINTピンの門（CONFIG_POCKET_KEY_INT_GPIO）: TCA8418の模型にI2Cの合間で辺を差し込み、取りこぼし0・順序・あふれの報告をASanで（WSLのみ）
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/test_key_int_gate.py"   # キーボードのINTピンの門（CONFIG_KOBAKO_KEY_INT_GPIO）: TCA8418の模型にI2Cの合間で辺を差し込み、取りこぼし0・順序・あふれの報告をASanで（WSLのみ）
 python tools/pie/stalls.py              # PIEインラインasmの静的パイプライン解析
 python tools/test_frame_lint.py         # frame_lint の走査器を既製の objdump の文で検査
 python tools/frame_lint.py build_api/esp-idf/main --far-only   # 1,020 B より奥のスタックの読み書き（ビルドでも自動で報告、docs/perf/o2-machine-code.md §5）
 python tools/pie/test_kernels.py        # PIEカーネルを命令レベルで模擬実行しスカラーと全画素比較
 python tools/pie/run_models.py          # カーネルが使う式の全域ビット一致証明
 wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && python3 tools/make_scene_tables.py .cache/generated && gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Itools/scene_stub -Imain/scene -I.cache/generated tools/test_wave.c -lm -o /tmp/tw && /tmp/tw"   # LEVEL WAVE: 水の体積保存・静止時の勾配・strip一致・傾きの全範囲（docs/scenes/level-wave.md）。tools/preview_wave.c は連番PPMのプレビュー
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_lessons_test.sh && /tmp/test-lessons"   # TUTORIALの全章とPlaygroundの既定ソースを実物のQuickJSとpocket.kasaneで実行（WSLのみ）
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_stress_app_test.sh && /tmp/test-stress-app"   # STRESS TESTを実物のQuickJSとpocket.kasane・Shikiで900フレーム（Kasaneが断るシーン・Shikiのdrawの失敗を焼く前に、WSLのみ、Node要）
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && M32=1 bash tools/build_kasane_ns_cost_test.sh && /tmp/test-kasane-ns-cost-m32"   # pocket.kasane を最初に読む時のゲストヒープ（grid・video・pixel・shiki の内訳、実機と同じ 8 B の JSValue。docs/kasane/logs/api-reorg-perf.md §3.3）
-python tools/memlog.py --map build_api/cardputer_pocketjs.map            # DRAMの増減とファイル別内訳
-python tools/memlog.py --map build_api/cardputer_pocketjs.map --port COM3 --check   # 実機の空きも記録し予算を検査
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_lessons_test.sh && /tmp/test-lessons"   # TUTORIALの全章とPlaygroundの既定ソースを実物のQuickJSとkobako.kasaneで実行（WSLのみ）
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_stress_app_test.sh && /tmp/test-stress-app"   # STRESS TESTを実物のQuickJSとkobako.kasane・Shikiで900フレーム（Kasaneが断るシーン・Shikiのdrawの失敗を焼く前に、WSLのみ、Node要）
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && M32=1 bash tools/build_kasane_ns_cost_test.sh && /tmp/test-kasane-ns-cost-m32"   # kobako.kasane を最初に読む時のゲストヒープ（grid・video・pixel・shiki の内訳、実機と同じ 8 B の JSValue。docs/kasane/logs/api-reorg-perf.md §3.3）
+python tools/memlog.py --map build_api/cardputer_kobako.map            # DRAMの増減とファイル別内訳
+python tools/memlog.py --map build_api/cardputer_kobako.map --port COM3 --check   # 実機の空きも記録し予算を検査
 ```
 
 ## ドキュメント検証（実機・ネットワーク不要）

@@ -1,0 +1,141 @@
+#ifndef KOBAKO_SHIKI_FRAME_H
+#define KOBAKO_SHIKI_FRAME_H
+#include <stdbool.h>
+#include "quickjs.h"
+#include "esp_err.h"
+#include "ui/kasane/ksn_ports.h"
+#include "ui/kasane/ksn_shiki_frame.h"
+/* Same-binary A/B arm: commit()'s damage from the signature's boxes (1) or a walk (0). */
+extern int g_kobako_proc_box_reuse;
+/* Same-binary A/B arm: bands drawn from their entry bitmap (1) or the range walk (0). */
+extern int g_kobako_proc_band_bits;
+
+/* The frames, surfaces and image resources Shiki draws into (the procedural
+ * IR that first used them went in v2.0). beginFrame, commit, resource,
+ * createSurface on obj (kasane.shiki, kobako_shiki_api.c). */
+esp_err_t kobako_proc_frame_install(JSContext *ctx, JSValueConst obj);
+void kobako_proc_reset(void);
+/* Shiki programs' slots, handles and frames
+ * (kobako_shiki_api.c): attach takes ownership of plan (freed by detach or
+ * reset) and returns its handle, 0 when the 32 slots or the handles are
+ * spent; draw runs it into the frame beginFrame() opened. */
+uint32_t kobako_proc_shiki_attach(void *plan);
+void *kobako_proc_shiki_plan(uint32_t handle);
+bool kobako_proc_shiki_detach(uint32_t handle);
+JSValue kobako_proc_shiki_draw(JSContext *ctx,uint32_t handle,const double *in,unsigned n);
+/* The same with the inputs either as JS numbers (in) or, when fixed is not
+ * NULL, already in each input's Q format (shiki.drawMany with an Int32Array),
+ * and the draw's number, what DRAW_INDEX reads (drawMany's entry; 0 for
+ * draw()). */
+JSValue kobako_proc_shiki_draw_inputs(JSContext *ctx,uint32_t handle,const double *in,const int32_t *fixed,unsigned n,
+                                      unsigned index);
+/* Diagnostic (shikiDebug.drawProfile, docs/kasane/shiki-bundle.md): CPU cycles
+ * a Shiki draw spends in each native stage, summed while on. parse: js_draw's
+ * argument checks and input reads; lookup: from there to the engine (handle,
+ * frame, workspace); engine: ksn_shiki_draw; copy: the segments into the
+ * frame. mark is the cycle count where the next stage starts. Off by default:
+ * one branch per stage. kobako_cycles() is 0 off the device. */
+typedef struct { bool on; uint32_t n,parse,lookup,engine,copy,mark; } kobako_shiki_draw_prof;
+extern kobako_shiki_draw_prof kobako_shiki_prof;
+/* Always on (a few cycle reads per draw): what the Shiki draws of the turns
+ * since the last take cost, for the SHIKI_TURN line next to KASANE_PAINT
+ * (docs/kasane/shiki-jit.md sec.9). engine: the conversion and the engine;
+ * total: the whole native draw (lookup, engine, copy into the frame). */
+typedef struct { uint32_t draws,steps,engine_cy,total_cy; } kobako_shiki_turn;
+void kobako_shiki_turn_take(kobako_shiki_turn *out);
+/* The same without the reset (a probe's before and after, kobako_derby.c). */
+void kobako_shiki_turn_peek(kobako_shiki_turn *out);
+uint32_t kobako_cycles(void);
+void kobako_proc_end_turn(void);
+/* One draw for a native caller (kobako_derby.c): a Shiki handle and its
+ * inputs as numbers, with shiki.draw()'s checks and KobakoError. Returns
+ * JS_UNDEFINED or JS_EXCEPTION. */
+JSValue kobako_proc_draw_numbers(JSContext *ctx,uint32_t handle,const double *in,unsigned n);
+/* The same with the inputs already in each input's Q format (as drawMany's
+ * Int32Array: no conversion) and the draw's number (DRAW_INDEX):
+ * kobako.derby.runners. */
+JSValue kobako_proc_draw_fixed(JSContext *ctx,uint32_t handle,const int32_t *in,unsigned n,unsigned index);
+#ifdef KOBAKO_PROC_DRAW_HOOK
+/* Host harness only: kobako_proc_draw_fixed's draws that succeeded. */
+void kobako_proc_draw_fixed_hook(uint32_t handle,const int32_t *in,unsigned n);
+/* Host harness only: called after each native draw that succeeded, with the
+ * inputs as given; with kobako_proc_hook_dry set, the draw is not run at all
+ * (the harness compares input lists without frames or plans). */
+void kobako_proc_draw_hook(uint32_t handle,const double *in,unsigned n);
+extern bool kobako_proc_hook_dry;
+#endif
+/* Native drawing into the frame being built (kobako_shape.c): segments go
+ * straight into the candidate under draw()'s frame limits -- the surface's
+ * segment count and 65,535 raster steps -- and coordinate range (-480..720),
+ * without a plan or the VM. begin() checks beginFrame and reentrancy and
+ * marks the candidate; a failing line() abandons the frame as a failing
+ * draw() does (LIMIT_EXCEEDED / INVALID_ARGUMENT, beginFrame again), and the
+ * caller rolls back to the mark so the candidate keeps no part of the call.
+ * Each returns JS_UNDEFINED or JS_EXCEPTION. */
+typedef struct { uint16_t count,raster; uint8_t ext,surface; size_t depth_bytes; unsigned depth_packets; uint32_t depth_work; } kobako_proc_mark;
+typedef struct {size_t candidate,committed,workspace,metadata;} kobako_proc_mesh_bytes;
+/* Explicit payload/metadata accounting; allocator overhead, guest/model and
+ * legacy frame/workspaces are separate. Does not claim physical RAM fitness. */
+void kobako_proc_mesh_memory(kobako_proc_mesh_bytes *out);
+#ifdef KSN_PROC_HOST_TEST
+void kobako_proc_mesh_fail_after(int allocations);
+#endif
+bool kobako_proc_native_mesh_depth(void);
+JSValue kobako_proc_native_mesh(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *patch,const float *depth,uint16_t node);
+JSValue kobako_proc_native_begin(JSContext *ctx,const char *op,kobako_proc_mark *mark);
+JSValue kobako_proc_native_line(JSContext *ctx,const char *op,int x0,int y0,int x1,int y1,uint16_t color);
+JSValue kobako_proc_native_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_ellipsoid *patch);
+/* Validation/quota failure leaves the current candidate AND building state
+ * unchanged. Unlike older analytic methods, budget rejection does not poison. */
+JSValue kobako_proc_native_clipped_ellipsoid(JSContext *ctx,const char *op,const ksn_proc_clipped_ellipsoid *patch);
+JSValue kobako_proc_native_blend_ellipsoids(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *patch);
+JSValue kobako_proc_native_blend_region(JSContext *ctx,const char *op,const ksn_proc_blend_ellipsoids *patch,
+    const ksn_proc_blend_region_mask *mask);
+/* Screen-linear vertex colours and an independent model-attached scalar
+ * mask. Synchronous numeric snapshot; quota/validation is NOT_APPLIED. */
+JSValue kobako_proc_native_gouraud(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *patch);
+JSValue kobako_proc_native_sided_mesh(JSContext *ctx,const char *op,const ksn_proc_gouraud_patch *patch,
+    const float *depth,const uint16_t *back_colors,const uint8_t back_faces[8],uint16_t node);
+void kobako_proc_native_rollback(const kobako_proc_mark *mark);
+/* The 8-row bands (17) of the image a just-committed frame changes, and on
+ * each its columns [x0, x1): the bands whose ordered entries differ from the
+ * frame on the panel (all of them without one, or with a new backdrop
+ * colour). False outside commit(). kobako_kasane.c turns it into image
+ * damage instead of commit()'s one bounding rectangle. */
+bool kobako_proc_band_damage(unsigned surface,uint32_t *bands,int16_t x0[],int16_t x1[]);
+// Takes what a present drawn in strip_rows pieces needs, before it runs.
+void kobako_proc_prepare_render(unsigned strip_rows);
+bool kobako_proc_has_frame(void);
+bool kobako_proc_pending(void);
+bool kobako_proc_backdrop_pending(void);
+/* Session-scoped dynamic image. Its descriptor borrows the adapter until reset. */
+void kobako_proc_image_port(ksn_image_port *out);
+void kobako_proc_image_port_at(ksn_image_port *out,unsigned surface);
+void kobako_proc_image_mode(void);
+void kobako_proc_image_mode_at(unsigned surface);
+bool kobako_proc_is_image_mode(void);
+ksn_result kobako_proc_backdrop(void *ctx,uint16_t y,uint16_t rows,uint16_t *pixels);
+/* Called only after the native presenter attempts a pending procedural frame. */
+void kobako_proc_present_result(ksn_result result);
+/* Native FLOWER backdrop presentation can ACK only procedural image nodes. */
+void kobako_proc_overlay_present_result(ksn_result result);
+#ifdef KASANE_MEGADEMO_TRACE
+/* Per-turn costs for the MEGADEMO trace (app_session.c), read and cleared
+ * once per host turn. Times are esp_timer microseconds except band_cy. */
+typedef struct {
+    uint32_t reg_n,reg_us,prep_us,prep_max_us,unreg_n;
+    uint32_t draw_n,draw_us,draw_max_us,band_n,band_cy;
+    /* commit(), replace()/patch(), and panel presents made while a commit
+     * had no view update after it yet: the picture that pairs a new image
+     * with the previous frame's view tree. */
+    uint32_t commit_n,view_n,split_n;
+} kobako_proc_trace;
+void kobako_proc_trace_take(kobako_proc_trace *out);
+void kobako_proc_trace_view(void);
+void kobako_proc_trace_presented(void);
+#endif
+#ifdef KASANE_PROC_JS_DIAGNOSTIC
+void kobako_proc_image_prof_read(uint32_t *band_count,uint32_t *band_cycles,
+                                 uint32_t *span_count,uint32_t *span_cycles);
+#endif
+#endif

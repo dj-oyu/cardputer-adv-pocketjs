@@ -6,7 +6,7 @@
 # the project root (./sdkconfig, gitignored) by default REGARDLESS of -B, so
 # two build_* directories normally read and write the very same file --
 # `idf.py -B build_vm_probe ... build` alone would leave
-# CONFIG_POCKET_VM_PROBE=y sitting in the ROOT sdkconfig, silently turning
+# CONFIG_QJS_LEAN_PROBE=y sitting in the ROOT sdkconfig, silently turning
 # every OTHER build_* directory's next build (build_vm, build_vm_vendor, ...)
 # into a probe build too. -D SDKCONFIG=<dir>/sdkconfig below is what actually
 # isolates it -- a mistake made and caught while writing this file; see the
@@ -19,4 +19,4 @@
 # build_vm_probe_off needs no such flag: it is meant to read the ordinary,
 # shared root sdkconfig, same as every other build_* directory, with this
 # option at its Kconfig default of n.
-CONFIG_POCKET_VM_PROBE=y
+CONFIG_QJS_LEAN_PROBE=y

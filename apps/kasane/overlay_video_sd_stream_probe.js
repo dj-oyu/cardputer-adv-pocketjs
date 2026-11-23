@@ -4,14 +4,14 @@
   const path = 'sd:/__ksn_d6_av_stream_probe_20260928.ksv';
   const mp3 = 'sd:/KAKATO/KARA OK 2nd Edition/01 KAKATORO.mp3';
   const width = 32, height = 8, expectedBytes = 157216;
-  const video = pocket.kasane.video;
+  const video = kobako.kasane.video;
   const resource = video.open(width, height);
   let stream = false, player = null;
   let playing = false;
   let requested = false, finishing = false, readyAt = 0;
   let selected = 0, lastStatusSecond = -1, lastState = '';
 
-  pocket.kasane.replace(tx => {
+  kobako.kasane.replace(tx => {
     tx.background(0x000000ff);
     tx.image({resource, bounds: [2, 2, 66, 18], scale: 2});
     tx.rect({bounds: [42, 4, 63, 16], color: 0xffe08080});
@@ -46,29 +46,29 @@
   async function prepare() {
     try {
       console.log('D6_AV GRANT_REQUEST');
-      if (await pocket.fs.requestFolder('sd') !== 'sd:/')
+      if (await kobako.fs.requestFolder('sd') !== 'sd:/')
         throw new Error('folder grant declined');
       console.log('D6_AV GRANTED');
-      const entry = await pocket.fs.stat(path);
+      const entry = await kobako.fs.stat(path);
       if (entry.sizeBytes !== expectedBytes)
         throw new Error('staged KSV size mismatch');
       console.log('D6_AV STAGED bytes=' + entry.sizeBytes);
       video.streamStart(path); stream = true;
       console.log('D6_AV STREAM_START');
-      player = await pocket.audio.player.open({source: mp3});
+      player = await kobako.audio.player.open({source: mp3});
       const info = player.info();
       console.log('D6_AV MP3_OPEN codec=' + info.codec +
                   ' durationMs=' + info.durationMs);
       if (info.codec !== 'mp3') throw new Error('wrong audio codec');
       await player.play();
-      readyAt = pocket.time.now(); playing = true;
+      readyAt = kobako.time.now(); playing = true;
       console.log('D6_AV MP3_PLAY');
     } catch (error) {
       console.log('D6_AV ERROR prepare=' + ((error && error.code) || error));
       await finish('prepare-error');
     }
   }
-  pocket.overlay.onKey(event => {
+  kobako.overlay.onKey(event => {
     if (event.action !== 'accept' || requested) return;
     requested = true;
     prepare();
@@ -76,7 +76,7 @@
   globalThis.frame = function () {
     if (!stream || !playing || finishing || !readyAt) return;
     try {
-      const elapsed = pocket.time.now() - readyAt;
+      const elapsed = kobako.time.now() - readyAt;
       const state = video.streamState();
       if (state !== lastState) {
         console.log('D6_AV STREAM_STATE ' + state);

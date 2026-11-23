@@ -10,7 +10,7 @@ import unittest
 
 from vm_l0_capture import Collector
 
-SOURCE = Path(__file__).resolve().parents[1] / 'main/pocket/vmprobe.c'
+SOURCE = Path(__file__).resolve().parents[1] / 'main/kobako/vmprobe.c'
 
 
 def function(source, name):
@@ -31,14 +31,14 @@ class ContinuationTest(unittest.TestCase):
 #include <assert.h>
 #include <stdint.h>
 #include <stddef.h>
-typedef int pocketjs_guest_t;
+typedef int kobako_guest_t;
 #define VMPROBE_SAMPLE_EVERY_N_FRAMES 8
 #define VMPROBE_WINDOW_US 1000000
 static unsigned continuation_ticks, samples, flushes, published, continuation_heap_n;
 static int64_t now, window_start_us;
 static uint64_t jobs_executed_base;
 static int64_t esp_timer_get_time(void) { return now; }
-static void heap_sample(pocketjs_guest_t *guest) { assert(guest); samples++; }
+static void heap_sample(kobako_guest_t *guest) { assert(guest); samples++; }
 static void window_reset(void) { window_start_us = now; samples = 0; continuation_heap_n = 0; }
 static void flush_window(void) {
     assert(samples == continuation_heap_n);
@@ -46,15 +46,15 @@ static void flush_window(void) {
 }
 static uint64_t qjs_vmprobe_jobs_executed_get(void) { return 13; }
 static unsigned qjs_vmprobe_job_queue_peak_take(void) { return 0; }
-static void pocketjs_guest_vmprobe_take(void *a, void *b) { (void)a; (void)b; }
-static unsigned pocketjs_guest_vmprobe_drain_calls(void *a, unsigned b, void *c)
+static void kobako_guest_vmprobe_take(void *a, void *b) { (void)a; (void)b; }
+static unsigned kobako_guest_vmprobe_drain_calls(void *a, unsigned b, void *c)
 { (void)a; (void)b; (void)c; return 0; }
 '''
         code += function(source, 'vmprobe_continuation_sample')
         code += function(source, 'vmprobe_session_reset')
         code += r'''
 int main(void) {
-    pocketjs_guest_t guest = 1;
+    kobako_guest_t guest = 1;
     for (int i = 0; i < 7; i++) vmprobe_continuation_sample(&guest);
     assert(samples == 0 && flushes == 0);
     vmprobe_continuation_sample(&guest);

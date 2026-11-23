@@ -12,11 +12,11 @@ const view={resource(id){assert.equal(id,'pets');return {};},mount(id){assert.eq
   images.push(values.variant);
   for(const key of ['head','line0','line1','line2','line3','foot','hint'])texts.push(values[key]);
 }};}};
-// pocket.app as the host has it: the frame listener is what ctx.frame() runs,
+// kobako.app as the host has it: the frame listener is what ctx.frame() runs,
 // and the resume hook is kept to check that a wake repaints.
 let hooks={},onFrame=()=>{};
 const app={start(h){hooks=h;},onFrame(fn){onFrame=fn;}};
-const ctx={pocket:{pet,kasane:view,input,app},console:{log(){}},frame:()=>onFrame()};vm.createContext(ctx);
+const ctx={kobako:{pet,kasane:view,input,app},console:{log(){}},frame:()=>onFrame()};vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../apps/companion/companion.js'),'utf8'),ctx);
 function key(action){clock+=1100;onAction({action,phase:'press'});ctx.frame();}
 assert.equal(images.at(-1),0);key('up');assert.equal(selected,1);assert.equal(images.at(-1),1);

@@ -19,7 +19,7 @@
 // including our lock, even for long output or a disconnected host.
 #define TX_BUDGET_US 50000
 #define TX_CHUNK 256
-#define CONSOLE_PATH "/dev/pocketusb"
+#define CONSOLE_PATH "/dev/kobakousb"
 static StaticSemaphore_t lock_storage;
 static SemaphoreHandle_t tx_lock;
 static atomic_bool broken_line;

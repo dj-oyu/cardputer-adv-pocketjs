@@ -5,7 +5,7 @@
 // The decisions of docs/api/common-api.md 3.1 that do not need a board.
 //
 // Everything here is a pure function of its arguments, the way
-// pet/pet_hub_core.c and pocket/app_registry.c are, so tools/test_overlay.c
+// pet/pet_hub_core.c and kobako/app_registry.c are, so tools/test_overlay.c
 // settles the safety valves on the host. That matters more here than usual:
 // the valve this file exists for is the one whose failure mode is a device
 // that boot-loops with no way in, and a valve that can only be tested by
@@ -25,7 +25,7 @@ typedef enum {
 
 // Where on the LCD an overlay may draw. x/y are screen pixels and the guest's
 // coordinates are relative to the box. overlay_region_holds() enforces the
-// strict legacy pocket.overlay display-list contract; the Kasane profile uses
+// strict legacy kobako.overlay display-list contract; the Kasane profile uses
 // the same box as a viewport and clips commands at the adapter boundary.
 typedef struct { int16_t x, y, w, h; } overlay_region_t;
 

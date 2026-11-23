@@ -1,8 +1,8 @@
 'use strict';
-const V = pocket.kasane, SK = V.shiki, K = pocket.input.keys, log = m => console.log('DERBY ' + m);
+const V = kobako.kasane, SK = V.shiki, K = kobako.input.keys, log = m => console.log('DERBY ' + m);
 // Integers only (docs/apps/derby-integer.md): lengths are Q16 m, px Q16
-// where a fraction counts, angles Q16 turns. pocket.derby does the divisions.
-const S = pocket.derby, QM = 65536;
+// where a fraction counts, angles Q16 turns. kobako.derby does the divisions.
+const S = kobako.derby, QM = 65536;
 // Frames now, while the heap still has holes that size (MEGADEMO's lesson),
 // 768 segments each: the most in a frame is 583 (host, every tier), and the
 // Shiki heap holds the frames, the programs and the windows (README).
@@ -17,7 +17,7 @@ function load() {
   const n = queue[0];
   if (!n) return;
   try {
-    if (pocket.memory && pocket.memory.info().internalFreeBytes < 18432) return;
+    if (kobako.memory && kobako.memory.info().internalFreeBytes < 18432) return;
     // The plan n: a built-in plan's name (derby_prog.js) and exactly its
     // declared arguments, or a polyline (poly()).
     const k = KN[tier], i = +n[1];
@@ -61,7 +61,7 @@ function poly(n, x, y, c) {
   b[52] = 6;
   return [b, 0, w];
 }
-// Draws plan n now if it is registered (inputs are copied: pocket_proc.c).
+// Draws plan n now if it is registered (inputs are copied: kobako_proc.c).
 const dr = (n, a, b, c, d, e, f, g, h) => { if (live[n]) SK.draw(live[n], a, b, c, d, e, f, g, h); };
 const want = l => { for (const n of l) if (!live[n] && queue.indexOf(n) < 0) queue.push(n); };
 function drop(l) {
@@ -75,7 +75,7 @@ function drop(l) {
 
 // ---- Sound: audio.tone plays one note at a time; a short note queue.
 let A = null, notes = [], busy = 0;
-try { if (pocket.capabilities.get('audio.tone').available) A = pocket.audio; } catch (e) {}
+try { if (kobako.capabilities.get('audio.tone').available) A = kobako.audio; } catch (e) {}
 const done = () => { busy = 0; }, nop = Boolean; // nop: any function without effects
 function sound() {
   if (!A || busy || !notes.length) return;
@@ -98,14 +98,14 @@ const PW = new Int32Array(141);
 PW[0] = 786432;
 for (let n = 0; n < 140; ++n) PW[n + 1] = PW[n] + (PW[n] * 268 >> 16);
 // Lanes drawn, the order far to near; xs (Q16 m along) and lz (Q16 m deep)
-// as Int32Array for pocket.derby; at()'s sway angles a / 40 + 2.4 i (Q16
+// as Int32Array for kobako.derby; at()'s sway angles a / 40 + 2.4 i (Q16
 // turns), one sinMany a frame.
 const XS = new Int32Array(8), LT = new Int32Array(8), LS = new Int32Array(8);
 let lz = new Int32Array(8).map((_, i) => PW[20 * i]), zo = [7, 6, 5, 4, 3, 2, 1, 0];
 const h4 = v => ('000' + v.toString(16).toUpperCase()).slice(-4), hex = s => h4(s >>> 16) + h4(s & 65535), num = i => 'NO.' + (i + 1),
   th = p => (p + 1) + (['ST', 'ND', 'RD'][p] || 'TH');
 // Seeds: the hardware's, mixed with the stored race count (README).
-const ST = pocket.storage, HW = pocket.random.seed() | 0; // int-lint: allow
+const ST = kobako.storage, HW = kobako.random.seed() | 0; // int-lint: allow
 let sn = 0;
 function save() { if (dm) return; try { ST.set('derby.v1', {v: 1, pts: pts, race: raceNo}).then(nop, nop); } catch (e) {} }
 try {
@@ -124,7 +124,7 @@ try {
 const VS = [840, 34, 20, 6, 16], FN = [3, 4, 6], LO = [3, -25, -30, 1, 1, 4, -30, -2, -26, 12, 12, 8];
 // The course: chord ends (CH, Q16 m) and sections [length, radius (0: a
 // straight), x, z, tangent x, z, heading (Q16 turns)], Q16; pose() is
-// pocket.derby's. The oval (README "楕円"): the back straight, a 120 m bend
+// kobako.derby's. The oval (README "楕円"): the back straight, a 120 m bend
 // to the right, the home straight on the straight's line from 650 m. OB: the
 // bend's start (650 - 120 pi m).
 const OB = 17891910, OC = [[OB, 0, 60490310, -14286848, -QM, 0], [24706490, -7864320, 42598400, -14286848, -QM, 0, 32768],
@@ -148,7 +148,7 @@ const CAMS = [[6553600, 635699, 2162688, 576717, 1, -2000000000, 2000000000], 0,
 // it is over 60 m from the leader, or the leader is on the oval's bend (the
 // side view does not bend: README). Height 6 and horizon 28 are baked in the
 // pan plans. PAN: the distance (m), the leader's px, the f cap. PU: the
-// units' [g, w] for pocket.derby.wide. pc: the unit in use (null for a side
+// units' [g, w] for kobako.derby.wide. pc: the unit in use (null for a side
 // unit), its f px at 4.
 const PAN = [60, 14, 1500];
 let pc = null;
@@ -177,7 +177,7 @@ function shot(m, xs, l, cut) {
   return c;
 }
 // Draws one frame of the course (dr, no list), back to front, for camera c
-// at x0 (pocket.derby: stands, crowd, rails, turf, poles, gate). K: the
+// at x0 (kobako.derby: stands, crowd, rails, turf, poles, gate). K: the
 // screen's face when this is its feed, a camera 6 m behind the leader, low on
 // the rail: rails and the leading FN[tier] runners, those wholly inside K.
 function course(c, x0, xs, close, gate, K) {
@@ -202,12 +202,12 @@ function course(c, x0, xs, close, gate, K) {
   runners(xs, 0, close, K);
   S.part(1, live.rail, 720896, 0xffff, k[4]);
 }
-// The runners (legs, run), far to near, in one call: pocket.derby.runners
+// The runners (legs, run), far to near, in one call: kobako.derby.runners
 // projects, culls and orders them and draws them with integer inputs
 // (docs/apps/derby-runners-native.md). It stops at the close-up lane (its
 // place in zo) and goes on from the next. CO: coats 0..7, silks 8..15. DO:
 // the legs' phase as a distance, xs plus the lane's offset (README). AB:
-// the series' path (pocket.derby.mode(), the up key's A/B).
+// the series' path (kobako.derby.mode(), the up key's A/B).
 const CO = new Int32Array(16), DO = (x, l) => x + l * 67797;
 let AB = 0;
 function runners(xs, pan, close, K) {

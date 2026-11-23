@@ -1,8 +1,8 @@
 # Profile-guided build of the QuickJS component (docs/vm/qjs-pgo.md).
 #
-#   pocket_qjs_pgo(generate <unused>)  instrument; the image dumps its counters
+#   kobako_qjs_pgo(generate <unused>)  instrument; the image dumps its counters
 #                                      (tools/r5sim, R5SIM_PGO_GEN)
-#   pocket_qjs_pgo(use <profile dir>)  compile with the profile in <profile dir>
+#   kobako_qjs_pgo(use <profile dir>)  compile with the profile in <profile dir>
 #
 # Call it from a project CMakeLists after project(). The profile dir mirrors
 # the component's sources: <dir>/quickjs-ng/quickjs.c.gcda and so on.
@@ -39,11 +39,11 @@
 # Not available: hot/cold splitting (-freorder-blocks-and-partition). The
 # Xtensa GCC turns it off whatever the options say (esp-15.2.0 reports it
 # [disabled]; the same test splits on x86).
-if(NOT DEFINED POCKET_QJS_PGO_OPTS)
-    set(POCKET_QJS_PGO_OPTS -freorder-blocks-algorithm=stc -fno-reorder-functions -fno-profile-values)
+if(NOT DEFINED KOBAKO_QJS_PGO_OPTS)
+    set(KOBAKO_QJS_PGO_OPTS -freorder-blocks-algorithm=stc -fno-reorder-functions -fno-profile-values)
 endif()
 
-function(pocket_qjs_pgo mode profile_dir)
+function(kobako_qjs_pgo mode profile_dir)
     idf_component_get_property(qjs_lib quickjs-ng COMPONENT_LIB)
     idf_component_get_property(qjs_dir quickjs-ng COMPONENT_DIR)
     if(mode STREQUAL "generate")
@@ -57,7 +57,7 @@ function(pocket_qjs_pgo mode profile_dir)
         # which tools/pgo/train.sh turns into the .ids that rekey.py needs.
         # It writes notes only; the code is the same.
         target_compile_options(${qjs_lib} PRIVATE
-            ${POCKET_QJS_PGO_OPTS}
+            ${KOBAKO_QJS_PGO_OPTS}
             -fprofile-generate -fprofile-update=single -fprofile-info-section
             -ftest-coverage)
         target_link_libraries(${qjs_lib} INTERFACE gcov)
@@ -88,10 +88,10 @@ function(pocket_qjs_pgo mode profile_dir)
             # quickjs-libc.c) has no profile and builds as before.
             # -Wmissing-profile reports a .gcda that is not found (once per
             # file) and a function the training image did not have (the
-            # firmware's CONFIG_POCKET_VM_ROM_INTRINSICS setup, a handful);
+            # firmware's CONFIG_QJS_LEAN_ROM_INTRINSICS setup, a handful);
             # a warning, not the IDF's -Werror: those build without a profile.
             set_property(SOURCE "${qjs_dir}/${src}" TARGET_DIRECTORY ${qjs_lib}
-                APPEND PROPERTY COMPILE_OPTIONS ${POCKET_QJS_PGO_OPTS}
+                APPEND PROPERTY COMPILE_OPTIONS ${KOBAKO_QJS_PGO_OPTS}
                     -fprofile-use -Wno-coverage-mismatch -Wmissing-profile
                     -Wno-error=missing-profile)
             # A new profile recompiles its source.
@@ -99,6 +99,6 @@ function(pocket_qjs_pgo mode profile_dir)
                 APPEND PROPERTY OBJECT_DEPENDS "${profile_dir}/${g}")
         endforeach()
     else()
-        message(FATAL_ERROR "pocket_qjs_pgo: mode is generate or use, not '${mode}'")
+        message(FATAL_ERROR "kobako_qjs_pgo: mode is generate or use, not '${mode}'")
     endif()
 endfunction()

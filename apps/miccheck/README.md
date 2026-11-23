@@ -1,7 +1,7 @@
 # miccheck
 
-`pocket.audio.capture`（docs/api/common-api.md §9 のマイク）が実機で立つかを見る1本。表示は
-持たず、`console.log` の行が結果そのもの。`tools/pocket_bridge.py demo --source
+`kobako.audio.capture`（docs/api/common-api.md §9 のマイク）が実機で立つかを見る1本。表示は
+持たず、`console.log` の行が結果そのもの。`tools/kobako_bridge.py demo --source
 apps/miccheck/miccheck.js` で Playground に打ち込んで走らせる。
 
 ソースのバイト数はそのままゲストのヒープを食うので、理由はここに置いてアプリ側には
@@ -72,9 +72,9 @@ peakが54〜85%なので、**普通に話す分には琥珀は出ず、声を張
 学んだ区別そのもの。メーター自体はまだ「ついでに見えた」以上の確認をされていない。
 
 ホスト側で確かめられる範囲（連続性・overflow・close・セッション終了・インジケータ・レベル計）は
-`tools/test_pocket_capture.c` が実物のQuickJSと実物の `pocket_capture.c` / `pocket_api.c`
+`tools/test_kobako_capture.c` が実物のQuickJSと実物の `kobako_capture.c` / `kobako_api.c`
 を ASan/UBSan で回して見ている。
 
 ```
-wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_pocket_capture_test.sh && /tmp/test-pocket-capture"
+wsl -e bash -lc "cd /mnt/c/devs/m5stack/cardputer-adv-pocketjs && bash tools/build_kobako_capture_test.sh && /tmp/test-kobako-capture"
 ```

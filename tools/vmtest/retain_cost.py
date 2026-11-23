@@ -37,9 +37,9 @@ def build():
     objs = [str(out / 'obj' / f'{n}.o') for n in
             ('dtoa', 'libregexp', 'libunicode', 'quickjs', 'quickjs-libc', 'quickjs-vm')]
     binary = out / 'retain_cost'
-    subprocess.run(['gcc', '-std=gnu11', '-O1', '-g', '-fno-pie', *flags, '-DQUICKJS_NG_BUILD', '-D_GNU_SOURCE',
+    subprocess.run(['gcc', '-std=gnu11', '-O1', '-g', '-fno-pie', *flags, '-DQUICKJS_NG_BUILD', '-DQJS_LEAN_LAZY_BUILTINS=1', '-D_GNU_SOURCE',
                     '-I', str(out / 'include'), '-I', str(compile_peak.QJS),
-                    '-I', str(ROOT / 'components/pocketjs_guest/include'), '-no-pie', '-Wall',
+                    '-I', str(ROOT / 'components/kobako_guest/include'), '-no-pie', '-Wall',
                     str(ROOT / 'tools/vmtest/retain_cost.c'), *objs, '-lm', '-lpthread', '-o', str(binary)],
                    cwd=ROOT, check=True)
     return binary

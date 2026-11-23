@@ -15,7 +15,7 @@
     if (i === 22) node.visible = {slot: 'show'};
     nodes.push(node);
   }
-  const view = pocket.kasane.mount({version: 1, background: 0x071425ff,
+  const view = kobako.kasane.mount({version: 1, background: 0x071425ff,
     slots: slots, nodes: nodes}, initial);
   let stage = 0;
   let update = 0;

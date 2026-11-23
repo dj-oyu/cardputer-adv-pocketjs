@@ -17,4 +17,4 @@ perl ~/vg/root/usr/bin/callgrind_annotate --inclusive=yes /tmp/sp.cg
 ```
 
 JS のターンは `test_stress_app.c:eval` の包含コスト（`frame()` と、その後のジョブの消化）。描画は
-`pocket_kasane_present`。WSL の `/tmp` は呼び出しの間に消えることがあるので、残したい結果は `.cache/prof/` へ写す。
+`kobako_kasane_present`。WSL の `/tmp` は呼び出しの間に消えることがあるので、残したい結果は `.cache/prof/` へ写す。

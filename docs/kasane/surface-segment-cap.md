@@ -15,7 +15,7 @@
 ## API
 
 ```js
-const proc = pocket.kasane.procedural;
+const proc = kobako.kasane.procedural;
 const small = proc.createSurface({ maxSegments: 256 }); // 面1: フレーム 2 枚 × 2,566 B
 proc.resource(small);
 proc.beginFrame(0, small); // ここで確保（従来どおり最初の beginFrame）
@@ -36,12 +36,12 @@ proc.beginFrame(0, small); // ここで確保（従来どおり最初の beginFr
 追加面はセッション内で一度だけ作れる。面0 の `beginFrame(color)`・`draw(handle, inputs)`・`commit()`・`resource()` は従来どおり。
 
 ```js
-const proc = pocket.kasane.procedural;
+const proc = kobako.kasane.procedural;
 const foreground = proc.createSurface();
 const backImage = proc.resource();
 const frontImage = proc.resource(foreground);
 
-pocket.kasane.replace(tx => {
+kobako.kasane.replace(tx => {
   tx.background(0x000000ff);
   tx.image({resource: backImage, bounds: [0, 0, 64, 48]});
   tx.image({resource: frontImage, bounds: [80, 0, 144, 48]});
@@ -78,11 +78,11 @@ proc.commit();
 
 scratch と VM を縮めなかったのは、1 本の plan が 1 回の `draw()` で最大 1,024 本を出せ、面への写しの前に数を確かめる形だから（面ごとの上限は写すときに効く）。
 
-**短いフレームが安全な理由**: フレームは `ksn_proc_frame` の先頭（`count`・`raster_steps`・`ready`、6 B）と n 本分だけを確保する。`pocket_shiki_frame.c` の中でフレームを読むのは `count` 本までの経路（`ksn_proc_render_band`、damage の計算、画像の帯）だけで、構造体を丸ごと写す・消す箇所は無い。`beginFrame` の `memset(sizeof *candidate)` は先頭 3 項目の初期化に替えた（1,024 本の面でも 10 KB の memset が無くなる）。`segments` が末尾で詰め物が無いことは `_Static_assert` で固定した。
+**短いフレームが安全な理由**: フレームは `ksn_proc_frame` の先頭（`count`・`raster_steps`・`ready`、6 B）と n 本分だけを確保する。`kobako_shiki_frame.c` の中でフレームを読むのは `count` 本までの経路（`ksn_proc_render_band`、damage の計算、画像の帯）だけで、構造体を丸ごと写す・消す箇所は無い。`beginFrame` の `memset(sizeof *candidate)` は先頭 3 項目の初期化に替えた（1,024 本の面でも 10 KB の memset が無くなる）。`segments` が末尾で詰め物が無いことは `_Static_assert` で固定した。
 
 ## host の検査
 
-`tools/kasane_contract/test_pocket_proc_turn_qjs.c` の `cap_contract`（ASan/UBSan、`run_pocket_proc_limits_qjs.py` の scalar と fake PIE の 2 通り、`run.sh` から走る）:
+`tools/kasane_contract/test_kobako_proc_turn_qjs.c` の `cap_contract`（ASan/UBSan、`run_kobako_proc_limits_qjs.py` の scalar と fake PIE の 2 通り、`run.sh` から走る）:
 
 - 確保量: 面0は従来どおり 10,246 B × 3（候補・scratch・確定）＋VM。面1（256）は 2,566 B × 2 だけ。n = 1・1,024・`{}`・`undefined`・引数なしの境界もそれぞれの確保量と、n 本目まで通り n+1 本目で `LIMIT_EXCEEDED` になることを確かめる。
 - ちょうど満杯: VM の 128 本＋型付き点列の 127 本＋VM の 1 本 = 256 で通り、次の 1 本で `LIMIT_EXCEEDED`、そのフレームは `commit()` できない（`BUSY`）。
@@ -93,7 +93,7 @@ scratch と VM を縮めなかったのは、1 本の plan が 1 回の `draw()`
 
 ## 実機の測定
 
-image は `build_surfcap`（この節の変更＋測定用コピー）。測定用コピーは [`tools/games/surfcap/surfcap_device.py`](../../tools/games/surfcap/surfcap_device.py) が `.cache/surfcap/derby_watch.js` に書き、`DERBY_BGCOST_SOURCE`（[derby-background-cost.md](derby-background-cost.md) の仕組み）で DERBY WATCH の行に埋め込んだ。`apps/derby` は変えていない。操作は `tools/games/bgcost/bgcost_device.py run`（放置でデモのレースが回る）。空き・最大連続は `pocket.memory.info()` の `internalFreeBytes`・`internalLargestBytes`（ターンの始めの標本、100 ms ごと）。
+image は `build_surfcap`（この節の変更＋測定用コピー）。測定用コピーは [`tools/games/surfcap/surfcap_device.py`](../../tools/games/surfcap/surfcap_device.py) が `.cache/surfcap/derby_watch.js` に書き、`DERBY_BGCOST_SOURCE`（[derby-background-cost.md](derby-background-cost.md) の仕組み）で DERBY WATCH の行に埋め込んだ。`apps/derby` は変えていない。操作は `tools/games/bgcost/bgcost_device.py run`（放置でデモのレースが回る）。空き・最大連続は `kobako.memory.info()` の `internalFreeBytes`・`internalLargestBytes`（ターンの始めの標本、100 ms ごと）。
 
 ### 1 面あたりの確保量（実機の実測）
 
@@ -151,10 +151,10 @@ image は `build_surfcap`（この節の変更＋測定用コピー）。測定�
 
 MEGADEMO の I・II を作り直した版が、実機で最初の `beginFrame` の `frame allocation failed` になった（評価後の空き 65,312 B、最大の連続 31,744 B。候補・確定フレームと scratch の 3 × 10,246 B が取れない）。フレームを評価の前に取ると、今度は `set` チャンクの解析が 8 KB の連続を取れずに落ちた。そこで面0にも同じ上限を宣言できるようにした。
 
-- `pocket.kasane.procedural.resource({maxSegments: n})`（n = 1〜1,024）は、面0の画像を返し、面0の候補・確定フレームを `6 + 10·n` B にする。scratch（1 回の `draw()` の出力、10,246 B）と VM は変わらない。
+- `kobako.kasane.procedural.resource({maxSegments: n})`（n = 1〜1,024）は、面0の画像を返し、面0の候補・確定フレームを `6 + 10·n` B にする。scratch（1 回の `draw()` の出力、10,246 B）と VM は変わらない。
 - 面0の最初の `beginFrame` より前に呼ぶ。フレームがもうあるときは、同じ値なら通り、違う値（`{}` = 1,024 を含む）は `BUSY`。不正な値は `INVALID_ARGUMENT`。`resource()`・`resource(id)` は従来どおり。`reset()` で上限は 1,024 に戻る。
 - 強制は面1と同じ（`draw()` が超えると `LIMIT_EXCEEDED`、フレームは閉じる）。
-- 検査: `test_pocket_proc_turn_qjs.c` の `cap_contract`（確保量 `6 + 10·96`、上限での `LIMIT_EXCEEDED`、確保後の `BUSY`、`reset()` 後の 1,024）。
+- 検査: `test_kobako_proc_turn_qjs.c` の `cap_contract`（確保量 `6 + 10·96`、上限での `LIMIT_EXCEEDED`、確保後の `BUSY`、`reset()` 後の 1,024）。
 - MEGADEMO は 768（いちばん多いフレームは HEAVY の TWIST で 648 本、`run_proc_megademo_scenes.py`）。フレーム 2 枚が 10,246 → 7,686 B（計 5,120 B 減）、要る連続領域も 7.7 KB になる。
 
 ## 2026-11-08: バッファは面ごとに 1 本、`spare` で予備を宣言する

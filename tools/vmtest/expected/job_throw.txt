@@ -5,6 +5,6 @@ Error: job-2-throws
 
 frame
 job-3 (runs in the frame-1 drain)
-E pocketjs_guest: Unhandled Promise rejection: Error: rejected-before-throw
+E kobako_guest: Unhandled Promise rejection: Error: rejected-before-throw
 frame
 exit=2

@@ -166,7 +166,7 @@ pet row cache arms PASS: 48495 panel comparisons, worst pixel step 0, hash d6eb4
 - **実機の時間は未測定**（この容器では測れない）。主張は命令数と回数の掛け算までである。
 - **8,208 B を払う判断はこの文書で確定させていない**。ヒット率は 64 行で崖になる（§3）が、
   DRAM 予算との引き換えは `tools/memlog.py --port --check` の実測で見るしかない。
-  ファームのビルドはこの容器では不可能（cmake が `Missing pocketjs_idf_ui_core for esp32s3` で
+  ファームのビルドはこの容器では不可能（cmake が `Missing kobako_idf_ui_core for esp32s3` で
   停止する）ので、ここにあるのは単体 TU の `size` である。**実機に焼いて `memlog.py` を走らせる
   までは「8 KiB 払ってよい」とは言えない。**
 - キーは 1 つだけである。**2 枚の画像を交互に描く画面では効かない**（最悪 = 旧経路、退行はしない）。

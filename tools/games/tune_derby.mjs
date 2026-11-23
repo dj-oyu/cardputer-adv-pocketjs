@@ -1,5 +1,5 @@
 // Monte Carlo over apps/derby/derby_watch.js's race model (host, Node).
-// Loads the app with no `pocket`, so only globalThis.derby is defined, and
+// Loads the app with no `kobako`, so only globalThis.derby is defined, and
 // reports what the tuning of the model and of the odds rests on: winners by
 // running style, the favourite's win rate, finishing margins, lead changes in
 // the last 300 m, race time; then the odds: a conditional-logit (Luce) fit of

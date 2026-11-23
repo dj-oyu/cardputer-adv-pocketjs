@@ -1,4 +1,4 @@
-"""Run the time-varying pocket.kasane diagnostic over USB."""
+"""Run the time-varying kobako.kasane diagnostic over USB."""
 import argparse
 import re
 import time

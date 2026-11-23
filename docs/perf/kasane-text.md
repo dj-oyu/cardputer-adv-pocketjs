@@ -26,21 +26,21 @@ turn_ms=0.43 render_ms=1.55 send_ms=1.67 bytes=11520 bands=3 band_mask=0x00e00
 4本とも同じ帯（9,10,11）。**変わった画素は caption 1文字ぶん 6×12 px、
 再描画したのは 240×24 px。** 面積比で 40 倍を塗り直している。
 
-**計測B — `pocket.input.text` に打鍵**（USB診断 `K` のテキスト欄へ70打鍵、
+**計測B — `kobako.input.text` に打鍵**（USB診断 `K` のテキスト欄へ70打鍵、
 `band_mask` を全部拾う）。修正前の16本の窓に `band_mask=0x1ffff`（17帯・64,800 B）が
 2本現れた。**1打鍵が全画面再描画になる経路があった。**
 
 ### 2. なぜ全画面だったか
 
-編集欄は Kasane のコマンドではない。`pocket_text_overlay()` が
+編集欄は Kasane のコマンドではない。`kobako_text_overlay()` が
 `app_session.c` の present 経路から、Kasane が描いた各帯の上へ直接合成している
-（`pocket_text.h` の冒頭が書いているとおり、欄はホストのもので、ゲストは確定文字しか見ない）。
+（`kobako_text.h` の冒頭が書いているとおり、欄はホストのもので、ゲストは確定文字しか見ない）。
 したがって欄の変化は **Kasane が自分のコマンド差分からは導けない damage** で、外から教える必要がある。
 
 教える口は `app_force_redraw()` しかなく、その先は
-`pocket_kasane_invalidate()` → `ksn_runtime_invalidate()` → `ksn_core_invalidate()` で、
+`kobako_kasane_invalidate()` → `ksn_runtime_invalidate()` → `ksn_core_invalidate()` で、
 `ksn_core_damage()` は `invalidated` を見て 17 帯を返していた。
-`pocket_text_key()` は先頭で無条件に `dirty=true` を立てるので、
+`kobako_text_key()` は先頭で無条件に `dirty=true` を立てるので、
 **受理されなかったキーでも全画面再描画**になる。
 
 ### 3. 置いたもの
@@ -58,11 +58,11 @@ turn_ms=0.43 render_ms=1.55 send_ms=1.67 bytes=11520 bands=3 band_mask=0x00e00
 `frame.full_redraw` は「全面」の意味を保つため、無指定 invalidate のときだけ真にする。
 
 上位は素通しの `_bands` 版を足しただけ（`ksn_view_host_invalidate_bands` →
-`ksn_runtime_invalidate_bands` → `pocket_kasane_invalidate_bands` →
-`app_force_redraw_bands`）。`pocket_text` 側は `dirty` と一緒に
+`ksn_runtime_invalidate_bands` → `kobako_kasane_invalidate_bands` →
+`app_force_redraw_bands`）。`kobako_text` 側は `dirty` と一緒に
 **欄の占める帯を累積**する（`field_bands()`）。累積なのは、閉じたセッションは
 自分の座標を持って行くのに、空けた行の repaint は残るから。
-`pocket_text_take_dirty()` は bool ではなく帯集合を返すようになった。
+`kobako_text_take_dirty()` は bool ではなく帯集合を返すようになった。
 
 ### 4. 結果
 
@@ -85,7 +85,7 @@ turn_ms=0.43 render_ms=1.55 send_ms=1.67 bytes=11520 bands=3 band_mask=0x00e00
 **静止画面＋編集欄という組み合わせの実機計測はまだ無い**（hello に欄がなく、
 pet の NAME 編集は NVS を書くので今回の試験では触っていない）。
 
-**静的 DIRAM**: `memlog` で +16 B（`pocket_text.c.obj` +4、残りは core の帯集合と整列）。
+**静的 DIRAM**: `memlog` で +16 B（`kobako_text.c.obj` +4、残りは core の帯集合と整列）。
 
 ### 5. 段階2: damage が帯の列範囲を持つ（2026-09-19）
 
@@ -125,7 +125,7 @@ display port に `present_rect` を**追加**した（`present` は不変なの�
 62 フレームが実際に狭まり（234 回の窓転送）、**全画素一致**。
 狭まった回数も検査するので「何も狭めずに通る」ことはない。
 パネルとストリップは毎フレーム 0xa55a で汚してから描くので、書き忘れた列は毒として現れる。
-契約スイート全体（ASan/UBSan・O2）、pocket_text、Kasane QuickJS、session dispatch も PASS。
+契約スイート全体（ASan/UBSan・O2）、kobako_text、Kasane QuickJS、session dispatch も PASS。
 
 **実機**: `kasane_input_device_test`・`smoke --cycles 20`・`test_settings`・`capture_home` すべて PASS。
 静的 DIRAM 増分 0。
@@ -175,7 +175,7 @@ unsigned (*advance)(void *,ksn_font font,uint32_t codepoint);
 **転送 15 分の 1、フレーム 40% 減。** 768 B は 3 帯 × 16 列 × 2 B × 8 行で、
 予測値と一致する（窓は 106..112 px が 16 画素丸めで 96..112）。
 
-**実機（`pocket.input.text` に打鍵、USB 診断 `K`）**: 着手前は 38,400〜64,800 B /
+**実機（`kobako.input.text` に打鍵、USB 診断 `K`）**: 着手前は 38,400〜64,800 B /
 render 12.8〜36.2 ms だったものが **13,312〜29,952 B / render 8.0〜29.5 ms**。
 この画面は自前の回転アニメーションで毎フレーム 14 帯 dirty なので、
 ここに出ているのは打鍵ぶんだけの改善ではない。
@@ -185,7 +185,7 @@ render 12.8〜36.2 ms だったものが **13,312〜29,952 B / render 8.0〜29.5
 広いアームには `advance` を渡さない（＝箱全体が damage）ので、両アームの damage は**違う**。
 それでも 120 フレームのパネルが全画素一致し、同じ長さの1桁更新 9 回で
 **狭いアームのバイト数が広いアームの 1/4 以下**であることを検査する。
-契約スイート（ASan/UBSan・O2）、pocket_text、Kasane QuickJS、session dispatch、lessons も PASS。
+契約スイート（ASan/UBSan・O2）、kobako_text、Kasane QuickJS、session dispatch、lessons も PASS。
 
 **実機回帰**: `kasane_input_device_test` / `smoke --cycles 20` / `test_settings` / `capture_home` PASS。
 静的 DIRAM 増分 0。

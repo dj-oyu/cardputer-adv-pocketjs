@@ -47,10 +47,10 @@
 
 ### トレース収集
 
-`tools/vmtest/` のコーパス(23本)を `run.sh --trace` で採取。加えて `apps/*/*.js` のうち **`pocket.*` を一切呼ばない5本**（`ui.*` も呼ばない、= vmrunだけで動く)を `vmrun --profile host --frames 5 --trace ... FILE.js` で個別採取した:
+`tools/vmtest/` のコーパス(23本)を `run.sh --trace` で採取。加えて `apps/*/*.js` のうち **`kobako.*` を一切呼ばない5本**（`ui.*` も呼ばない、= vmrunだけで動く)を `vmrun --profile host --frames 5 --trace ... FILE.js` で個別採取した:
 
 - 含めた: `apps/vmprobe/{async_generator,closures,deep_recursion,promise_chain,sync_loop}.js`
-- **除外した**（`pocket.*` または `ui.*` を呼ぶため `ReferenceError` で止まる。2026-09-12に実行して確認、全件 `pocket.*`呼び出し回数>0 または `ui.*`使用を先にgrepで確認済み）: `apps/hello/main.js`（`ui.*`）、`apps/apicheck/{apicheck,capsweep,pickcheck}.js`、`apps/appcheck/appcheck.js`、`apps/bridge/bridge.js`、`apps/companion/companion.js`、`apps/deskclock/deskclock.js`、`apps/imucal/imucal.js`、`apps/ioprobe/ioprobe.js`、`apps/miccheck/miccheck.js`、`apps/mp3play/mp3play.js`、`apps/netcheck/{netcheck,tlscycle,tlshosts,tlsleak}.js`、`apps/opusfit/opusfit.js`、`apps/opusplay/opusplay.js`、`apps/pet/pet.js`、`apps/player/player.js`、`apps/pocketfs/pocketfs.js`、`apps/pocketui/pocketui.js`、`apps/streamplay/streamplay.js`、`apps/textcheck/textcheck.js`、`apps/vmprobe/io_wait.js`。
+- **除外した**（`kobako.*` または `ui.*` を呼ぶため `ReferenceError` で止まる。2026-09-12に実行して確認、全件 `kobako.*`呼び出し回数>0 または `ui.*`使用を先にgrepで確認済み）: `apps/hello/main.js`（`ui.*`）、`apps/apicheck/{apicheck,capsweep,pickcheck}.js`、`apps/appcheck/appcheck.js`、`apps/bridge/bridge.js`、`apps/companion/companion.js`、`apps/deskclock/deskclock.js`、`apps/imucal/imucal.js`、`apps/ioprobe/ioprobe.js`、`apps/miccheck/miccheck.js`、`apps/mp3play/mp3play.js`、`apps/netcheck/{netcheck,tlscycle,tlshosts,tlsleak}.js`、`apps/opusfit/opusfit.js`、`apps/opusplay/opusplay.js`、`apps/pet/pet.js`、`apps/player/player.js`、`apps/kobakofs/kobakofs.js`、`apps/kobakoui/kobakoui.js`、`apps/streamplay/streamplay.js`、`apps/textcheck/textcheck.js`、`apps/vmprobe/io_wait.js`。
 
 合計28トレース、`.cache/vmtest/traces/*.trace` + `.cache/vmalloc/apptraces/vmprobe_*.trace`（いずれもgit管理外、再生成コマンドは§5）。
 

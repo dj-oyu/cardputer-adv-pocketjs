@@ -13,8 +13,8 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "pocket/net_service.h"
-#include "pocket/wifi_time.h"
+#include "kobako/net_service.h"
+#include "kobako/wifi_time.h"
 #include "sdkconfig.h"
 #ifdef CONFIG_AYATSURI_CHAT_STREAM_PROBE
 #include "ayatsuri_chat_stream_probe.h"

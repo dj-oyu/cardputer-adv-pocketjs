@@ -96,7 +96,7 @@ try:
     line=command('e','VALUE');assert f'autotime={was}' in line,line
     command('u','SELECT 5');command('u','SELECT 4')
     command('b','CATEGORY 1');command('u','SELECT 3');command('u','SELECT 2')
-    # POCKET PET is appended at index 5; existing settings/Hello indices stay fixed.
+    # KOBAKO PET is appended at index 5; existing settings/Hello indices stay fixed.
     command('a','CATEGORY 0');command('e','FRAME_PRESENTED');command('q','HOME_READY')
     print('SETTINGS_OK sound=ON categories, toggles, mute, app-return',flush=True)
 finally:

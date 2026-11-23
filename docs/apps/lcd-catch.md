@@ -1,6 +1,6 @@
 # LCD CATCH — 固定セグメントの液晶ゲーム
 
-2026-09-29、ブランチ `vm/game-lcd`（`vm/main` 026e8c7 から）。メニュー行 "LCD CATCH"（`local.lcdcatch`）の中身。アプリは [`apps/lcdcatch/lcd_catch.js`](../../apps/lcdcatch/lcd_catch.js)、コードの注と調整用定数の表は [`apps/lcdcatch/README.md`](../../apps/lcdcatch/README.md)。**この文書の数値は断りのない限り host の実測**（実物の QuickJS と実物の `pocket.kasane` を 64bit の Linux で動かしたもの）で、実機では何も測っていない。計算・推定にはその旨を書く。
+2026-09-29、ブランチ `vm/game-lcd`（`vm/main` 026e8c7 から）。メニュー行 "LCD CATCH"（`local.lcdcatch`）の中身。アプリは [`apps/lcdcatch/lcd_catch.js`](../../apps/lcdcatch/lcd_catch.js)、コードの注と調整用定数の表は [`apps/lcdcatch/README.md`](../../apps/lcdcatch/README.md)。**この文書の数値は断りのない限り host の実測**（実物の QuickJS と実物の `kobako.kasane` を 64bit の Linux で動かしたもの）で、実機では何も測っていない。計算・推定にはその旨を書く。
 
 ## 結論
 
@@ -72,11 +72,11 @@
 
 ## 音
 
-`pocket.audio.tone({frequencyHz, durationMs, gain})`（capability `audio.tone`、manifest では optional）。拍ごとに 1600 Hz 12 ms のクリック（受けた拍は代わりに 2100 Hz 50 ms）、ミスで 220 Hz 350 ms、開始で 1000 Hz 40 ms。**1度に1音**で、鳴っている間の次の `tone()` は `BUSY` で断られる（Promise の拒否を握りつぶしている）。`tone()` はホームの音楽を止める（`pocket_av_background_stop("tone")`）。ミュート中は同じ長さの無音。host では `tone()` の呼び出しを数えただけで、鳴り方は確かめていない。
+`kobako.audio.tone({frequencyHz, durationMs, gain})`（capability `audio.tone`、manifest では optional）。拍ごとに 1600 Hz 12 ms のクリック（受けた拍は代わりに 2100 Hz 50 ms）、ミスで 220 Hz 350 ms、開始で 1000 Hz 40 ms。**1度に1音**で、鳴っている間の次の `tone()` は `BUSY` で断られる（Promise の拒否を握りつぶしている）。`tone()` はホームの音楽を止める（`kobako_av_background_stop("tone")`）。ミュート中は同じ長さの無音。host では `tone()` の呼び出しを数えただけで、鳴り方は確かめていない。
 
 ## 最高得点の保存
 
-`pocket.storage` のキー `hi` に `[GAME A, GAME B]`。ゲームオーバーで更新があったとき、および Back の保存ターン（`frame(0x2000)`、プレイ中の得点が最高を超えていればそれも）で書く。`storage.set` は JS のタスクで書き込みを終えてから Promise を返す（`pocket_storage.c` のコメント）ので、Back の直後にセッションが終わっても書き込みは残る。manifest の optional に `storage.kv` を足した（`main/pocket/app_registry.c` のこのアプリの行。能力の検査はセッションの注入を変えないが、宣言として正しくするため）。
+`kobako.storage` のキー `hi` に `[GAME A, GAME B]`。ゲームオーバーで更新があったとき、および Back の保存ターン（`frame(0x2000)`、プレイ中の得点が最高を超えていればそれも）で書く。`storage.set` は JS のタスクで書き込みを終えてから Promise を返す（`kobako_storage.c` のコメント）ので、Back の直後にセッションが終わっても書き込みは残る。manifest の optional に `storage.kv` を足した（`main/kobako/app_registry.c` のこのアプリの行。能力の検査はセッションの注入を変えないが、宣言として正しくするため）。
 
 ## host の検証 — `tools/games/run_lcd_catch.sh`
 
@@ -85,7 +85,7 @@ wsl -e bash -lc "cd <repo> && bash tools/games/run_lcd_catch.sh"          # 台�
 wsl -e bash -lc "cd <repo> && bash tools/games/run_lcd_catch.sh --sheet"  # 画像も作る
 ```
 
-`tools/games/test_lcd_catch_host.c` を `tools/build_kasane_test.sh` の部品（実物の QuickJS、`pocket_kasane.c` と Kasane の core・render、ASan/UBSan）に `pocket_input.c` `keymap.c` `keystate.c` を足して作る（`tools/build_keytest_app_test.sh` と同じ組み方）。キーは実物の `keymap_poll()` へ押下・解放の辺として入れる。`pocket.audio` `pocket.storage` `pocket.random` は JS の代役: `tone()` は数えるだけ、ストアは C の文字列1つでセッションを越えて残る、乱数は common-api.md §8.1 の `xorshift32-v1` をそのまま JS で書き、種は定数 20260929。ゲストのヒープは実機の TLSF の数え方（4 B 切り上げ、最小 12 B）で数え、上限 163,840 B をかける（`test_megademo_app_host.c` と同じ模型）。
+`tools/games/test_lcd_catch_host.c` を `tools/build_kasane_test.sh` の部品（実物の QuickJS、`kobako_kasane.c` と Kasane の core・render、ASan/UBSan）に `kobako_input.c` `keymap.c` `keystate.c` を足して作る（`tools/build_keytest_app_test.sh` と同じ組み方）。キーは実物の `keymap_poll()` へ押下・解放の辺として入れる。`kobako.audio` `kobako.storage` `kobako.random` は JS の代役: `tone()` は数えるだけ、ストアは C の文字列1つでセッションを越えて残る、乱数は common-api.md §8.1 の `xorshift32-v1` をそのまま JS で書き、種は定数 20260929。ゲストのヒープは実機の TLSF の数え方（4 B 切り上げ、最小 12 B）で数え、上限 163,840 B をかける（`test_megademo_app_host.c` と同じ模型）。
 
 プレイヤーは**台本どおりに反応するボット**: 毎フレーム、いちばん下の星の筋へ1回だけ押す（押下と解放を同じフレームに入れる）。
 

@@ -2,7 +2,7 @@
 // F3b (docs/vm/builtin-floor-plan.md sec.17): typed-array classes made on
 // first use must look exactly like eager ones. The expected file is made by
 // the eager build. First, before any global is read: a Uint8Array made by
-// native code (host.bytes = JS_NewUint8ArrayCopy, pocket.fs's path) has to
+// native code (host.bytes = JS_NewUint8ArrayCopy, kobako.fs's path) has to
 // get the same prototype and constructor the global will later give.
 // The prototype's constructor is overwritten BEFORE the global is read: the
 // binding must still be the real constructor, not whatever is there now.

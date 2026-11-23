@@ -1,7 +1,7 @@
-# appcheck — `pocket.app` / `pocket.time` / `pocket.log` の自己検査
+# appcheck — `kobako.app` / `kobako.time` / `kobako.log` の自己検査
 
 `docs/api/common-api.md` §5（ライフサイクル・フレーム・時刻）と §7 の「ログと診断」が
-実機で仕様どおりかを、1回の起動で確かめる。実装は `main/pocket_app.c`。
+実機で仕様どおりかを、1回の起動で確かめる。実装は `main/kobako_app.c`。
 
 このファイルは `shell.c` に配線していない（別セッションが同じファイルを持っている
 ため触っていない）。**Playground に貼って実行する**か、`main/CMakeLists.txt` の
@@ -14,7 +14,7 @@ USBログの `js` タグに `APPCHK ...` として出る。
 
 | 行 | 主張 |
 | --- | --- |
-| `CAP app/time/log ...` | 3つの capability が supported かつ available で、`limits` が `pocket_app.c` の強制値と一致する |
+| `CAP app/time/log ...` | 3つの capability が supported かつ available で、`limits` が `kobako_app.c` の強制値と一致する |
 | `FRAME function` | このアプリは `globalThis.frame` を書いていないのに存在する。§5 の「ホストが frame を用意する」 |
 | `WALL unsynced null` / `WALL network <ms>` | SNTP 成功前は `unixMs` が null。`solar_time.c` のデモ日時を時計として渡さない |
 | `SLEEP ~150ms frames=0` | start hook が返した Promise が解決するまで Starting のままで、onFrame は1回も来ていない |
@@ -38,6 +38,6 @@ USBログの `js` タグに `APPCHK ...` として出る。
 - `reason` は常に `back`。`main.c` の終了経路が1本しかなく、`replace` / `shutdown`
   を名乗る根拠がない。
 - `exit()` はアプリ側からの正規終了経路を `main.c` が持たないため、失敗したターン
-  として着地する。エラー行は `pocket_app_reset()` が `APP EXITED` に書き換える。
-- Promise の job はフレームの**後**に排出される（`pocketjs_guest` の設計）。§5 の
+  として着地する。エラー行は `kobako_app_reset()` が `APP EXITED` に書き換える。
+- Promise の job はフレームの**後**に排出される（`kobako_guest` の設計）。§5 の
   「Promise job → frame」の順とは逆で、sleep の `then` は次のフレームで走る。

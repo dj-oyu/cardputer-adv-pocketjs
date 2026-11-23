@@ -23,7 +23,7 @@ class RunnerTest(unittest.TestCase):
             out, build = root / 'out', root / 'build'
             build.mkdir()
             (build / 'sdkconfig').write_text('CONFIG_KSN_DEVICE_PROBE=y\n')
-            (build / 'cardputer_pocketjs.bin').write_bytes(b'audited firmware')
+            (build / 'cardputer_kobako.bin').write_bytes(b'audited firmware')
             commands = []
 
             def execute(command, **kwargs):
@@ -88,9 +88,9 @@ class LinkAuditTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             build = Path(folder)
             (build / 'project_description.json').write_text(json.dumps({'build_components': [component]}))
-            for name in ('cardputer_pocketjs.map', 'build.ninja', 'compile_commands.json'):
+            for name in ('cardputer_kobako.map', 'build.ninja', 'compile_commands.json'):
                 (build / name).write_text(source)
-            symbols = 'ksn_core_init pocket_input_install pocketjs_guest_frame ' + symbol
+            symbols = 'ksn_core_init kobako_input_install kobako_guest_frame ' + symbol
             with patch.object(sys, 'argv', ['audit', '--build', str(build), '--nm', 'mock-nm']), \
                  patch.object(runner.subprocess, 'check_output', return_value=symbols), \
                  contextlib.redirect_stdout(io.StringIO()):

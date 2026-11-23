@@ -1,4 +1,4 @@
-# MEGADEMO WAKE のジオメトリを C へ（`pocket.shapes`）
+# MEGADEMO WAKE のジオメトリを C へ（`kobako.shapes`）
 
 2026-10-28。WAKE（目覚め、逆光のタマ）を 3D の点＋透視にした版（dd3bfba）は、実機で 1 フレームの JS のターンが 127〜134 ms（約 7.4 fps）だった。描画 4.3 ms・転送 7.3 ms（どちらも実測、broker の `app_session`、HEAVY）。アニメーションの量は減らさない（ユーザーの指示）ので、同じ絵を安く計算する。設計の比較は Fable の独立レビュー（候補 1〜4）にもとづく。
 
@@ -17,31 +17,31 @@ JS のまま書き直す（行ごとの交点の代わりに辺の表）試作�
 
 ## 1 版目: 何を C にしたか（ec52431〜452898f。2 版目で作り直した）
 
-芝居（POSE の表、耳・目・ひげ・頭の輪郭の点の作り方）は JS に残し、その先の重い 3 つだけを C にした（`main/pocket/pocket_shape.c`、`pocket.shapes`）。
+芝居（POSE の表、耳・目・ひげ・頭の輪郭の点の作り方）は JS に残し、その先の重い 3 つだけを C にした（`main/kobako/kobako_shape.c`、`kobako.shapes`）。
 
 - `project(model, points, from, count, pose)`: モデルの点（x 右、y 下、z 手前）を、yaw・pitch・透視・roll で画面の点へ。`pose` = [cos yaw, sin yaw, cos pitch, sin pitch, cos roll, sin roll, カメラの距離, 倍率, x0, y0]。
 - `fill(points, plan, step, y0, y1, base, holes)`: 凸多角形（`[start, count]`）または楕円（`[cx, cy, rx, ry]`）から、穴の多角形（最大 6）を抜いた行の区間を、4 行ずつの台形（plan `tz` / `tz2`）で描く。`y0`・`y1` が `null` なら多角形の上下 ±.01。
 - `outline(points, plan, start, count, closed, parts, hidden)`: 辺を `parts` 等分し、中点が隠す多角形の中にある断片を飛ばして、線（plan `ln`）で描く。画面の外の片側に収まる断片は描かない。
 
-点は JS の `Float64Array` 2 本（モデル 146 点 × 3、画面 146 点 × 2）に置き、関数には区間の番号だけを渡す（フレームごとの配列を作らない）。描くのは `pocket_proc_draw_numbers()`（`H.draw` の後半）で、plan・VM・フレームの上限は今までどおり。
+点は JS の `Float64Array` 2 本（モデル 146 点 × 3、画面 146 点 × 2）に置き、関数には区間の番号だけを渡す（フレームごとの配列を作らない）。描くのは `kobako_proc_draw_numbers()`（`H.draw` の後半）で、plan・VM・フレームの上限は今までどおり。
 
-- **アプリだけの面**: `pocket.derby` と同じく、manifest の optional に `kasane.shapes` を持つセッション（MEGADEMO）にだけ入る（`app_session.c`、`app_registry.c`）。診断 `J` も入れる。capability `kasane.shapes`、limits は `maxPoints` 512・`maxHoles` 6。
+- **アプリだけの面**: `kobako.derby` と同じく、manifest の optional に `kasane.shapes` を持つセッション（MEGADEMO）にだけ入る（`app_session.c`、`app_registry.c`）。診断 `J` も入れる。capability `kasane.shapes`、limits は `maxPoints` 512・`maxHoles` 6。
 - **float で計算する**: S3 は単精度の FPU を持ち、倍精度はソフトウェア。1 フレームで辺を約 5,000 回なめるので、倍精度だと 10 ms 前後（推定）かかる。ビルドは `-ffp-contract=off`（host と実機で積和を融合させない）。
 
 ## 照合（host）
 
 `tools/kasane_contract/run_shape_oracle.py`: 置き換える前の JS（`--baseline-rev`、既定 c52af92）と今の木で WAKE の全 104 フレームを走らせ、draw ごとに plan と入力を比べる。
 
-- **倍精度でビルドした C**（`-DPOCKET_SHAPE_DOUBLE`）: 8,100 draw すべてがビット単位で一致（PASS）。C の移植が JS の演算順まで同じことの証明。
+- **倍精度でビルドした C**（`-DKOBAKO_SHAPE_DOUBLE`）: 8,100 draw すべてがビット単位で一致（PASS）。C の移植が JS の演算順まで同じことの証明。
 - **単精度（実機と同じ）**: 104 フレーム中 103 で draw の数が同じ、入力の差の最大 0.00028 px。`run_megademo_app_host.py` の WAKE の 13 フレームは、JS の版と全画素一致。
-- 他の試験は `pocket.shapes` を同じ C で載せる: `run_proc_megademo_scenes.py`（WAKE は 310 セグメント・ラスタ 7,085・145 draw で変わらず）、`run_proc_megademo_js.py`、`run_pocket_proc_qjs.py`、`run_megademo_app_host.py`。本物の `pocket_shiki_frame.c` を持たない試験は `shape_draw_shim.c` が draw を JS へ戻す。
+- 他の試験は `kobako.shapes` を同じ C で載せる: `run_proc_megademo_scenes.py`（WAKE は 310 セグメント・ラスタ 7,085・145 draw で変わらず）、`run_proc_megademo_js.py`、`run_kobako_proc_qjs.py`、`run_megademo_app_host.py`。本物の `kobako_shiki_frame.c` を持たない試験は `shape_draw_shim.c` が draw を JS へ戻す。
 
 ## メモリ（host m32、`MEGA_HEAP_LIMIT=163840`）
 
 | | 評価のピーク | 評価後 | 実行中の最大 |
 | --- | ---: | ---: | ---: |
 | JS で描いていた版（c52af92） | 134,352 | 129,816 | 145,732 |
-| `pocket.shapes` | 134,188 | 130,048 | **143,764** |
+| `kobako.shapes` | 134,188 | 130,048 | **143,764** |
 
 型付き配列（約 3.5 KB）と消えた JS の関数がほぼ相殺し、フレームごとの配列が無くなった分、実行中の最大が 2 KB 下がった。ネイティブ側の `.bss` は 0（状態は呼び出しの間だけ）。
 
@@ -50,8 +50,8 @@ JS のまま書き直す（行ごとの交点の代わりに辺の表）試作�
 | WAKE の 30 フレーム窓 | JS のターン | 描画 | 転送 |
 | --- | ---: | ---: | ---: |
 | JS で描いていた版（dd3bfba） | 127.6 / 130.6 / 133.6 / 129.8 ms | 4.3〜4.7 ms | 7.3 ms |
-| `pocket.shapes`（1 周目） | **21.6 / 21.5 ms** | 4.3〜4.7 ms | 7.3 ms |
-| `pocket.shapes`（2 周目） | **17.1 / 22.9 ms** | 4.1〜4.7 ms | 7.3 ms |
+| `kobako.shapes`（1 周目） | **21.6 / 21.5 ms** | 4.3〜4.7 ms | 7.3 ms |
+| `kobako.shapes`（2 周目） | **17.1 / 22.9 ms** | 4.1〜4.7 ms | 7.3 ms |
 
 - 30 フレームが 0.9〜1.04 秒（約 29〜30 fps。前は約 4 秒で 7.4 fps）。JS のターンは約 6 分の 1。
 - 残りの約 20 ms は、C の幾何と、約 110 回の `draw`（VM の実行と、JS から呼ぶ固定費）。描画と転送は変わらない（画面全体を毎フレーム送る。8 行の帯ごとに変わった所だけ送る改善は別の項目）。
@@ -60,9 +60,9 @@ JS のまま書き直す（行ごとの交点の代わりに辺の表）試作�
 
 ## 2 版目: 汎用の API に作り直した（2026-10-29）
 
-ユーザーの指示: 使いどころが多いので、インターフェースをきちんと定義する。契約は [docs/api/shapes.md](../api/shapes.md)、試験は `tools/kasane_contract/run_pocket_shape.py`（`shape_contract.js`）。1 版目からの違い:
+ユーザーの指示: 使いどころが多いので、インターフェースをきちんと定義する。契約は [docs/api/shapes.md](../api/shapes.md)、試験は `tools/kasane_contract/run_kobako_shape.py`（`shape_contract.js`）。1 版目からの違い:
 
-- **plan を通さない**: `fill`・`outline` は色を受け取り、線分を組み立て中のフレームへ直接書く（`pocket_proc_native_line`、`draw()` と同じフレームの上限）。台形の plan（`tz`/`tz2`）との暗黙の約束と、台形 1 個ごとの VM の実行が無くなった。WAKE の plan は 7 本 → 0 本。
+- **plan を通さない**: `fill`・`outline` は色を受け取り、線分を組み立て中のフレームへ直接書く（`kobako_proc_native_line`、`draw()` と同じフレームの上限）。台形の plan（`tz`/`tz2`）との暗黙の約束と、台形 1 個ごとの VM の実行が無くなった。WAKE の plan は 7 本 → 0 本。
 - **`project` は 3×4 の射影行列**: yaw・pitch・roll の順と 10 個の引数の固定をやめた。WAKE は行列を JS で組む（数行）。`w <= 0` の点は `NaN` を書き、塗り・線はそれを含む形を空として扱う。
 - **点は `Float32Array` だけ**（ユーザーと合意、2026-10-29）: 計算は単精度なので `Float64Array` は精度を上げずメモリを倍にするだけ。WAKE の点と行列は float32（約 2.9 KB → 1.5 KB）。
 - **毎行ぴったり塗る**: 4 行ずつの直線補間（JS の名残）をやめた。線分の数は同じ（plan も 1 行 1 本を出していた）。`outline` の断片は画面に切ってから描く。
@@ -74,9 +74,9 @@ JS のまま書き直す（行ごとの交点の代わりに辺の表）試作�
 
 手続き面の画像は毎フレーム全体（17 帯、64,800 B）を送っていた（Fable の指摘）。`commit()` の傷は 1 つの外接矩形で、さらに MEGADEMO の画像は等倍の STRETCH なので、その矩形も捨てられて画像の全体が傷になっていた。
 
-- **帯の署名**: `commit()` で、8 行の帯ごとに、その帯にかかる線分の並び（生のエントリ、パターン線のパラメータ込み）のハッシュと列の範囲を取る（`pocket_shiki_frame.c` の `band_signature`）。帯の画素は背景色とその並びだけで決まる（`ksn_proc_render_band`）ので、ハッシュが同じ帯は描き直さなくてよい。
-- **帯の傷**: パネルに出ている版（前に提示に成功したフレーム）とハッシュが違う帯だけを、両方の列の範囲の和で傷にする（`pocket_proc_band_damage`）。背景色が変わったフレームと最初のフレームは全部。
-- **等倍の画像へ**: `ksn_core_invalidate_image_source_damage()` が、等倍（`1X`、または回転なしで自分の大きさへの STRETCH）の画像のノードには帯ごとの矩形で傷を付け、それ以外（ズーム中、小窓の縮小）はノード全体にする。既存の `..._source_rect()` と試験の `publish_at(surface, rect)` の形はそのまま（`pocket_kasane.c` が帯の傷を取れるときだけ使う）。
+- **帯の署名**: `commit()` で、8 行の帯ごとに、その帯にかかる線分の並び（生のエントリ、パターン線のパラメータ込み）のハッシュと列の範囲を取る（`kobako_shiki_frame.c` の `band_signature`）。帯の画素は背景色とその並びだけで決まる（`ksn_proc_render_band`）ので、ハッシュが同じ帯は描き直さなくてよい。
+- **帯の傷**: パネルに出ている版（前に提示に成功したフレーム）とハッシュが違う帯だけを、両方の列の範囲の和で傷にする（`kobako_proc_band_damage`）。背景色が変わったフレームと最初のフレームは全部。
+- **等倍の画像へ**: `ksn_core_invalidate_image_source_damage()` が、等倍（`1X`、または回転なしで自分の大きさへの STRETCH）の画像のノードには帯ごとの矩形で傷を付け、それ以外（ズーム中、小窓の縮小）はノード全体にする。既存の `..._source_rect()` と試験の `publish_at(surface, rect)` の形はそのまま（`kobako_kasane.c` が帯の傷を取れるときだけ使う）。
 - `.bss` 約 400 B（面 2 つ × 署名 2 つ × 17 帯 × 6 B）。
 - **正しさ**: `run_megademo_app_host.py` の合成パネル（前のフレームの画素に、送った帯だけを上書きしていく）を、帯の傷あり・なし（`--no-band-damage`）で 700 フレーム走らせ、3 フレームおきの 234 枚がすべて一致（Enter の部屋の往復を含む）。送ったバイトは 1 周平均で 46,291 → 43,193 B/フレーム（全部が動く場面を含む平均。WAKE だけの値は実機の `KASANE_PAINT bytes=` で見る）。
 

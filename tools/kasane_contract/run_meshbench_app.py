@@ -16,13 +16,13 @@ def build_harness(test_source='tools/kasane_contract/test_meshbench_app.c', cach
     out.mkdir(parents=True, exist_ok=True)
     qjs = ROOT/'components/quickjs-ng/quickjs-ng'
     flags = ['-std=gnu11', '-O2', '-g', '-ffp-contract=off', '-fsanitize=address,undefined',
-             '-fno-omit-frame-pointer', '-DQUICKJS_NG_BUILD', '-D_GNU_SOURCE', '-DKSN_PROC_HOST_TEST']
+             '-fno-omit-frame-pointer', '-DQUICKJS_NG_BUILD', '-DQJS_LEAN_LAZY_BUILTINS=1', '-D_GNU_SOURCE', '-DKSN_PROC_HOST_TEST']
     flags += list(extra_flags)
     compiler = subprocess.check_output(['cc', '--version'], text=True)
     key = hashlib.sha256((' '.join(flags)+compiler+''.join(
         hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(qjs.glob('*'))
         if p.suffix in ('.c', '.h'))).encode()).hexdigest()
-    includes = ['-I'+str(p) for p in [qjs, ROOT/'main', ROOT/'main/pocket', ROOT/'main/ui',
+    includes = ['-I'+str(p) for p in [qjs, ROOT/'main', ROOT/'main/kobako', ROOT/'main/ui',
                 ROOT/'main/ui/kasane', ROOT/'main/ayatsuri', ROOT/'main/text', ROOT/'main/hal',
                 ROOT/'tools/hostshim', ROOT/'tools/kasane_contract', out]]
     commands = []
@@ -44,14 +44,14 @@ def build_harness(test_source='tools/kasane_contract/test_meshbench_app.c', cach
     rom = out/'rom.c'
     rom.write_text('#include "ksn_shiki.h"\nconst ksn_shiki_rom_entry *ksn_shiki_rom_table(unsigned *n){*n=0;return 0;}\n')
     sources = list(dict.fromkeys(re.findall(r'(?:main|tools)/[\w/]+\.c', (ROOT/'tools/build_kasane_test.sh').read_text())))
-    sources = [ROOT/p for p in sources if p!='tools/test_pocket_kasane.c']
-    sources += [ROOT/'main/pocket/pocket_shape.c', ROOT/'main/pocket/pocket_shiki_api.c',
-                ROOT/'main/pocket/app_registry.c', ROOT/test_source, rom]
+    sources = [ROOT/p for p in sources if p!='tools/test_kobako_kasane.c']
+    sources += [ROOT/'main/kobako/kobako_shape.c', ROOT/'main/kobako/kobako_shiki_api.c',
+                ROOT/'main/kobako/app_registry.c', ROOT/test_source, rom]
     sources += [ROOT/p for p in extra_sources]
     binary = out/'meshbench'
     run(['cc', *flags, '-DKASANE_DMA_OVERLAP=1',
          # app_registry.c's local.meshbench row exists only with the Shiki diagnostics.
-         '-DCONFIG_POCKET_SHIKI_DEBUG=1', '-Wall', '-Wextra', '-Werror', *includes, *sources, *objects,
+         '-DCONFIG_KOBAKO_SHIKI_DEBUG=1', '-Wall', '-Wextra', '-Werror', *includes, *sources, *objects,
          *['-Wl,--wrap='+n for n in ['malloc', 'calloc', 'realloc', 'free']], '-lm', '-o', binary])
     evidence = {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
                 'compiler': compiler, 'commands': commands, 'quickjs_cache_key': key,

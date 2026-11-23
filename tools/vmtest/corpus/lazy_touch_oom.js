@@ -1,8 +1,8 @@
 // vmrun-flags: --profile device
 // Regression for docs/vm/turn-cpi.md sec.4 (R4a): the first read of a lazy
-// list entry (POCKET_VM_LAZY_BUILTINS) marked it done before putting it in
+// list entry (QJS_LEAN_LAZY_BUILTINS) marked it done before putting it in 
 // the shape, and an out-of-memory in between left the name in neither place:
-// it read as undefined for the rest of the run. On the device pocket.fs.open
+// it read as undefined for the rest of the run. On the device kobako.fs.open
 // vanished that way; on the host Object.fromEntries did, at --fail-alloc 707.
 //
 // Each name below is untouched until its own turn. For each, fill the heap to

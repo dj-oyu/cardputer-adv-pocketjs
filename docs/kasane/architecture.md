@@ -14,7 +14,7 @@
 
 Kasane の C core にアプリ別 `kind`、特別な source 名、status 優先順位を入れない。組込み画面は flash 上の不変 descriptor を借用し、ユーザー定義は `mount` 時に上限付き native descriptor へ一度コンパイルする。どちらも同じ実行経路を使う。JS に毎 frame の命令木や自動 diff 用コピーを保持させない。描画の意味を一般化するための CSS/仮想 DOM/任意 JS callback は実装しない。PIE 幅は renderer 内部に閉じ、descriptor/slot/source ABI に漏らさない。
 
-`pocket.kasane.mount({version:1, slots, nodes}, initial)` と登録済み定義の `mount(name)`、`view.set(partial)` が高水準入口。型付き slot は text/bool/数値/矩形等を検証し、未知名、型違い、不正 UTF-8、容量超過では**部分反映しない**。定義は mount 後に不変、JS オブジェクトの後編集は表示に影響しない。文字は宣言した容量だけを保持し、数値 slot に文字用領域を割り当てない。`u32` source を `u16` 座標/page/reveal に暗黙変換しない。text は1命令128 B、APP全体896 B、APP80命令、SYSTEM16命令/128 Bを上限とする。低レベル `createScene` / `replace` は escape hatch であり、同じ APP lease の mounted view と混ぜない。
+`kobako.kasane.mount({version:1, slots, nodes}, initial)` と登録済み定義の `mount(name)`、`view.set(partial)` が高水準入口。型付き slot は text/bool/数値/矩形等を検証し、未知名、型違い、不正 UTF-8、容量超過では**部分反映しない**。定義は mount 後に不変、JS オブジェクトの後編集は表示に影響しない。文字は宣言した容量だけを保持し、数値 slot に文字用領域を割り当てない。`u32` source を `u16` 座標/page/reveal に暗黙変換しない。text は1命令128 B、APP全体896 B、APP80命令、SYSTEM16命令/128 Bを上限とする。低レベル `createScene` / `replace` は escape hatch であり、同じ APP lease の mounted view と混ぜない。
 
 制作時の JSON Schema は型の入口に過ぎない。host生成器を作るなら、未登録command、参照切れ、token、UTF-8**バイト**容量、展開後の命令/文字quota、画面・modal遷移時の同時peakを意味検査する。端末上でJSONの全木やtoken辞書を保持せず、flash定数と数値IDへコンパイルする構想である。現在のJSON例はこの生成器が完成した証拠ではない。見た目の規約として、選択状態は色または点滅だけに頼らず枠/マーカーでも示す。
 
@@ -32,7 +32,7 @@ APP と SYSTEM は別 layer だが builder と物理 bank は共有する。`sub
 
 ### overlay と音楽
 
-overlay は第三 layer を作らず APP lease を使う。`pocket.overlay` は region とキー入力を担当し、Kasane は描画を担当する。region-local 座標を LCD 座標へ変換し viewport で切る。native 背景は Kasane の dirty state と独立に動くため、overlay 中の全画面 invalidate は残る。shell の HUD・picker は guest より上。overlay profile では Kasane modal は UNSUPPORTED（全画面 scrim と region 契約が衝突する）。音楽の play/seek/pause、曲名・status の意味は music module、文字の寸法・命令・提出は presenter。music 固有の light-only PATCH も music module に置き、Kasane core に分岐を増やさない。
+overlay は第三 layer を作らず APP lease を使う。`kobako.overlay` は region とキー入力を担当し、Kasane は描画を担当する。region-local 座標を LCD 座標へ変換し viewport で切る。native 背景は Kasane の dirty state と独立に動くため、overlay 中の全画面 invalidate は残る。shell の HUD・picker は guest より上。overlay profile では Kasane modal は UNSUPPORTED（全画面 scrim と region 契約が衝突する）。音楽の play/seek/pause、曲名・status の意味は music module、文字の寸法・命令・提出は presenter。music 固有の light-only PATCH も music module に置き、Kasane core に分岐を増やさない。
 
 ### System の規約
 
@@ -44,4 +44,4 @@ cache は明示的な不変 template（8件）と独立 instance（8件）を持
 
 ## コードと試験の入口
 
-`main/ui/kasane/ksn_core.c`, `ksn_schema.c`, `ksn_schema_session.c`, `ksn_view*`; `main/pocket/pocket_kasane.c`, `app_view_assets.h`, `app_music_view.c`, `app_legacy_presenter.c`（`ksn_presenter_*` の実装）; `main/system/`; `tools/kasane_contract/run.sh`。API の正確な名前・feature flag・バイト数は、これらとビルド済みターゲットの `sizeof` / map を優先する。
+`main/ui/kasane/ksn_core.c`, `ksn_schema.c`, `ksn_schema_session.c`, `ksn_view*`; `main/kobako/kobako_kasane.c`, `app_view_assets.h`, `app_music_view.c`, `app_legacy_presenter.c`（`ksn_presenter_*` の実装）; `main/system/`; `tools/kasane_contract/run.sh`。API の正確な名前・feature flag・バイト数は、これらとビルド済みターゲットの `sizeof` / map を優先する。

@@ -3,9 +3,9 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "pocketjs/guest.h"
-#include "pocketjs/guest_quickjs.h"
-#include "pocketjs/vm_sched.h"
+#include "kobako/guest.h"
+#include "kobako/guest_quickjs.h"
+#include "kobako/vm_sched.h"
 #include "quickjs-vm.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -31,27 +31,27 @@ static int value(JSContext *ctx, const char *expr) {
 
 void vmtest_guest_lifecycle(void) {
     {
-        pocketjs_guest_config_t config;
-        pocketjs_guest_config_defaults(&config);
+        kobako_guest_config_t config;
+        kobako_guest_config_defaults(&config);
         config.heap_limit = 160 * 1024;
         config.stack_limit = 20 * 1024;
         config.prefer_psram = false;
-        pocketjs_guest_t *guest = NULL;
-        assert(pocketjs_guest_create(&config, &guest) == ESP_OK);
+        kobako_guest_t *guest = NULL;
+        assert(kobako_guest_create(&config, &guest) == ESP_OK);
         const char *missing = "globalThis.jobs=0";
-        assert(pocketjs_guest_eval(guest, missing, strlen(missing), "missing-frame") == ESP_ERR_NOT_FOUND);
+        assert(kobako_guest_eval(guest, missing, strlen(missing), "missing-frame") == ESP_ERR_NOT_FOUND);
         const char *event_driven = "globalThis.frame=null;Promise.resolve().then(()=>jobs++)";
-        assert(pocketjs_guest_eval(guest, event_driven, strlen(event_driven), "event-driven") == ESP_OK);
-        JSContext *ctx = pocketjs_guest_quickjs_context(guest);
+        assert(kobako_guest_eval(guest, event_driven, strlen(event_driven), "event-driven") == ESP_OK);
+        JSContext *ctx = kobako_guest_quickjs_context(guest);
         assert(value(ctx, "jobs") == 1);
         assert(value(ctx, "Promise.resolve().then(()=>jobs++);0") == 0);
-        pocketjs_guest_frame_t input = {.struct_size = sizeof(input)};
-        assert(pocketjs_guest_frame(guest, &input) == ESP_OK);
+        kobako_guest_frame_t input = {.struct_size = sizeof(input)};
+        assert(kobako_guest_frame(guest, &input) == ESP_OK);
         assert(value(ctx, "jobs") == 2);
-        pocketjs_guest_stats_t stats = {.struct_size = sizeof(stats)};
-        assert(pocketjs_guest_stats(guest, &stats) == ESP_OK);
+        kobako_guest_stats_t stats = {.struct_size = sizeof(stats)};
+        assert(kobako_guest_stats(guest, &stats) == ESP_OK);
         assert(stats.frames == 1 && stats.frame_errors == 0);
-        pocketjs_guest_destroy(guest);
+        kobako_guest_destroy(guest);
     }
     const char *sources[] = {
         "globalThis.frame=()=>{calls++;work()}",
@@ -62,84 +62,84 @@ void vmtest_guest_lifecycle(void) {
     unsigned cases = 0;
     for (unsigned shape = 0; shape < 4; shape++) {
       for (unsigned mode = 0; mode < 4; mode++) {
-        pocketjs_guest_config_t config;
-        pocketjs_guest_config_defaults(&config);
+        kobako_guest_config_t config;
+        kobako_guest_config_defaults(&config);
         config.heap_limit = 160 * 1024;
         config.stack_limit = 20 * 1024;
         config.prefer_psram = false;
-        pocketjs_guest_t *guest = NULL;
-        assert(pocketjs_guest_create(&config, &guest) == ESP_OK);
-        JSContext *ctx = pocketjs_guest_quickjs_context(guest);
+        kobako_guest_t *guest = NULL;
+        assert(kobako_guest_create(&config, &guest) == ESP_OK);
+        JSContext *ctx = kobako_guest_quickjs_context(guest);
         JSValue global = JS_GetGlobalObject(ctx);
         JS_SetPropertyStr(ctx, global, "requestYield", JS_NewCFunction(ctx, request, "requestYield", 0));
         JS_FreeValue(ctx, global);
         assert(value(ctx, "globalThis.calls=0;globalThis.side=0;globalThis.done=0;"
                      "function work(){try{requestYield();for(let i=0;i<3;i++)side++}finally{done++}};0") == 0);
-        assert(pocketjs_guest_eval(guest, sources[shape], strlen(sources[shape]), "guest") == ESP_OK);
-        pocketjs_guest_frame_t input = {.struct_size = sizeof(input)};
-        assert(pocketjs_guest_frame(guest, &input) == ESP_OK);
-        assert(pocketjs_guest_suspended(guest) && pocketjs_guest_work_pending(guest));
-        if (shape == 0) assert(!pocketjs_guest_jobs_pending(guest));
-        if (shape == 1) assert(pocketjs_guest_jobs_pending(guest));
-        assert(pocketjs_guest_frame(guest, &input) == ESP_ERR_INVALID_STATE);
+        assert(kobako_guest_eval(guest, sources[shape], strlen(sources[shape]), "guest") == ESP_OK);
+        kobako_guest_frame_t input = {.struct_size = sizeof(input)};
+        assert(kobako_guest_frame(guest, &input) == ESP_OK);
+        assert(kobako_guest_suspended(guest) && kobako_guest_work_pending(guest));
+        if (shape == 0) assert(!kobako_guest_jobs_pending(guest));
+        if (shape == 1) assert(kobako_guest_jobs_pending(guest));
+        assert(kobako_guest_frame(guest, &input) == ESP_ERR_INVALID_STATE);
         JS_RunGC(JS_GetRuntime(ctx));
         if (mode == 0) {
-            assert(pocketjs_guest_continue(guest) == ESP_OK);
-            assert(!pocketjs_guest_work_pending(guest));
+            assert(kobako_guest_continue(guest) == ESP_OK);
+            assert(!kobako_guest_work_pending(guest));
             assert(value(ctx, "calls===1&&side===3&&done===1") == 1);
-            pocketjs_guest_stats_t stats = {.struct_size = sizeof(stats)};
-            assert(pocketjs_guest_stats(guest, &stats) == ESP_OK);
+            kobako_guest_stats_t stats = {.struct_size = sizeof(stats)};
+            assert(kobako_guest_stats(guest, &stats) == ESP_OK);
             assert(stats.frames == 1 && stats.continuations == 1);
             if (shape == 1) assert(stats.jobs == 1);
         } else if (mode == 1 || mode == 3) {
             if (mode == 3) JS_SetMaxStackSize(JS_GetRuntime(ctx), 1);
-            pocketjs_guest_prepare_stop(guest);
+            kobako_guest_prepare_stop(guest);
             if (mode == 3) JS_SetMaxStackSize(JS_GetRuntime(ctx), 20 * 1024);
-            assert(!pocketjs_guest_suspended(guest));
+            assert(!kobako_guest_suspended(guest));
             assert(value(ctx, "side===0&&done===0") == 1);
             assert(value(ctx, "40+2") == 42); // a stop hook may now enter JS
         }
         // mode 2 destroys a live parked chain without a continuation.
-        pocketjs_guest_destroy(guest);
+        kobako_guest_destroy(guest);
         cases++;
         vTaskDelay(1);
       }
     }
     printf("lifecycle guest receiver cases=%u OK\n", cases);
     for (unsigned mode = 0; mode < 3; mode++) {
-        pocketjs_guest_config_t config;
-        pocketjs_guest_config_defaults(&config);
+        kobako_guest_config_t config;
+        kobako_guest_config_defaults(&config);
         config.heap_limit = 160 * 1024;
         config.stack_limit = 20 * 1024;
         config.prefer_psram = false;
-        pocketjs_guest_t *guest = NULL;
-        assert(pocketjs_guest_create(&config, &guest) == ESP_OK);
-        JSContext *ctx = pocketjs_guest_quickjs_context(guest);
+        kobako_guest_t *guest = NULL;
+        assert(kobako_guest_create(&config, &guest) == ESP_OK);
+        JSContext *ctx = kobako_guest_quickjs_context(guest);
         const char *src = "globalThis.side=0;globalThis.done=0;globalThis.frame=()=>{"
                           "try{for(let i=0;i<20000;i++)side++;}finally{done++;}}";
-        assert(pocketjs_guest_eval(guest, src, strlen(src), "timed-guest") == ESP_OK);
+        assert(kobako_guest_eval(guest, src, strlen(src), "timed-guest") == ESP_OK);
         vm_budget_t budget;
         vm_budget_begin(&budget, 100);
-        pocketjs_guest_budget(guest, &budget);
-        pocketjs_guest_frame_t input = {.struct_size = sizeof(input)};
-        assert(pocketjs_guest_frame(guest, &input) == ESP_OK);
-        assert(pocketjs_guest_suspended(guest));
-        assert(pocketjs_guest_frame_total(guest) > 0);
+        kobako_guest_budget(guest, &budget);
+        kobako_guest_frame_t input = {.struct_size = sizeof(input)};
+        assert(kobako_guest_frame(guest, &input) == ESP_OK);
+        assert(kobako_guest_suspended(guest));
+        assert(kobako_guest_frame_total(guest) > 0);
         unsigned resumes = 0;
         if (mode == 2) {
-            pocketjs_guest_prepare_stop(guest);
-            assert(!pocketjs_guest_suspended(guest));
+            kobako_guest_prepare_stop(guest);
+            assert(!kobako_guest_suspended(guest));
             assert(value(ctx, "done") == 0);
         } else {
-            if (mode == 1) pocketjs_guest_yield_enabled(guest, false);
-            while (pocketjs_guest_work_pending(guest) && resumes < 10000) {
+            if (mode == 1) kobako_guest_yield_enabled(guest, false);
+            while (kobako_guest_work_pending(guest) && resumes < 10000) {
                 JS_RunGC(JS_GetRuntime(ctx));
                 vm_budget_begin(&budget, 100);
-                pocketjs_guest_budget(guest, &budget);
-                assert(pocketjs_guest_continue(guest) == ESP_OK);
+                kobako_guest_budget(guest, &budget);
+                assert(kobako_guest_continue(guest) == ESP_OK);
                 resumes++;
             }
-            if (pocketjs_guest_work_pending(guest)) {
+            if (kobako_guest_work_pending(guest)) {
                 JSValue g = JS_GetGlobalObject(ctx);
                 JSValue p = JS_GetPropertyStr(ctx, g, "side");
                 int32_t side;
@@ -147,52 +147,52 @@ void vmtest_guest_lifecycle(void) {
                 JS_FreeValue(ctx, p);
                 JS_FreeValue(ctx, g);
                 printf("lifecycle guest timer pending mode=%u resumes=%u side=%ld frame_us=%lld\n",
-                       mode, resumes, (long)side, (long long)pocketjs_guest_frame_total(guest));
+                       mode, resumes, (long)side, (long long)kobako_guest_frame_total(guest));
             }
-            assert(!pocketjs_guest_work_pending(guest));
+            assert(!kobako_guest_work_pending(guest));
             assert(value(ctx, "side===20000&&done===1") == 1);
             if (mode == 1) assert(resumes == 1);
         }
-        pocketjs_guest_destroy(guest);
+        kobako_guest_destroy(guest);
         vTaskDelay(1); // esp_timer_delete frees from the timer task
         printf("lifecycle guest timer mode=%u resumes=%u OK\n", mode, resumes);
     }
     // Resident suspension (docs/vm/app-suspend-design.md, S0): a dormant
     // guest keeps its state, refuses every entry, and wakes where it slept.
     for (unsigned mode = 0; mode < 2; mode++) {
-        pocketjs_guest_config_t config;
-        pocketjs_guest_config_defaults(&config);
+        kobako_guest_config_t config;
+        kobako_guest_config_defaults(&config);
         config.heap_limit = 160 * 1024;
         config.stack_limit = 20 * 1024;
         config.prefer_psram = false;
-        pocketjs_guest_t *guest = NULL;
-        assert(pocketjs_guest_create(&config, &guest) == ESP_OK);
-        JSContext *ctx = pocketjs_guest_quickjs_context(guest);
+        kobako_guest_t *guest = NULL;
+        assert(kobako_guest_create(&config, &guest) == ESP_OK);
+        JSContext *ctx = kobako_guest_quickjs_context(guest);
         JSValue global = JS_GetGlobalObject(ctx);
         JS_SetPropertyStr(ctx, global, "requestYield", JS_NewCFunction(ctx, request, "requestYield", 0));
         JS_FreeValue(ctx, global);
         const char *src = "globalThis.n=0;globalThis.park=false;globalThis.junk=[];"
                           "globalThis.frame=()=>{n++;junk.push({n});if(junk.length>64)junk.length=0;"
                           "if(park){park=false;requestYield();for(let i=0;i<3;i++);}}";
-        assert(pocketjs_guest_eval(guest, src, strlen(src), "dormant-guest") == ESP_OK);
-        pocketjs_guest_frame_t input = {.struct_size = sizeof(input)};
-        for (unsigned i = 0; i < 3; i++) assert(pocketjs_guest_frame(guest, &input) == ESP_OK);
+        assert(kobako_guest_eval(guest, src, strlen(src), "dormant-guest") == ESP_OK);
+        kobako_guest_frame_t input = {.struct_size = sizeof(input)};
+        for (unsigned i = 0; i < 3; i++) assert(kobako_guest_frame(guest, &input) == ESP_OK);
         // A parked chain belongs to its turn: it may not go to sleep.
         assert(value(ctx, "park=true;0") == 0);
-        assert(pocketjs_guest_frame(guest, &input) == ESP_OK);
-        assert(pocketjs_guest_work_pending(guest));
-        assert(pocketjs_guest_set_dormant(guest, true) == ESP_ERR_INVALID_STATE);
-        assert(!pocketjs_guest_dormant(guest));
-        assert(pocketjs_guest_continue(guest) == ESP_OK);
-        assert(!pocketjs_guest_work_pending(guest));
+        assert(kobako_guest_frame(guest, &input) == ESP_OK);
+        assert(kobako_guest_work_pending(guest));
+        assert(kobako_guest_set_dormant(guest, true) == ESP_ERR_INVALID_STATE);
+        assert(!kobako_guest_dormant(guest));
+        assert(kobako_guest_continue(guest) == ESP_OK);
+        assert(!kobako_guest_work_pending(guest));
         unsigned cycles = 0;
         for (; cycles < 20; cycles++) {
-            assert(pocketjs_guest_set_dormant(guest, true) == ESP_OK);
-            assert(pocketjs_guest_dormant(guest));
-            assert(pocketjs_guest_frame(guest, &input) == ESP_ERR_INVALID_STATE);
-            assert(pocketjs_guest_continue(guest) == ESP_ERR_INVALID_STATE);
-            assert(pocketjs_guest_eval(guest, "n++", 3, "dormant-eval") == ESP_ERR_INVALID_STATE);
-            assert(pocketjs_guest_quickjs_install_once(guest, "dormant-surface", noop_install, NULL)
+            assert(kobako_guest_set_dormant(guest, true) == ESP_OK);
+            assert(kobako_guest_dormant(guest));
+            assert(kobako_guest_frame(guest, &input) == ESP_ERR_INVALID_STATE);
+            assert(kobako_guest_continue(guest) == ESP_ERR_INVALID_STATE);
+            assert(kobako_guest_eval(guest, "n++", 3, "dormant-eval") == ESP_ERR_INVALID_STATE);
+            assert(kobako_guest_quickjs_install_once(guest, "dormant-surface", noop_install, NULL)
                    == ESP_ERR_INVALID_STATE);
             if (cycles == 0) {
                 // Past the gates, the interrupt handler still stops it.
@@ -201,11 +201,11 @@ void vmtest_guest_lifecycle(void) {
                 JS_FreeValue(ctx, JS_GetException(ctx));
             }
             if (mode == 1 && cycles == 10) break;   // destroyed while dormant
-            assert(pocketjs_guest_set_dormant(guest, false) == ESP_OK);
-            assert(pocketjs_guest_frame(guest, &input) == ESP_OK);
+            assert(kobako_guest_set_dormant(guest, false) == ESP_OK);
+            assert(kobako_guest_frame(guest, &input) == ESP_OK);
             assert(value(ctx, "n") == 5 + (int)cycles);
         }
-        pocketjs_guest_destroy(guest);
+        kobako_guest_destroy(guest);
         vTaskDelay(1);
         printf("lifecycle guest dormant mode=%u cycles=%u OK\n", mode, cycles);
     }

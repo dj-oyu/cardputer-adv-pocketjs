@@ -4,9 +4,9 @@
 //
 // The real header pulls in freertos/FreeRTOS.h and freertos/task.h, which the
 // host builds do not have. It is reachable from the host because
-// main/pocket/pocket_api.c (pocket_api_complete) and main/system/sys_clock.c
+// main/kobako/kobako_api.c (kobako_api_complete) and main/system/sys_clock.c
 // include it and call vm_wake_post(). That call used to sit behind
-// CONFIG_POCKET_VM_SCHED, which no host build defined; since the scheduler
+// CONFIG_KOBAKO_VM_SCHED, which no host build defined; since the scheduler
 // stopped being a build option (docs/vm/backlog.md, 2026-09-27) it is always
 // compiled, so these are definitions, not just declarations. A host test
 // drives its turns itself and has no sleeping owner task to wake, so posting

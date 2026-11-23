@@ -3,7 +3,7 @@
 # no signal that it has gone red except somebody else's build failing. On
 # 2026-09-09 opus_net.c existed on disk with every symbol defined, and the SRCS
 # row below arrived several minutes after the first call to opus_net_stop() went
-# into pocket_av.c. So every object compiled and only the ELF failed -- the most
+# into kobako_av.c. So every object compiled and only the ELF failed -- the most
 # confusing possible version of the mistake, because nothing looks wrong until
 # the last step, and it blocked an agent whose own work was fine.
 #
@@ -19,26 +19,26 @@ if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/../third_party/bmi270/bmi2.c" OR
         "CMake never downloads dependencies.")
 endif()
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
-set(POCKET_RANDOM_SOURCES "pocket/random_seed.c" "pocket/pocket_random.c")
+set(KOBAKO_RANDOM_SOURCES "kobako/random_seed.c" "kobako/kobako_random.c")
 # The BLE / Opus / SD diagnostic probes (main/*_probe.c). They run at boot when the
 # option is on, so the default is OFF: the probes are kept in the tree, the shipped
 # firmware does not carry their boot-time work.
-option(POCKET_PROBES "compile and run the BLE/Opus/SD diagnostic probes at boot" OFF)
-set(POCKET_PROBE_SOURCES "")
-if(POCKET_PROBES)
-    set(POCKET_PROBE_SOURCES "ble_probe.c" "opus_probe.c" "sd_probe.c")
+option(KOBAKO_PROBES "compile and run the BLE/Opus/SD diagnostic probes at boot" OFF)
+set(KOBAKO_PROBE_SOURCES "")
+if(KOBAKO_PROBES)
+    set(KOBAKO_PROBE_SOURCES "ble_probe.c" "opus_probe.c" "sd_probe.c")
 endif()
-set(POCKET_INPUT_SOURCES "pocket/pocket_input.c")
-set(SYSTEM_SOURCES "system/sys_state.c" "system/sys_device.c" "system/sys_clock.c" "system/sys_notify.c" "system/sys_timer.c" "system/sys_ringer.c" "system/sys_wall.c" "pocket/pocket_power.c" "pocket/pocket_clock_source.c" "pocket/pocket_clock.c" "pocket/pocket_mutex_arena.c" "pocket/pocket_av_output_source.c" "pocket/pocket_av_playback_source.c")
+set(KOBAKO_INPUT_SOURCES "kobako/kobako_input.c")
+set(SYSTEM_SOURCES "system/sys_state.c" "system/sys_device.c" "system/sys_clock.c" "system/sys_notify.c" "system/sys_timer.c" "system/sys_ringer.c" "system/sys_wall.c" "kobako/kobako_power.c" "kobako/kobako_clock_source.c" "kobako/kobako_clock.c" "kobako/kobako_mutex_arena.c" "kobako/kobako_av_output_source.c" "kobako/kobako_av_playback_source.c")
 set(KASANE_FONT_SOURCES "text/ksn_font.c")
 set(KASANE_PET_SOURCES "pet/ksn_pet.c" "pet/ksn_pet_builtin.c")
-set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane/ksn_schema_session.c" "ui/kasane/ksn_source.c" "pocket/app_view_assets.c" "pocket/app_view_provider.c" "apps/player/app_music_view.c" "pocket/app_legacy_presenter.c" "pocket/app_notice.c" "pocket/pocket_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_indicator.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_blend_pie.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c")
+set(KASANE_SOURCES "ui/kasane/ksn_runtime.c" "ui/kasane/ksn_schema.c" "ui/kasane/ksn_schema_session.c" "ui/kasane/ksn_source.c" "kobako/app_view_assets.c" "kobako/app_view_provider.c" "apps/player/app_music_view.c" "kobako/app_legacy_presenter.c" "kobako/app_notice.c" "kobako/kobako_kasane.c" "ui/kasane/ksn_core.c" "ui/kasane/ksn_view.c" "ui/kasane/ksn_indicator.c" "ui/kasane/ksn_render.c" "ui/kasane/ksn_blend_pie.c" "ui/kasane/ksn_cache.c" "ui/kasane/ksn_modal.c")
 list(APPEND KASANE_SOURCES
     "hone/hone_frame.c" "hone/aynm_mesh.c"
     "ayatsuri/ayatsuri_model.c" "ayatsuri/ayatsuri_visibility.c"
     "ayatsuri/compact_opaque.c" "ui/kasane/ksn_mesh_depth.c"
-    "pocket/pocket_shiki_frame.c" "pocket/shiki_memstat.c" "pocket/shiki_heap.c" "pocket/pocket_shiki_api.c" "apps/derby/pocket_derby.c" "apps/derby/derby_ser_int.c" "apps/derby/derby_ser_pie.c" "pocket/pocket_shape.c" "pocket/pocket_grid.c" "pocket/pocket_video.c" "pocket/pocket_pixel.c"
-    "pocket/pocket_video_stream.c" "pocket/pocket_video_sd_stream.c"
+    "kobako/kobako_shiki_frame.c" "kobako/shiki_memstat.c" "kobako/shiki_heap.c" "kobako/kobako_shiki_api.c" "apps/derby/kobako_derby.c" "apps/derby/derby_ser_int.c" "apps/derby/derby_ser_pie.c" "kobako/kobako_shape.c" "kobako/kobako_grid.c" "kobako/kobako_video.c" "kobako/kobako_pixel.c"
+    "kobako/kobako_video_stream.c" "kobako/kobako_video_sd_stream.c"
     "ui/kasane/ksn_proc_grid.c" "ui/kasane/ksn_proc_grid_pie.c"
     "ui/kasane/ksn_proc_grid_image.c" "ui/kasane/ksn_proc_grid_resize.c"
     "ui/kasane/ksn_shiki_frame.c" "ui/kasane/ksn_pixel_function.c"
@@ -51,20 +51,20 @@ list(APPEND KASANE_SOURCES
 if(CONFIG_KSN_DEVICE_PROBE)
     list(APPEND KASANE_SOURCES "ui/kasane/ksn_device_probe.c" "ui/kasane/ksn_frost.c" "ui/kasane/ksn_stress_probe.c")
 endif()
-# pocket.shikiDebug, the Shiki bench programs and the six diagnostic apps that
+# kobako.shikiDebug, the Shiki bench programs and the six diagnostic apps that
 # use them (docs/kasane/api-reorg.md sec.4.3). Off in the product image.
-set(POCKET_SHIKI_DEBUG_APPS "")
-if(CONFIG_POCKET_SHIKI_DEBUG)
-    list(APPEND KASANE_SOURCES "pocket/pocket_shiki.c" "ui/kasane/ksn_shiki_bench.c")
-    set(POCKET_SHIKI_DEBUG_APPS "../apps/shikitest/shiki_test.js" "../apps/shikitest/shiki_data_test.js" "../apps/shikitest/shiki_api_test.js" "../apps/shikitest/cycle_bench.js" "../apps/shikitest/draw_cost.js" "../apps/meshbench/mesh_bench.js")
+set(KOBAKO_SHIKI_DEBUG_APPS "")
+if(CONFIG_KOBAKO_SHIKI_DEBUG)
+    list(APPEND KASANE_SOURCES "kobako/kobako_shiki.c" "ui/kasane/ksn_shiki_bench.c")
+    set(KOBAKO_SHIKI_DEBUG_APPS "../apps/shikitest/shiki_test.js" "../apps/shikitest/shiki_data_test.js" "../apps/shikitest/shiki_api_test.js" "../apps/shikitest/cycle_bench.js" "../apps/shikitest/draw_cost.js" "../apps/meshbench/mesh_bench.js")
 endif()
 # Private mesh architecture experiments; never implicitly enabled.
 option(KASANE_MESH_PREPARED_PROTOTYPE "Retain bounded mesh triangle setup (private experiment)" OFF)
 option(KASANE_MESH_EDGE4_PROTOTYPE "Use conservative S3 PIE edge classifier (private experiment)" OFF)
 option(KASANE_MESH_Q7_CERTIFIED_PROTOTYPE "Approximate Q7 coverage/color with certified original depth/mask (private experiment)" OFF)
 option(KASANE_MESH_Q7_BENCH_PREFLIGHT "Compile benchmark-only numeric and RAM admission probes" OFF)
-if(KASANE_MESH_Q7_BENCH_PREFLIGHT AND NOT CONFIG_POCKET_SHIKI_DEBUG)
-    message(FATAL_ERROR "Q7 benchmark preflight requires CONFIG_POCKET_SHIKI_DEBUG=y; enable it only in the benchmark sdkconfig")
+if(KASANE_MESH_Q7_BENCH_PREFLIGHT AND NOT CONFIG_KOBAKO_SHIKI_DEBUG)
+    message(FATAL_ERROR "Q7 benchmark preflight requires CONFIG_KOBAKO_SHIKI_DEBUG=y; enable it only in the benchmark sdkconfig")
 endif()
 if(KASANE_MESH_Q7_BENCH_PREFLIGHT AND KASANE_MESH_EDGE4_PROTOTYPE)
     message(FATAL_ERROR "Q7 benchmark preflight requires edge4 OFF")
@@ -104,13 +104,13 @@ option(KASANE_FLOWER_ALLOC_FAULT_PROBE "Inject one FLOWER candidate allocation f
 option(KASANE_FLOWER_AUDIO_PROBE "Alternate FLOWER with a diagnostic audio tone and heap measurements" OFF)
 option(KASANE_PROC_JS_DIAGNOSTIC "Log JS procedural present backend counts" OFF)
 option(KASANE_MEGADEMO_TRACE "Per-turn MDT trace (JS/render/send/register/draw/heap) and '~' guest heap cap" OFF)
-option(POCKET_DERBY_COURSE_CACHE "Experimental registered course world-point cache" OFF)
-option(POCKET_DERBY_PROJECT_BATCH "Experimental double pose/camera/projection batch" OFF)
-if(POCKET_DERBY_PROJECT_BATCH)
-    add_compile_definitions(POCKET_DERBY_PROJECT_BATCH=1)
+option(KOBAKO_DERBY_COURSE_CACHE "Experimental registered course world-point cache" OFF)
+option(KOBAKO_DERBY_PROJECT_BATCH "Experimental double pose/camera/projection batch" OFF)
+if(KOBAKO_DERBY_PROJECT_BATCH)
+    add_compile_definitions(KOBAKO_DERBY_PROJECT_BATCH=1)
 endif()
-if(POCKET_DERBY_COURSE_CACHE)
-    add_compile_definitions(POCKET_DERBY_COURSE_CACHE=1)
+if(KOBAKO_DERBY_COURSE_CACHE)
+    add_compile_definitions(KOBAKO_DERBY_COURSE_CACHE=1)
 endif()
 set(DERBY_WATCH_SOURCE "../apps/derby/derby_watch.js")
 if(KASANE_FLOWER_D1_PROBE)
@@ -189,42 +189,42 @@ if(KASANE_P1_OUTPUT_CORE0 AND NOT KASANE_P0_BUS_PROBE)
     message(FATAL_ERROR "P1 audio affinity experiments require KASANE_P0_BUS_PROBE")
 endif()
 if(KASANE_P0_PROBE)
-    list(APPEND KASANE_SOURCES "ui/kasane/ksn_p0_probe.c" "pocket/pocket_pool_probe.c")
+    list(APPEND KASANE_SOURCES "ui/kasane/ksn_p0_probe.c" "kobako/kobako_pool_probe.c")
 endif()
-# ``scene/fxmath.c`` and ``pocket/fir_pie.c`` sit in the first row rather than the
+# ``scene/fxmath.c`` and ``kobako/fir_pie.c`` sit in the first row rather than the
 # trailing variables because both are called from files listed beside them (the
 # scenes and mp3_decode.c) -- see the note at the top of this file about a row
 # arriving after its first caller.
 # The QuickJS helpers a JS turn fetches most, in IRAM (main/vm/helper_iram8.lf).
 # Fragments register through idf_component_register only, so the list is built here.
-set(POCKET_LDFRAGMENTS "")
-if(CONFIG_POCKET_VM_HELPER_IRAM)
-    list(APPEND POCKET_LDFRAGMENTS "vm/helper_iram8.lf")
+set(KOBAKO_LDFRAGMENTS "")
+if(CONFIG_KOBAKO_QJS_HELPER_IRAM)
+    list(APPEND KOBAKO_LDFRAGMENTS "vm/helper_iram8.lf")
 endif()
 if(NOT CONFIG_AYATSURI_POSE_DMA_PROBE)
     set(COMPANION_APP_SOURCE "../apps/companion/companion.js")
 endif()
 idf_component_register(SRCS "hal/usb_console.c" "hal/rtc_task.c" "hal/fpu_latency.c" "hal/int_latency.c" "hal/icache_ab.c" "hal/frame_bd.c" "hal/disp.c"
-        "scene/fxmath.c" "pocket/mp3_decode.c" "pocket/fir_pie.c" "pocket/mp3_feed.c" "pocket/mp3_sd_session.c" "pocket/pocket_memory.c" "main.c" "hal/keyboard_probe.c" "hal/board.c" "hal/lcd_spi.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "scene/scene_mem.c" "scene/stars.c" "app_session.c" "vm/vm_wake.c" "hal/motion.c" "hal/sound.c"
-    "hal/keymap.c" "hal/keystate.c" "text/jpfont.c" "text/skk_session.c" "ui/editor.c" "ui/codeedit.c" "ui/vimcmd.c" "text/srcstore.c" "ui/jsconsole.c" "text/jslex.c" "text/textfield.c" "pocket/pocket_api.c" "pocket/pocket_bridge.c" "pocket/app_control.c" "pocket/pocket_storage.c" "pocket/pocket_fs.c" "pocket/pocket_imu.c" "pocket/pocket_av.c" "pocket/opus_feed.c" "pocket/opus_net.c" "pocket/pocket_capture.c" "pocket/pocket_io.c" "pocket/pocket_text.c" "pocket/pocket_app.c" "pocket/pocket_app_load.c" "pocket/pocket_workspace.c" "pocket/pocket_overlay.c" "ui/overlay.c" "ui/overlay_core.c" "pocket/app_registry.c" "pocket/sd_path.c" "pocket/sd_lease.c" "pocket/sd_media.c" "pocket/sd_picker.c" "pocket/file_picker.c" "ui/pickmodal.c" "ui/pickmodal_draw.c" "pocket/pocket_net.c" "pocket/pocket_tls_txfix.c" "pocket/pocket_ble.c" "pocket/wifi_time.c" "pocket/net_service.c" "pocket/net_autosync.c" "pocket/wifi_ui.c" "ui/lessons.c" "ui/tutorial.c" "ui/paint.c"
+        "scene/fxmath.c" "kobako/mp3_decode.c" "kobako/fir_pie.c" "kobako/mp3_feed.c" "kobako/mp3_sd_session.c" "kobako/kobako_memory.c" "main.c" "hal/keyboard_probe.c" "hal/board.c" "hal/lcd_spi.c" "ui/shell.c" "scene/solar_sail.c" "scene/solar_time.c" "scene/scene_mem.c" "scene/stars.c" "app_session.c" "vm/vm_wake.c" "hal/motion.c" "hal/sound.c"
+    "hal/keymap.c" "hal/keystate.c" "text/jpfont.c" "text/skk_session.c" "ui/editor.c" "ui/codeedit.c" "ui/vimcmd.c" "text/srcstore.c" "ui/jsconsole.c" "text/jslex.c" "text/textfield.c" "kobako/kobako_api.c" "kobako/kobako_bridge.c" "kobako/app_control.c" "kobako/kobako_storage.c" "kobako/kobako_fs.c" "kobako/kobako_imu.c" "kobako/kobako_av.c" "kobako/opus_feed.c" "kobako/opus_net.c" "kobako/kobako_capture.c" "kobako/kobako_io.c" "kobako/kobako_text.c" "kobako/kobako_app.c" "kobako/kobako_app_load.c" "kobako/kobako_workspace.c" "kobako/kobako_overlay.c" "ui/overlay.c" "ui/overlay_core.c" "kobako/app_registry.c" "kobako/sd_path.c" "kobako/sd_lease.c" "kobako/sd_media.c" "kobako/sd_picker.c" "kobako/file_picker.c" "ui/pickmodal.c" "ui/pickmodal_draw.c" "kobako/kobako_net.c" "kobako/kobako_tls_txfix.c" "kobako/kobako_ble.c" "kobako/wifi_time.c" "kobako/net_service.c" "kobako/net_autosync.c" "kobako/wifi_ui.c" "ui/lessons.c" "ui/tutorial.c" "ui/paint.c"
     "pet/pet_pixels.c" "pet/pet_hub.c" "pet/pet_hub_core.c" "../third_party/bmi270/bmi2.c" "../third_party/bmi270/bmi270.c"
-    ${POCKET_RANDOM_SOURCES} ${POCKET_INPUT_SOURCES} ${KASANE_SOURCES} ${KASANE_FONT_SOURCES} ${KASANE_PET_SOURCES} ${SYSTEM_SOURCES} ${POCKET_PROBE_SOURCES}
-    INCLUDE_DIRS "." "hal" "pocket" "vm" "pet" "ui" "ui/kasane" "text" "scene" "${CMAKE_BINARY_DIR}/generated" "../third_party/bmi270"
-    REQUIRES pocketjs_guest vfs
+    ${KOBAKO_RANDOM_SOURCES} ${KOBAKO_INPUT_SOURCES} ${KASANE_SOURCES} ${KASANE_FONT_SOURCES} ${KASANE_PET_SOURCES} ${SYSTEM_SOURCES} ${KOBAKO_PROBE_SOURCES}
+    INCLUDE_DIRS "." "hal" "kobako" "vm" "pet" "ui" "ui/kasane" "text" "scene" "${CMAKE_BINARY_DIR}/generated" "../third_party/bmi270"
+    REQUIRES kobako_guest vfs
              skk_core ime_core
              esp_app_format esp_hw_support esp_driver_spi esp_driver_i2c esp_driver_gpio esp_driver_uart esp_driver_rmt esp_driver_usb_serial_jtag esp_timer esp_partition esp_driver_i2s esp_adc nvs_flash
              esp_wifi esp_netif esp_event lwip esp_http_client esp-tls
              fatfs esp_driver_sdspi sdmmc
              opus minimp3
-    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" ${COMPANION_APP_SOURCE} "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" ${POCKET_SHIKI_DEBUG_APPS} "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js" "../apps/netcheck/netcheck.js" "../apps/netcheck/tlscycle.js"
+    EMBED_TXTFILES "../apps/hello/main.js" "../apps/kasane/demo.js" "../apps/kasane/proc_megademo.js" "../apps/kasane/grid_fold.js" "../apps/kasane/grid_lab.js" ${KASANE_VIDEO_LAB_SOURCE} "../apps/imucal/imucal.js" "../apps/pet/pet.js" ${COMPANION_APP_SOURCE} "../apps/deskclock/deskclock.js" "../apps/player/player.js" "../apps/stress/stress.js" ${KOBAKO_SHIKI_DEBUG_APPS} "../apps/lcdcatch/lcd_catch.js" ${DERBY_WATCH_SOURCE} "../apps/bigwave/big_wave.js" "../apps/netcheck/netcheck.js" "../apps/netcheck/tlscycle.js"
     EMBED_FILES "../apps/pet/assets/pets-compact.bin"
-    LDFRAGMENTS ${POCKET_LDFRAGMENTS})
+    LDFRAGMENTS ${KOBAKO_LDFRAGMENTS})
 target_link_libraries(${COMPONENT_LIB} INTERFACE
     "-Wl,--wrap=xQueueCreateMutex" "-Wl,--wrap=vQueueDelete")
-# The hot/cold layout of the turn-path files (POCKET_NATIVE_HOTCOLD,
+# The hot/cold layout of the turn-path files (KOBAKO_NATIVE_HOTCOLD,
 # docs/vm/qjs-hotcold.md sec.13).
 include("${CMAKE_CURRENT_LIST_DIR}/../tools/qjs_hotcold/hotcold.cmake")
-pocket_native_hotcold("${CMAKE_CURRENT_LIST_DIR}")
+kobako_native_hotcold("${CMAKE_CURRENT_LIST_DIR}")
 execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_font.py" "${CMAKE_BINARY_DIR}/generated"
     COMMAND_ERROR_IS_FATAL ANY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tools/make_font.py")
@@ -243,10 +243,10 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_D
 execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/make_scene_tables.py" "${CMAKE_BINARY_DIR}/generated"
     COMMAND_ERROR_IS_FATAL ANY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tools/make_scene_tables.py")
-# The probes live behind the same option as their sources: with POCKET_PROBES=OFF the
+# The probes live behind the same option as their sources: with KOBAKO_PROBES=OFF the
 # firmware compiles and links exactly as before, and main.c's calls are compiled out.
-if(POCKET_PROBES)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_PROBES=1)
+if(KOBAKO_PROBES)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KOBAKO_PROBES=1)
 endif()
 if(KASANE_FLOWER_FRAME_PROBE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_FLOWER_FRAME_PROBE=1)
@@ -266,21 +266,21 @@ endif()
 if(KASANE_MEGADEMO_TRACE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KASANE_MEGADEMO_TRACE=1)
 endif()
-# The pocket.input.keys diagnostic (docs/platform/keystate.md): the key test app
+# The kobako.input.keys diagnostic (docs/platform/keystate.md): the key test app
 # on USB 'r', and US-framed key injection on the same USB stream. OFF by default
 # so the shipping USB byte table and flash layout are unchanged.
-option(POCKET_KEYTEST "USB 'r' key test app and USB key injection (diagnostic only)" OFF)
-if(POCKET_KEYTEST)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_KEYTEST=1)
+option(KOBAKO_KEYTEST "USB 'r' key test app and USB key injection (diagnostic only)" OFF)
+if(KOBAKO_KEYTEST)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KOBAKO_KEYTEST=1)
     target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/keytest/keytest.js" TEXT)
 endif()
 # The evaluation heap probe (docs/vm/spread-eval-oom.md): apps/heapprobe's
 # variants, each a separate source started over USB ('Q<index>[,<limit>]\n')
 # through the same path a menu app takes, with the guest's heap reported after
 # the evaluation. OFF by default: no menu row, no USB byte, no flash.
-option(POCKET_HEAPPROBE "USB 'Q' evaluation heap probe (diagnostic only)" OFF)
-if(POCKET_HEAPPROBE)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE POCKET_HEAPPROBE=1)
+option(KOBAKO_HEAPPROBE "USB 'Q' evaluation heap probe (diagnostic only)" OFF)
+if(KOBAKO_HEAPPROBE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KOBAKO_HEAPPROBE=1)
     target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/heapprobe/heapprobe.js" TEXT)
     # DERBY WATCH with GK built by the spread again, the source that ran out
     # of heap. Generated into flash rather than patched into a DRAM copy at
@@ -294,12 +294,12 @@ if(POCKET_HEAPPROBE)
     # chunks (apps/heapprobe/derby_v0, e15e6eb) until Shiki v2.0 removed the
     # float VM that copy drew with. The "derby" variant runs the shipped
     # entry, chunks and all.
-    find_program(POCKET_NODE node)
+    find_program(KOBAKO_NODE node)
     set(_hp_derby "${CMAKE_CURRENT_BINARY_DIR}/hp_src/derby_watch.js")
-    execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/heapprobe_derby.py" "${POCKET_NODE}" "${_hp_derby}"
+    execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/heapprobe_derby.py" "${KOBAKO_NODE}" "${_hp_derby}"
                     RESULT_VARIABLE _hp_rc)
     if(NOT _hp_rc EQUAL 0)
-        message(FATAL_ERROR "POCKET_HEAPPROBE: tools/heapprobe_derby.py failed (it needs Node on PATH)")
+        message(FATAL_ERROR "KOBAKO_HEAPPROBE: tools/heapprobe_derby.py failed (it needs Node on PATH)")
     endif()
     file(GLOB _hp_derby_srcs "${CMAKE_SOURCE_DIR}/apps/derby/*.js" "${CMAKE_SOURCE_DIR}/apps/derby/chunks.txt")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_hp_derby_srcs}
@@ -308,7 +308,7 @@ if(POCKET_HEAPPROBE)
     file(READ "${_hp_derby}" _hp_src)
     string(FIND "${_hp_src}" "'a d e s r 1 , / tab'.split(' ')" _hp_at)
     if(_hp_at LESS 0)
-        message(FATAL_ERROR "POCKET_HEAPPROBE: GK's split is gone from derby_watch.js")
+        message(FATAL_ERROR "KOBAKO_HEAPPROBE: GK's split is gone from derby_watch.js")
     endif()
     string(REPLACE "'a d e s r 1 , / tab'.split(' ')" "[...'adesr1,/', 'tab']" _hp_src "${_hp_src}")
     file(WRITE "${_hp_spread}" "${_hp_src}")
@@ -317,15 +317,15 @@ if(POCKET_HEAPPROBE)
     # 4 global scripts (tools/heapprobe_split.py): the chunked-evaluation
     # spike. Directories per count so the file names, and with them the
     # embedded symbols, say which set a chunk belongs to. The chunks are
-    # embedded by the pocket.app.load() table below, as local.derby's
+    # embedded by the kobako.app.load() table below, as local.derby's
     # s3c1..s3c3 and s4c1..s4c4 -- in this image only -- so the spike's
-    # __hpLoad(k) and the product's pocket.app.load('s3c1') read the same
+    # __hpLoad(k) and the product's kobako.app.load('s3c1') read the same
     # bytes under the same symbols.
     execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/heapprobe_split.py"
                     "${_hp_derby}" 1 "${CMAKE_CURRENT_BINARY_DIR}/hp" --flat
                     RESULT_VARIABLE _hp_rc OUTPUT_QUIET)
     if(NOT _hp_rc EQUAL 0)
-        message(FATAL_ERROR "POCKET_HEAPPROBE: heapprobe_split.py failed")
+        message(FATAL_ERROR "KOBAKO_HEAPPROBE: heapprobe_split.py failed")
     endif()
     target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_BINARY_DIR}/hp/derby_watch_flat.js" TEXT)
     foreach(_hp_n 3 4)
@@ -333,7 +333,7 @@ if(POCKET_HEAPPROBE)
         execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/heapprobe_split.py"
                         "${_hp_derby}" ${_hp_n} "${_hp_dir}" RESULT_VARIABLE _hp_rc OUTPUT_QUIET)
         if(NOT _hp_rc EQUAL 0)
-            message(FATAL_ERROR "POCKET_HEAPPROBE: heapprobe_split.py failed")
+            message(FATAL_ERROR "KOBAKO_HEAPPROBE: heapprobe_split.py failed")
         endif()
         foreach(_hp_k RANGE 1 ${_hp_n})
             file(RENAME "${_hp_dir}/derby_watch_c${_hp_k}.js" "${_hp_dir}/hp${_hp_n}_c${_hp_k}.js")
@@ -341,12 +341,12 @@ if(POCKET_HEAPPROBE)
         endforeach()
     endforeach()
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/hp_chunks.txt" "app local.derby\n${_hp_list}")
-    # pocket.app.load()'s own device check (apps/heapprobe/appload_*.js):
+    # kobako.app.load()'s own device check (apps/heapprobe/appload_*.js):
     # the error paths, and DERBY WATCH's first third as `big` for a load from
     # frame(), as HELLO WORLD's chunks -- the identity the small variants run
     # under.
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/hp_hello_chunks.txt" "app local.hello\nbig hp3/hp3_c1.js\n")
-    list(APPEND POCKET_APP_CHUNK_LISTS "${CMAKE_CURRENT_BINARY_DIR}/hp_chunks.txt"
+    list(APPEND KOBAKO_APP_CHUNK_LISTS "${CMAKE_CURRENT_BINARY_DIR}/hp_chunks.txt"
          "${CMAKE_CURRENT_BINARY_DIR}/hp_hello_chunks.txt"
          "${CMAKE_CURRENT_LIST_DIR}/../apps/heapprobe/appload_chunks.txt")
     # Static import (docs/vm/eval-peak.md section 9): one generated program as
@@ -357,14 +357,14 @@ if(POCKET_HEAPPROBE)
     execute_process(COMMAND "${PYTHON}" "${CMAKE_SOURCE_DIR}/tools/heapprobe_import_gen.py"
                     "${_hp_imp}" RESULT_VARIABLE _hp_rc OUTPUT_QUIET)
     if(NOT _hp_rc EQUAL 0)
-        message(FATAL_ERROR "POCKET_HEAPPROBE: heapprobe_import_gen.py failed")
+        message(FATAL_ERROR "KOBAKO_HEAPPROBE: heapprobe_import_gen.py failed")
     endif()
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
                  "${CMAKE_SOURCE_DIR}/tools/heapprobe_import_gen.py")
     foreach(_hp_f imp_all.js imp_entry_load.js imp_entry_import.mjs)
         target_add_binary_data(${COMPONENT_LIB} "${_hp_imp}/${_hp_f}" TEXT)
     endforeach()
-    list(APPEND POCKET_APP_CHUNK_LISTS "${_hp_imp}/imp_chunks.txt"
+    list(APPEND KOBAKO_APP_CHUNK_LISTS "${_hp_imp}/imp_chunks.txt"
          "${CMAKE_CURRENT_LIST_DIR}/../apps/heapprobe/import_chunks.txt")
     # Precompiled DERBY WATCH, if the host has made it (WSL:
     #   python3 tools/heapprobe_derby.py node .cache/compile_peak/derby_watch.js
@@ -377,17 +377,17 @@ if(POCKET_HEAPPROBE)
         target_compile_definitions(${COMPONENT_LIB} PRIVATE HP_HAVE_BC=1)
     endif()
 endif()
-# pocket.app.load()'s chunks (main/pocket/app_chunks.h, docs/vm/eval-peak.md
+# kobako.app.load()'s chunks (main/kobako/app_chunks.h, docs/vm/eval-peak.md
 # section 7): every apps/*/chunks.txt, plus any list a diagnostic option above
-# appended to POCKET_APP_CHUNK_LISTS. An app gains chunks by gaining a
+# appended to KOBAKO_APP_CHUNK_LISTS. An app gains chunks by gaining a
 # chunks.txt; nothing in this file names them. The table is generated at
 # configure time and records symbols, not lengths, so editing a chunk needs no
 # reconfigure -- adding or renaming one does, and the lists are configure
 # dependencies for that (GLOB CONFIGURE_DEPENDS catches a new chunks.txt).
 file(GLOB _app_chunk_lists CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/../apps/*/chunks.txt")
-list(APPEND _app_chunk_lists ${POCKET_APP_CHUNK_LISTS})
-if(POCKET_DERBY_PROJECT_BATCH)
-    if(POCKET_HEAPPROBE)
+list(APPEND _app_chunk_lists ${KOBAKO_APP_CHUNK_LISTS})
+if(KOBAKO_DERBY_PROJECT_BATCH)
+    if(KOBAKO_HEAPPROBE)
         message(FATAL_ERROR "DERBY projection batch requires the normal game chunks")
     endif()
     set(_project_input "${CMAKE_SOURCE_DIR}/apps/derby")
@@ -421,24 +421,24 @@ target_sources(${COMPONENT_LIB} PRIVATE "${CMAKE_BINARY_DIR}/generated/app_chunk
 # built-in table. Only then does the build need Node, 16 or later
 # (docs/platform/build-environment.md).
 if(APP_CHUNK_LOWER)
-    find_program(POCKET_NODE node)
+    find_program(KOBAKO_NODE node)
     set(_node_version "")
-    if(POCKET_NODE)
-        execute_process(COMMAND "${POCKET_NODE}" --version OUTPUT_VARIABLE _node_version
+    if(KOBAKO_NODE)
+        execute_process(COMMAND "${KOBAKO_NODE}" --version OUTPUT_VARIABLE _node_version
                         OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
     endif()
     if(NOT _node_version MATCHES "^v([0-9]+)\\." OR CMAKE_MATCH_1 LESS 16)
         string(REPLACE ";" ", " _plans "${APP_CHUNK_PLANS}")
         set(_found "no node on PATH")
-        if(POCKET_NODE)
-            set(_found "${POCKET_NODE} is ${_node_version}")
+        if(KOBAKO_NODE)
+            set(_found "${KOBAKO_NODE} is ${_node_version}")
         endif()
         # Searched again at the next configure, after PATH is fixed.
-        unset(POCKET_NODE CACHE)
+        unset(KOBAKO_NODE CACHE)
         message(FATAL_ERROR "The app chunks ${_plans} have @shiki functions, which the build "
                 "compiles with tools/kasane_ir: that needs Node 16 or later on PATH "
                 "(${_found}). Install Node (this project's machine uses Volta's Node v24) and put it "
-                "on the PATH of the shell that runs idf.py, or pass -DPOCKET_NODE=<path to node>; "
+                "on the PATH of the shell that runs idf.py, or pass -DKOBAKO_NODE=<path to node>; "
                 "then reconfigure. See docs/platform/build-environment.md.")
     endif()
     set(_kir "${CMAKE_SOURCE_DIR}/tools/kasane_ir")
@@ -448,7 +448,7 @@ if(APP_CHUNK_LOWER)
         list(POP_FRONT _lower _src _dst _how)
         string(REGEX REPLACE "^rom:" "" _app "${_how}")
         add_custom_command(OUTPUT "${_dst}"
-            COMMAND "${POCKET_NODE}" "${_kir}/lower_plans.mjs" --rom "${_app}" --file "${_src}" "${_dst}"
+            COMMAND "${KOBAKO_NODE}" "${_kir}/lower_plans.mjs" --rom "${_app}" --file "${_src}" "${_dst}"
             DEPENDS "${_src}" "${_kir}/lower_plans.mjs" "${_kir}/plan_js.mjs"
             COMMENT "Removing the @shiki functions of ${_src}"
             VERBATIM)
@@ -459,7 +459,7 @@ if(APP_CHUNK_LOWER)
     # below). Not a weak default: in libmain.a it would win over the table.
     if(APP_CHUNK_SHIKI)
         add_custom_command(OUTPUT "${APP_CHUNK_SHIKI_C}"
-            COMMAND "${POCKET_NODE}" "${_kir}/emit_shiki_rom.mjs" "${APP_CHUNK_SHIKI_C}" ${APP_CHUNK_SHIKI}
+            COMMAND "${KOBAKO_NODE}" "${_kir}/emit_shiki_rom.mjs" "${APP_CHUNK_SHIKI_C}" ${APP_CHUNK_SHIKI}
             DEPENDS ${APP_CHUNK_SHIKI_SOURCES} "${_kir}/emit_shiki_rom.mjs" "${_kir}/plan_js.mjs"
                     "${_kir}/shiki_compile.mjs" "${_kir}/shiki_q.mjs" "${_kir}/shiki_fix.mjs"
             COMMENT "Compiling the built-in Shiki programs"
@@ -566,48 +566,48 @@ set_source_files_properties(ui/kasane/ksn_shiki_frame.c PROPERTIES COMPILE_OPTIO
 # -ffp-contract=off keeps float results identical to the -Os build (no fused
 # multiply-add). ksn_render.c keeps render_group at -Os by function attribute.
 set_source_files_properties(text/ksn_font.c ui/kasane/ksn_render.c ui/kasane/ksn_core.c
-    pocket/pocket_kasane.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
-set_source_files_properties(pocket/pocket_shiki_frame.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+    kobako/kobako_kasane.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+set_source_files_properties(kobako/kobako_shiki_frame.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # DERBY's series in C must give the JS's draw inputs bit for bit
 # (docs/apps/derby-ser-native.md): no fused or reordered floating point.
-set_source_files_properties(apps/derby/pocket_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
-# The ser() PIE kernels (CONFIG_POCKET_DERBY_SER_PIE, default y; empty when
-# off): their scalar reference is timed against them, at pocket_derby.c's level.
+set_source_files_properties(apps/derby/kobako_derby.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+# The ser() PIE kernels (CONFIG_KOBAKO_DERBY_SER_PIE, default y; empty when
+# off): their scalar reference is timed against them, at kobako_derby.c's level.
 set_source_files_properties(apps/derby/derby_ser_pie.c PROPERTIES COMPILE_OPTIONS "-O2")
 # Its integer path (docs/apps/derby-ser-division.md sec.4): integers only but
 # for the chord tables' doubles, made once a series.
 set_source_files_properties(apps/derby/derby_ser_int.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
-# pocket.shapes: the same scan conversion on host and device (no fused madd.s).
-set_source_files_properties(pocket/pocket_shape.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
+# kobako.shapes: the same scan conversion on host and device (no fused madd.s).
+set_source_files_properties(kobako/kobako_shape.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 # Shiki (docs/kasane/shiki-spec.md): integer engine; the only floating point is
 # the sec.2.4 conversion of inputs, which must match the host reference bit
 # for bit, so no contraction there either.
 set_source_files_properties(ui/kasane/ksn_shiki.c PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
-if(POCKET_DERBY_COURSE_CACHE OR POCKET_DERBY_PROJECT_BATCH)
-    set_property(SOURCE apps/derby/pocket_derby.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
+if(KOBAKO_DERBY_COURSE_CACHE OR KOBAKO_DERBY_PROJECT_BATCH)
+    set_property(SOURCE apps/derby/kobako_derby.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
 endif()
 
 # The VM probe (docs/vm/quickjs-freertos-vm-spec.md sec.5), off by default
-# (main/Kconfig.projbuild's CONFIG_POCKET_VM_PROBE). Both the source file and
+# (main/Kconfig.projbuild's CONFIG_QJS_LEAN_PROBE). Both the source file and
 # the six workload apps are added ONLY in this branch -- not just guarded by
 # #ifdef inside them -- so a normal build embeds none of it: same object
 # files, same EMBED_TXTFILES, same DIRAM. The harness is permanent rather than
 # something a measuring branch restores from the vm-L0 tag each time: after L1
 # trimmed vmprobe.h that tag-restore recipe no longer compiled, and nobody
-# noticed because a probe-off build never builds the file. CONFIG_POCKET_VM_PROBE
+# noticed because a probe-off build never builds the file. CONFIG_QJS_LEAN_PROBE
 # reaches this file as an ordinary CMake variable; ESP-IDF injects every
 # sdkconfig value that way for every component's CMakeLists.txt.
-if(CONFIG_POCKET_VM_SELFTEST)
+if(CONFIG_KOBAKO_VM_SELFTEST)
     target_sources(${COMPONENT_LIB} PRIVATE "../tools/vmtest/lifecycle.c" "../tools/vmtest/guest_lifecycle.c")
 endif()
 
-if(CONFIG_POCKET_VM_OOMPROBE)
-    target_sources(${COMPONENT_LIB} PRIVATE "pocket/oomprobe.c")
+if(CONFIG_QJS_LEAN_OOMPROBE)
+    target_sources(${COMPONENT_LIB} PRIVATE "kobako/oomprobe.c")
 endif()
 
 
-if(CONFIG_POCKET_VM_PROBE)
-    target_sources(${COMPONENT_LIB} PRIVATE "pocket/vmprobe.c")
+if(CONFIG_QJS_LEAN_PROBE)
+    target_sources(${COMPONENT_LIB} PRIVATE "kobako/vmprobe.c")
     target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/vmprobe/sync_loop.js" TEXT)
     target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/vmprobe/deep_recursion.js" TEXT)
     target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../apps/vmprobe/closures.js" TEXT)
@@ -621,7 +621,7 @@ endif()
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_mbedtls_add_tx_buffer" "-Wl,-u,__wrap_esp_mbedtls_add_tx_buffer")
 
 # Compile-time stack evidence for the native endpoint; no runtime instrumentation.
-set_property(SOURCE "main.c" "pocket/app_control.c" "pocket/pocket_bridge.c" "pocket/app_control.c"
+set_property(SOURCE "main.c" "kobako/app_control.c" "kobako/kobako_bridge.c" "kobako/app_control.c"
              APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
 
 # Keep managed mesh F32 evaluation and coverage order consistent with host.
@@ -634,7 +634,7 @@ if(KASANE_MESH_PREPARED_PROTOTYPE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KSN_MESH_PREPARED_PROTOTYPE=1)
     set_source_files_properties(ui/kasane/ksn_mesh_prepared.c PROPERTIES
         COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-lto;-fstack-usage")
-    set_property(SOURCE pocket/pocket_shiki_frame.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
+    set_property(SOURCE kobako/kobako_shiki_frame.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
 endif()
 if(KASANE_MESH_EDGE4_PROTOTYPE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KSN_MESH_PREPARED_EDGE4=1)
@@ -655,7 +655,7 @@ if(KASANE_MESH_Q7_BENCH_PREFLIGHT)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KSN_MESH_Q7_BENCH_PREFLIGHT=1)
     set_source_files_properties(ui/kasane/ksn_mesh_q7_preflight.c PROPERTIES
         COMPILE_OPTIONS "-O2;-fno-fast-math;-fno-associative-math;-fno-reciprocal-math;-ffp-contract=off;-frounding-math;-fno-lto;-fstack-usage")
-    set_property(SOURCE pocket/pocket_shiki.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
+    set_property(SOURCE kobako/kobako_shiki.c APPEND PROPERTY COMPILE_OPTIONS "-fstack-usage")
 endif()
 
 # Opt-in trusted-native streaming producer; no actor/model registration.

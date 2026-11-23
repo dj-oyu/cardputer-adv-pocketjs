@@ -1,6 +1,6 @@
 # DERBY WATCH（`apps/derby/derby_watch.js` と `chunks.txt` のチャンク）
 
-観戦が主体の競馬ゲーム。夜の 1000 m のコース（直線か楕円、レースごとに種で決まる。下の「楕円」。ナイター）を、手続き描画（`pocket.kasane.procedural`）の線分だけの疑似 3D で見せる。遊びはレース前に1頭を選んで賭け、レース中はカメラを切り替えるだけ。設計・実測・上限の使用率・実機で確かめる項目は [docs/apps/derby-watch.md](../../docs/apps/derby-watch.md)。このファイルはコードの隣に置く「なぜ」のメモ（ソースのコメントはゲストのヒープを食うので短くしてある）。
+観戦が主体の競馬ゲーム。夜の 1000 m のコース（直線か楕円、レースごとに種で決まる。下の「楕円」。ナイター）を、手続き描画（`kobako.kasane.procedural`）の線分だけの疑似 3D で見せる。遊びはレース前に1頭を選んで賭け、レース中はカメラを切り替えるだけ。設計・実測・上限の使用率・実機で確かめる項目は [docs/apps/derby-watch.md](../../docs/apps/derby-watch.md)。このファイルはコードの隣に置く「なぜ」のメモ（ソースのコメントはゲストのヒープを食うので短くしてある）。
 
 ## キー
 
@@ -14,7 +14,7 @@
 | 結果 | `1` | 次のレース（種が変わる。種は起動ごとにハードウェアの乱数と混ぜる、下の「種」） |
 | 結果 | `R` | 同じレースをもう一度（同じ種。持ち点は動かない） |
 | どこでも | `tab` | 負荷段階 LIGHT → MID → HEAVY（既定 MID）。スタンドと観客の plan を登録し直す |
-| どこでも | up（broker の `up`、`;`） | 首振りの系列 `pocket.derby.ser()` の経路を整数（既定）⇔ 倍精度で切り替える（A/B の計測用。ログ `AB INT`／`AB DOUBLE`。docs/apps/derby-ser-division.md §7.3）。broker の up はデモを止めない |
+| どこでも | up（broker の `up`、`;`） | 首振りの系列 `kobako.derby.ser()` の経路を整数（既定）⇔ 倍精度で切り替える（A/B の計測用。ログ `AB INT`／`AB DOUBLE`。docs/apps/derby-ser-division.md §7.3）。broker の up はデモを止めない |
 | どこでも | `` ` ``（Back） | 終了。main.c の保存ターン `frame(0x2000)` で持ち点を保存 |
 | デモ中 | どのキーでも | デモをやめてパドックへ（そのキーはゲームの操作にならない） |
 
@@ -50,12 +50,12 @@
 
 ## 種
 
-レースの種は起動ごとに変わる。評価中に `pocket.random.seed()`（実機は `esp_random()`）を 1 回引き（`HW`）、保存済みのレース番号 `sn`（通算カウンタ。保存が無ければ 0）と混ぜて基準 `base = rng(HW ^ sn·φ)()·2³²` にし、レースの種を `base + raceNo·φ`、そのレースのノイズの列を `rng(seed + 0x5bd1e995)` にする。以前は `0x3e1b7 + raceNo·φ` で、同じ番号のレースがいつも同じ展開になり、保存を消すと同じレースが再現して結果を覚えられた。
+レースの種は起動ごとに変わる。評価中に `kobako.random.seed()`（実機は `esp_random()`）を 1 回引き（`HW`）、保存済みのレース番号 `sn`（通算カウンタ。保存が無ければ 0）と混ぜて基準 `base = rng(HW ^ sn·φ)()·2³²` にし、レースの種を `base + raceNo·φ`、そのレースのノイズの列を `rng(seed + 0x5bd1e995)` にする。以前は `0x3e1b7 + raceNo·φ` で、同じ番号のレースがいつも同じ展開になり、保存を消すと同じレースが再現して結果を覚えられた。
 
 - **加算にした理由。** mulberry32 は状態が定数ずつ進むカウンタなので、2 本の列が重なるかは種の差だけで決まる。加算なら差が `base` に依らないので、「レース 1〜20,975 とデモ 1,000 レースのどの列も重ならない」を全セッションについて 1 回の計算で言える（`python3 tools/games/derby_seeds.py`）。
 - **通算カウンタに保存のレース番号を使った理由。** `esp_random()` は RF が止まっていると擬似乱数扱い（common-api §8.1）で、起動ごとに同じ値が出る可能性を否定できない。保存のレース番号が違えば基準も変わる。起動回数を保存に足す案は、読み書きの式だけで host のコンパイルのピークが +348 B で、評価の余裕（3.8〜5.6 KB）を食うのでやめた。
 - **再生とデモ。** `R` は同じ `F` を走らせるので全桁一致のまま。デモのレース番号は `1e6 + n` のままで、種はレース番号の純関数なので、プレイヤーの次のレースの種はデモの前後で変わらない。
-- **host。** `tools/games/test_derby_host.c` の `pocket.random.seed()` は固定値（`DERBY_HW`）を返すので台本は決定的。`run_derby.py` がログの種を `derby_seeds.py` の式と照合する。
+- **host。** `tools/games/test_derby_host.c` の `kobako.random.seed()` は固定値（`DERBY_HW`）を返すので台本は決定的。`run_derby.py` がログの種を `derby_seeds.py` の式と照合する。
 
 ## オッズ
 
@@ -148,7 +148,7 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 - **台**: `CAMS` の行 7〜9、`[200, 6, 28, g, −14]`（g = 100・460・820 m、横見の線から 14 m 手前、高さ 6 m、地平線 y 28）。高さと地平線は首振りの plan に焼いてあるので、行を変えても plan は変わらない。
 - **向きと焦点距離**: 台から先頭（内外の中央）への単位ベクトルを向き、f は先頭の馬が `PAN[1]` = 14 px に見える長さ（`14·距離/2.4`）を最小 200・最大 `PAN[2]` = 1,500 に収める。`pc = [台の x, z, 向き x, z, f, 先頭までの距離]`。
 - **投影** `pj(x, z)`: 世界の点を `[X'', Z']` にする（画面の x = X''/Z'、1 m の px = 1/Z'）。JS が割るのは draw の最初の点と、距離標・走者・大型画面の 4 隅だけ。
-- **列の描き方** `ser()`（2026-10-02 から C: `pocket.derby.ser`、下の「列を C で」）: コースに沿う物（柵・観客・芝の縞）は、奥行き w の線の上に s m ごとの点を「奥から手前へ」並べ、VM が前の点の 1/Z' から Newton 法 3 段で次の 1/Z' を出す（前の点の方が遠いので下から近づき、発散しない）。JS は視野（x −40〜280、奥行き 0.02f〜先頭の 75 m 先。LIGHT は 150 m 先）で列を切り出し、点が L px より詰まる奥では間隔を倍々に広げる（LOD。1 歩は奥行きの 0.3 以下）。
+- **列の描き方** `ser()`（2026-10-02 から C: `kobako.derby.ser`、下の「列を C で」）: コースに沿う物（柵・観客・芝の縞）は、奥行き w の線の上に s m ごとの点を「奥から手前へ」並べ、VM が前の点の 1/Z' から Newton 法 3 段で次の 1/Z' を出す（前の点の方が遠いので下から近づき、発散しない）。JS は視野（x −40〜280、奥行き 0.02f〜先頭の 75 m 先。LIGHT は 150 m 先）で列を切り出し、点が L px より詰まる奥では間隔を倍々に広げる（LOD。1 歩は奥行きの 0.3 以下）。
 - **plan**（ゲートで登録、計 4 本）: `prail`（柵と支柱、49 命令）、`pt`（芝の縞。`t0`・`t1` の 2 本、`$0` が緑、59 命令）、`hl`（スタンドの段と大型画面の面を描く横線、27 命令）。観客は横見と同じ `crowd`（下の「観客」）を、スタンドの段（`hl`）と同じ弦のループで弦ごとに 1 回描く（`ser()` の `b < 0` の枝）。
 - **描く順**（`pan()`）: スタンドの柱と屋根 → 段（`hl`）→ 観客 → 大型画面（面・ベゼル・中継）→ 向こうの柵 → 芝の縞 → 距離標・決勝柱 → 走者（`runner` を共用）→ 手前の柵。支柱の最小の間隔は 4 px、大型画面が見えている間は 8 px（その分の JS と VM を中継に回す）。
 - **大型画面**: 4 隅を `pj` して、横見と同じ判定（幅 8〜160 px、上端 y ≥ 13）を通ったときだけ描く。面の塗りとベゼルは `hl`、中継は横見と同じ `feed()`（縮尺は面の幅/120 と高さ/30 の小さい方）。
@@ -157,12 +157,12 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 - **host の検査**: 首振りのフレームの全点を倍精度の厳密な投影と比べる（誤差 0.1 px 未満、実測の最大 0.075 px）。`DERBY_PAN=1e9` で首振りを止めると、横見の画素は首振りを入れる前と全構成で同じ。
 
 
-## 列を C で（`pocket.derby`、2026-10-02）
+## 列を C で（`kobako.derby`、2026-10-02）
 
-首振りの列（`ser()` と、その中の `ou()`・`lim()`・`inr()`、弦の端 `VE` と視野の弦 `VC`）は firmware の C（`main/apps/derby/pocket_derby.c`）にある。JS の `ser()` を倍精度の同じ演算順で写したもので、`draw` に渡す入力は JS とビット単位で同じ（host の oracle、`tools/games/derby_ser_oracle.js`）。画素と結果は変わらない。設計と実測は docs の [derby-ser-native.md](../../docs/apps/derby-ser-native.md)。
+首振りの列（`ser()` と、その中の `ou()`・`lim()`・`inr()`、弦の端 `VE` と視野の弦 `VC`）は firmware の C（`main/apps/derby/kobako_derby.c`）にある。JS の `ser()` を倍精度の同じ演算順で写したもので、`draw` に渡す入力は JS とビット単位で同じ（host の oracle、`tools/games/derby_ser_oracle.js`）。画素と結果は変わらない。設計と実測は docs の [derby-ser-native.md](../../docs/apps/derby-ser-native.md)。
 
-- **入口**: `S = pocket.derby`。`S.course(CH, OC か 0, DNR)` をパドックで 1 回、`S.view(pc, zf, t, live.hl, live.crowd, KN[tier][0], KN[3][5])` を首振りのフレームごとに 1 回、`S.ser(live.prail, w, s, g0, L, a, b)` を列ごとに（`b` を省くと芝）。描く順は JS が呼ぶ順のまま。
-- **DERBY のセッションにだけある**（manifest の optional に `derby.series`。`pocket.pet` と同じ作り）。capability `derby.series`、limits は `maxEnds` 32・`maxSections` 4。
+- **入口**: `S = kobako.derby`。`S.course(CH, OC か 0, DNR)` をパドックで 1 回、`S.view(pc, zf, t, live.hl, live.crowd, KN[tier][0], KN[3][5])` を首振りのフレームごとに 1 回、`S.ser(live.prail, w, s, g0, L, a, b)` を列ごとに（`b` を省くと芝）。描く順は JS が呼ぶ順のまま。
+- **DERBY のセッションにだけある**（manifest の optional に `derby.series`。`kobako.pet` と同じ作り）。capability `derby.series`、limits は `maxEnds` 32・`maxSections` 4。
 - **規則が 2 か所にある**: コースの表と `pose()` は JS にもある（距離標・走者・大型画面・台）。表は `S.course()` で C に渡すので値は 1 か所だが、`pose()` の式と列の規則（LOD・格子・丸め）を変えるときは C と oracle の写しも同じに変える。oracle が違いを見つける。
 - **`dr()` は数値引数**（`H.draw(h, a0, …, a7)`、配列を作らない）。
 - **fps**（実機 MID、各 3 回の中央値）: 楕円のコーナーの首振り WIDE 2 は 15.9 → 24.6 fps（JS 44.1 → 22.0 ms）、HEAVY 24.4 fps。WIDE 2 の台を w=−3 にした場合は 13.3 → 23.0 fps。ゲストの最大は約 5.2 KB 減り（133.2〜133.3 KB）、評価の余裕は 30.6 KB。
@@ -211,7 +211,7 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 | 結果 | `conf`（紙吹雪） | `r0`〜`r7`・`map`・`vis`・`fr`・`hd`・首振りの 5 本・`photo` |
 | 次のレース／再戦 | 次の場面の分 | `conf`（パドックに入るときは `band` も） |
 
-登録は `pocket.memory.info().internalFreeBytes` が 18,432 B 以上のときだけ。実機（2026-09-30、大型画面を足した後）で、登録したターンの heap の落ち込みは最大 12.6 KB（ゲート）、パドックで 8.1 KB だったので、門で登録しても 5 KB 以上残る（MEGADEMO が破綻とみなした 4 KB の上）。門の値は以前 22,528 B（MEGADEMO の値）だったが、大型画面の分だけゲートでの空きが減り（登録の始まりで最小 25.5 KB）、余裕が 3 KB しか無かったので下げた。ゲートは 300 フレーム待っても全部そろわなければ `GO LOADSTALL` を出して走らせる（そろわない馬は描かれない）。
+登録は `kobako.memory.info().internalFreeBytes` が 18,432 B 以上のときだけ。実機（2026-09-30、大型画面を足した後）で、登録したターンの heap の落ち込みは最大 12.6 KB（ゲート）、パドックで 8.1 KB だったので、門で登録しても 5 KB 以上残る（MEGADEMO が破綻とみなした 4 KB の上）。門の値は以前 22,528 B（MEGADEMO の値）だったが、大型画面の分だけゲートでの空きが減り（登録の始まりで最小 25.5 KB）、余裕が 3 KB しか無かったので下げた。ゲートは 300 フレーム待っても全部そろわなければ `GO LOADSTALL` を出して走らせる（そろわない馬は描かれない）。
 
 **評価中（トップレベル）に `load()` を呼ばない。** 実機の `internalFreeBytes` はターンの始めに採るので、ソースの評価中は `null` で、門（`null < 18432` は真）を越えられない。値はターンの中では変わらないので、「登録できるまで回す」ループは終わらない。2026-09-30 まで起動時に `while (queue.length && reg < 3) load();` があり、実機ではこれが 2 秒の評価期限まで回って起動に失敗していた（docs の「実機での測定」）。host の台本も評価中は `null` を返すようにした。
 
@@ -220,7 +220,7 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 - 走者（ゲートと FIELD）は Shiki の組み込みの式 `run`（胴と騎手）と `legs`（脚 4 本）、HEAD ON の正面の馬は `frl`（前脚）と `frb`（胴と騎手）。`derby_prog.js` の `@shiki` 関数で、ビルドが flash の表にする（`tools/kasane_ir/emit_shiki_rom.mjs`）。色を入力にしたので全馬で共通、旧 API の `r0`〜`r7` と `fr`（9 個）が 4 個になった（handle の上限 32）。
 - **脚の位相は距離から**: 1 歩 6.5 m なので、位相 = 2π × 距離 / 6.5。距離 `d` は表示の位置 `xs[l]`（スロー再生では `at()` が step の途中まで補間する）に馬ごとのずらし `l × 1.0345 m`（ゲートの位相 l rad）を足したもの（`DO`）。`sin` は式の中の `SIN` 命令で、JS は位相の配列を持たず、`Math.sin` も double → int の変換もしない。大写しの馬のコマ（`g0`〜`g5`）も同じ距離から `⌊d × 6 / 6.5⌋ mod 6`。
 - **束ねて描く**: 1 頭が 2 本の draw（脚が先）で、`drawMany` 1 回にまとめる（`bput`・`bflush`）。z 順を保つため、大写しの馬（旧 API の draw）の前で書き出す。入力は `Float64Array`（変換はネイティブ側）。
-  - **2026-11-13 から `pocket.derby.runners()`（C）**: 投影・間引き・奥から手前の並べ替え・入力の組み立て・draw を 1 回の呼び出しで行う（1 頭 2 本、整数の入力）。大写しの馬のレーンに来たら止まってその位置を返し、JS が大写しの 2 本を描いて続きを呼ぶ。HEAD ON の `frl`・`frb` も同じ関数（mode 2）。`bput`・`bflush` の JS は A/B 用のチャンク `ab`（`derby_ab.js`）に移し、その A/B は 2026-11-13 に退役した（up は系列の整数／倍精度の A/B に使う）。理由と r5sim の前後は docs/apps/derby-runners-native.md。
+  - **2026-11-13 から `kobako.derby.runners()`（C）**: 投影・間引き・奥から手前の並べ替え・入力の組み立て・draw を 1 回の呼び出しで行う（1 頭 2 本、整数の入力）。大写しの馬のレーンに来たら止まってその位置を返し、JS が大写しの 2 本を描いて続きを呼ぶ。HEAD ON の `frl`・`frb` も同じ関数（mode 2）。`bput`・`bflush` の JS は A/B 用のチャンク `ab`（`derby_ab.js`）に移し、その A/B は 2026-11-13 に退役した（up は系列の整数／倍精度の A/B に使う）。理由と r5sim の前後は docs/apps/derby-runners-native.md。
 - 正面の馬の前脚の持ち上げ `max(0, ±1.5 s sin)` は、Shiki に max の命令が無いので、1 回だけ回すループと `break` で書く。
 - `kasane.shiki` を宣言するので、セッションの始めに Shiki のヒープ（既定 48 KiB）を取り、旧 API のフレームもその中に置かれる。
 
@@ -228,7 +228,7 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 
 ### 背景の式もすべて Shiki（2026-11-02、Shiki v2.0 の手順 1）
 
-- `nil`（大写しの馬と HEAD ON の型付きの点）以外の 21 本はすべて `@shiki`。`derby_view.js` は `nil` 以外を `kasane.shiki` で登録し、描くときも登録した側の API を使う（`onS`。`t0`・`t1` は同じ `pt`）。`pocket.derby` の C の描画（`part`・`ser` など）は、handle が Shiki ならその engine で描く（`pocket_proc_draw_numbers`）。
+- `nil`（大写しの馬と HEAD ON の型付きの点）以外の 21 本はすべて `@shiki`。`derby_view.js` は `nil` 以外を `kasane.shiki` で登録し、描くときも登録した側の API を使う（`onS`。`t0`・`t1` は同じ `pt`）。`kobako.derby` の C の描画（`part`・`ser` など）は、handle が Shiki ならその engine で描く（`kobako_proc_draw_numbers`）。
 - Q 形式の宣言（`@q`）: `prail`・`pt` は奥行きを Q24（docs/kasane/shiki.md §5.6.1）、`turf` は `phase=0`、`dust`・`bokeh` は `t=0, h0=0`（どちらも整数。Q16 のままだと `h0` が飽和して 96 px ずれた）。`bokeh` は 1 回だけ回る内側のループを書き下した（64 命令に収めるため。線分は同じ）。
 - 誤差（host、同じ関数の double と比べた最大。実ゲーム／ランダム）: `prail` 0.009／0.047 px、`pt` 0.008／0.016、`hl` 0.0002／0.001、`conf` 0.12／0.75、`dust` 0.56／1.7、`bokeh` 0.26／0.85、他は 0.001 px 未満。`dust`・`bokeh` は sin を乱数の代わりに使うので、粒が 1〜2 px 動く（見た目の破綻ではない）。
 - host の全検査は通り、レースの結果は同じ。画素のハッシュは変わる（float から Q16 へ）。
@@ -239,7 +239,7 @@ P = lambda x, lat, e: (round(120 + (lat - C0) * F / (XC - x)), round(HY + (H - e
 
 ### sin は Shiki（2026-11-01）
 
-表示側の残りの `Math.sin` / `Math.cos` も `pocket.kasane.shiki` の整数版（Q16 の回転数、結果は Q16）へ移した。JS の `Math.sin` は実機で 1 回約 2,700 cycles、`shiki.sin` は約 1,150（ほぼ呼び出しの固定費）、`sinMany` は 1 要素約 80（docs/kasane/logs/shiki-drawcost-20261101-4392695.txt）。レースのモデル（`derby_watch.js`）は算術だけなので触らない。
+表示側の残りの `Math.sin` / `Math.cos` も `kobako.kasane.shiki` の整数版（Q16 の回転数、結果は Q16）へ移した。JS の `Math.sin` は実機で 1 回約 2,700 cycles、`shiki.sin` は約 1,150（ほぼ呼び出しの固定費）、`sinMany` は 1 要素約 80（docs/kasane/logs/shiki-drawcost-20261101-4392695.txt）。レースのモデル（`derby_watch.js`）は算術だけなので触らない。
 
 - `at()` の横揺れ `sin(a / 40 + 2.4 i)`: 8 頭分を `Int32Array` に詰めて毎フレーム `sinMany` 1 回。馬ごとのずらし `2.4 i` は定数の表 `ZO`。
 - `pose()` の曲線（楕円コースのカーブ）: 同じ角を `shiki.cos` と `shiki.sin` で。角の量子化は 1/65536 回転、半径 120 m で約 1.2 cm。
@@ -259,17 +259,17 @@ FINISH のスロー中（`cm === 3`）だけ、ダスト 3 層（奥の点・中
 
 ## 音
 
-`pocket.audio.tone` は1声の正弦波（20〜8000 Hz、1 回に 1 音、鳴っている間の次の要求は BUSY）なので、音符の列を 1 音ずつ鳴らす小さな列にした。ゲート入りのファンファーレ（ド・ミ・ソ・ド、特定の曲ではない）、発走の鐘（高い音 3 回）、写真判定のシャッター音（2637 Hz を 25 ms）、当たり・外れの短い音形。**歓声（雑音）は出せない**（正弦波しか無く、PCM を JS から流すのは common-api §9 が禁じている）ので、歓声は見せていない（以前は観客の点の明滅で代えていたが、P24 の観客は明滅しない。下の「観客」）。`audio.cue('move'/'accept')` は選択・決定の操作音。最初の tone は、ホームから流れているプレイヤーの音楽を止める（`pocket_av_background_stop("tone")`）。
+`kobako.audio.tone` は1声の正弦波（20〜8000 Hz、1 回に 1 音、鳴っている間の次の要求は BUSY）なので、音符の列を 1 音ずつ鳴らす小さな列にした。ゲート入りのファンファーレ（ド・ミ・ソ・ド、特定の曲ではない）、発走の鐘（高い音 3 回）、写真判定のシャッター音（2637 Hz を 25 ms）、当たり・外れの短い音形。**歓声（雑音）は出せない**（正弦波しか無く、PCM を JS から流すのは common-api §9 が禁じている）ので、歓声は見せていない（以前は観客の点の明滅で代えていたが、P24 の観客は明滅しない。下の「観客」）。`audio.cue('move'/'accept')` は選択・決定の操作音。最初の tone は、ホームから流れているプレイヤーの音楽を止める（`kobako_av_background_stop("tone")`）。
 
 ## デモ（アトラクト）モード
 
 パドックで 15 秒（`DEMO_IDLE_S`）キーが無いと、ゲームが自分で1レースを走らせる。画面の右下（`[212,109,238,120]`、下の HUD 行の上）に `DEMO` が点滅し、どのキーでもパドックへ戻る。詳細と検証は docs の「デモモード」。
 
 - **タイトルはパドック。** このアプリに独立したタイトル画面は無く、起動直後に最初に出る待機状態がパドック（馬を選ぶ前）なので、そこを「タイトル」とみなした。次のレースのパドックも同じ扱い（15 秒触らなければデモ）。
-- **時計は `pocket.time.now()`**（起動からの単調なミリ秒、どのアプリにも入る面）。放置はフレーム数ではなく壁時計で数える。fps が落ちても 15 秒は 15 秒。キーを押している間・フレームの外で押して離した `A D E S 1 R , / tab`・`frame(buttons)` のパッドのビットが、計時をやり直す。
+- **時計は `kobako.time.now()`**（起動からの単調なミリ秒、どのアプリにも入る面）。放置はフレーム数ではなく壁時計で数える。fps が落ちても 15 秒は 15 秒。キーを押している間・フレームの外で押して離した `A D E S 1 R , / tab`・`frame(buttons)` のパッドのビットが、計時をやり直す。
 - **ゲームの経路をそのまま通す。** デモの操縦は `attract()` が1フレームに1つの「キー」を `dk` に置くだけで、`frame()` の `P()` は `dk` があればそれを押下として読む。A/D の選択と `1` の決定は、人が押したときと同じ行を通る。走らせる馬は奇数回目のデモが1番人気、偶数回目が2番人気（オッズ順、同率は枠の若い方）で、A/D の短い方向へ 12 フレームに1歩動かしてから `1`。賭け金は 100 固定。レース中はキーを送らず、カメラは監督（自動切替）に任せる（大型画面との統合で、240 フレームごとの `/` をやめた。`/` は監督を 5 秒止めるので、VISION や HEAD ON が出にくくなる）。結果を 150 フレーム（`DEMO_RES`）見せてパドックへ戻る。
 - **プレイヤーの状態を汚さない。** デモの開始で持ち点・レース番号・選んだ馬・賭け金・音の出口（`A`）を `bk` に退避し、終わりで戻す。デモのレース番号は `1e6 + n`（n はデモの回数）で、種はセッションの基準とレース番号から決まるので、プレイヤーの種の列（1, 2, 3…）を進めない。100 万レースはプレイヤーが届かない（1 レース 50 秒で約 1.6 年）。`save()` はデモ中は何もしない。Back の保存ターンは先にデモを終えて（退避を戻して）から保存するので、デモの持ち点は書かれない。
-- **無音。** デモ中は `A = null`（tone も cue も呼ばない）。放置された機械が勝手に鳴ると困るのと、最初の `tone` がホームから流れている音楽を止める（`pocket_av_background_stop("tone")`）ので、デモが始まるだけで音楽が止まってしまう。デモの終わりで残りの音符を捨てる。
+- **無音。** デモ中は `A = null`（tone も cue も呼ばない）。放置された機械が勝手に鳴ると困るのと、最初の `tone` がホームから流れている音楽を止める（`kobako_av_background_stop("tone")`）ので、デモが始まるだけで音楽が止まってしまう。デモの終わりで残りの音符を捨てる。
 - **キーで抜ける。** デモ中に押されたキー（`input.keys.down()` に新しく入ったキー、フレームの外で押して離したゲームのキー、`frame(buttons)` のパッドのビット）で、そのフレームのうちにパドックへ戻る。そのフレームは `dk = ''` なので、押したキーはゲームの操作として二度読まれない。途中で抜けたときは走者・写真の plan を解除して、タイトルと同じ 12 本に戻す。
 - **`DEMO` は view のテキスト 1 つ**（`R.dm`、場面を組むたびに作り、`setVisible` で出し入れ）。パドックの ref は 30→31（上限 32）、レースは大型画面の文字 3 つと合わせて 10。大型画面と `DEMO` は重ならない（画面と脚の下端は最も低い VISION でも y = 90、`DEMO` は y 109〜120）。通常のゲーム中は非表示で、LIGHT・HEAVY の全画素ハッシュは追加の前と同じ。
 - **デモ中のパドックの 1 行目は `RACE n` を出さない**（デモのレース番号 1000001 を見せても意味が無い）。
@@ -277,7 +277,7 @@ FINISH のスロー中（`cm === 3`）だけ、ダスト 3 層（奥の点・中
 
 ## ファイルの構成（チャンク、2026-09-30）
 
-1 本のスクリプトだったものを、`pocket.app.load`（docs/vm/eval-peak.md §7）のチャンクに分けた。QuickJS は 1 本のスクリプトの解析の一時領域を最後まで持つので、評価のピークは「一番大きいチャンク＋それまでに残ったもの」になる。**評価の余裕は実機で 3,893 → 30,312 B**（docs の「チャンクへの分割」）。
+1 本のスクリプトだったものを、`kobako.app.load`（docs/vm/eval-peak.md §7）のチャンクに分けた。QuickJS は 1 本のスクリプトの解析の一時領域を最後まで持つので、評価のピークは「一番大きいチャンク＋それまでに残ったもの」になる。**評価の余裕は実機で 3,893 → 30,312 B**（docs の「チャンクへの分割」）。
 
 | 名前 | ファイル | 中身 | いつ読むか |
 | --- | --- | --- | --- |
@@ -285,14 +285,14 @@ FINISH のスロー中（`cm === 3`）だけ、ダスト 3 層（奥の点・中
 | `prog` | `derby_prog.js` | plan のプログラム（`T` の各 plan は `@shiki`（`nil` だけ `@plan`）を付けた JS のメソッド。`@planDecoder rom` の印で、ビルドが firmware の flash の表（`@shiki` は `ksn_shiki_rom.c`、`@plan` は `ksn_proc_rom_plans.c`）にコンパイルし、このファイルからは plan と復号器を消して埋め込む。アプリは `H.register('derby.' + 名前, 引数, 点列)` で登録する。このファイルはそのままでは動かない。plan の前と中のコメントは出荷されない。docs/kasane/flash-plan.md）・大写しの馬の点列の元・HEAD ON の線画 | 入口の評価中 |
 | `view` | `derby_view.js` | plan の登録・音・状態・保存・カメラ・`course()` | 同 |
 | `scene` | `derby_scene.js` | `enter`・`build`・`hud`・`settle`・`paint` | 同 |
-| `pan` | `derby_pan.js` | 首振りの投影（`pj`）と 1 フレーム（`pan`）。列は `pocket.derby`（C）。scene に入れるとそのチャンクのコンパイルのピークが +5.9 KB 跳ねたので分けた | 同 |
+| `pan` | `derby_pan.js` | 首振りの投影（`pj`）と 1 フレーム（`pan`）。列は `kobako.derby`（C）。scene に入れるとそのチャンクのコンパイルのピークが +5.9 KB 跳ねたので分けた | 同 |
 | `play` | `derby_play.js` | `attract`・`globalThis.frame`（1 フレームの処理を関数に分けず、その中のラベル付きブロック `fr` に置く）・最初の `enter('pad')` | 同 |
 | `demo` | `derby_demo.js` | `demo()` と自動操縦（`pilot()`） | デモが初めて始まるとき（幕が黒になったフレーム） |
 
 - **全部がグローバルのスクリプト**で、トップレベルの `const`/`let`/関数は 1 つの名前空間を共有する（元の IIFE の中の名前がそのままグローバルになった）。境目はトップレベルの関数・宣言の単位で、静的 `import` へ移るときもこの単位で切れる。
 - 読む順は上の表の順。チャンクのトップレベルで、後のチャンクの関数を**評価の時点で**呼ばない（関数の中から呼ぶのはよい）。`globalThis.frame` と最初の `enter('pad')` は最後の `play` に置く。
 - **`demo` の読み込みに失敗したら**（heap 不足など）、`DEMOFAIL` を記録して放置の計時をやり直す（幕が上がってパドックに戻り、15 秒後にもう一度試す）。アプリは止まらない。
-- 入口の 3 行目のコメントに `pocket.kasane` と書いてある。Kasane の arena を評価の前に取る判定（`app_session.c` の `names_kasane`）は入口のソースしか見ないので、消さない。
+- 入口の 3 行目のコメントに `kobako.kasane` と書いてある。Kasane の arena を評価の前に取る判定（`app_session.c` の `names_kasane`）は入口のソースしか見ないので、消さない。
 - チャンクを足す・名前を変えるときは `chunks.txt` を直す（ファームは configure で、host の `tools/games/run_derby.py` は実行時に同じ一覧を読む）。ファイル名は全アプリの埋め込みで重複させない（`derby_` を付ける）。
 
 ## ゲスト heap とソースの書き方（デモと大型画面の統合、2026-09-30）
@@ -320,7 +320,7 @@ FINISH のスロー中（`cm === 3`）だけ、ダスト 3 層（奥の点・中
 
 ## 持ち点の保存
 
-`pocket.storage`（`storage.kv`、キー `derby.v1`、`{v:1, pts, race}`）。起動時に読み、結果が出たとき・次のレースへ進むとき・Back の保存ターンで書く。`storage.kv` はマニフェストに書かなくても全アプリに入る面（`app_session.c` が owner を設定して常に install する）なので、`main/pocket/app_registry.c` の行は変えていない。持ち点が 50 を切ったら 1000 に戻す。
+`kobako.storage`（`storage.kv`、キー `derby.v1`、`{v:1, pts, race}`）。起動時に読み、結果が出たとき・次のレースへ進むとき・Back の保存ターンで書く。`storage.kv` はマニフェストに書かなくても全アプリに入る面（`app_session.c` が owner を設定して常に install する）なので、`main/kobako/app_registry.c` の行は変えていない。持ち点が 50 を切ったら 1000 に戻す。
 
 ## 負荷の段階（`KN`、`tab`）
 
@@ -335,7 +335,7 @@ FINISH のスロー中（`cm === 3`）だけ、ダスト 3 層（奥の点・中
 ## 試験
 
 ```bash
-# WSL。実物の QuickJS・pocket.kasane・pocket.input.keys で台本を通し、全 draw を 3 通りで実行・全画素比較
+# WSL。実物の QuickJS・kobako.kasane・kobako.input.keys で台本を通し、全 draw を 3 通りで実行・全画素比較
 python3 tools/games/run_derby.py            # ASan/UBSan、MID の全台本（デモ 10 回を含む）＋デモ 3 レースを手で走らせた照合＋LIGHT/HEAVY の1レース＋監督だけ・8 番の CLOSE
 python3 tools/games/run_derby.py --m32      # 実機と同じ 8 B JSValue でゲスト heap を測る
 python3 tools/games/run_derby.py --ppm      # docs/apps/derby-watch-preview.png・derby-watch-demo-preview.png・derby-watch-vision-preview.png・derby-watch-dissolve-preview.png（デモの幕）を作り直す

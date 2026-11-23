@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host check of board_key_event's INT gate (CONFIG_POCKET_KEY_INT_GPIO).
+"""Host check of board_key_event's INT gate (CONFIG_KOBAKO_KEY_INT_GPIO).
 
 Compiles the production function out of main/hal/board.c against a model of
 the TCA8418: a 10-event FIFO, the K_INT and OVR_FLOW latches in INT_STAT
@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def gated_body():
     text = (ROOT / "main/hal/board.c").read_text()
-    start = text.index("// With INT wired (CONFIG_POCKET_KEY_INT_GPIO)")
+    start = text.index("// With INT wired (CONFIG_KOBAKO_KEY_INT_GPIO)")
     end = text.index("#endif\nstatic bool key_decode(uint8_t event")
     decode_end = text.index("\n}\n", end) + 3
     return text[start:end] + text[end + len("#endif\n"):decode_end]
@@ -35,7 +35,7 @@ C = r'''
 #include <stdlib.h>
 typedef int esp_err_t;
 #define ESP_OK 0
-#define CONFIG_POCKET_KEY_INT_GPIO 11
+#define CONFIG_KOBAKO_KEY_INT_GPIO 11
 #define KEY_INT_PROBE 0
 // The safety net off: this test checks the gate alone.
 #define KEY_INT_RESCAN 1000000u

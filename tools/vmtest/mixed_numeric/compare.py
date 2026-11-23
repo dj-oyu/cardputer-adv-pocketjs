@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[3]
 # The base is the pinned fork engine (tools/vmtest/engine_pin.py). Every VM
 # change since must leave numeric.log, BIG WAVE's behaviour and its panels
 # byte for byte. Before v0.18 the pin was pocketjs dd36a29, which adopted
-# Math.sin/cos/tan from Shiki's sine table (pocket_trig.h, max error 1.1e-5,
+# Math.sin/cos/tan from Shiki's sine table (lean_trig.h, max error 1.1e-5,
 # accepted by the owner) and changed BIG WAVE's panels on purpose.
 QJS = ROOT / 'components/quickjs-ng/quickjs-ng'
 sys.path.insert(0, str(ROOT / 'tools/games'))
@@ -62,8 +62,8 @@ def main():
               'host_model_only': True, 'commands': [], 'variants': {}}
 
     def compile_c(source, obj):
-        cmd = ['gcc', '-std=gnu11', '-w', *flags, '-DQUICKJS_NG_BUILD', '-D_GNU_SOURCE',
-               '-I' + str(QJS), '-Icomponents/pocketjs_guest/include',
+        cmd = ['gcc', '-std=gnu11', '-w', *flags, '-DQUICKJS_NG_BUILD', '-DQJS_LEAN_LAZY_BUILTINS=1', '-D_GNU_SOURCE',
+               '-I' + str(QJS), '-Icomponents/kobako_guest/include',
                '-c', str(source), '-o', str(obj)]
         result['commands'].append(cmd)
         command(cmd)
@@ -77,12 +77,12 @@ def main():
     pets = (ROOT / 'apps/pet/assets/pets-compact.bin').read_bytes()
     (out / 'kasane_pet_test_data.h').write_text(
         'static const uint8_t pet_test_data[] = {' + ','.join(map(str, pets)) + '};\n')
-    api = (ROOT / 'main/pocket/pocket_api.c').read_text()
+    api = (ROOT / 'main/kobako/kobako_api.c').read_text()
     begin = api.index('// ----------------------------------------------------------- subscriptions')
     end = api.index('// ------------------------------------------------------- async completions', begin)
-    (out / 'pocket_sub_impl.inc').write_text(api[begin:end])
+    (out / 'kobako_sub_impl.inc').write_text(api[begin:end])
     harness = (ROOT / 'tools/games/test_big_wave_host.c').read_text()
-    needle = '    else pocket_kasane_animations_presented(now);'
+    needle = '    else kobako_kasane_animations_presented(now);'
     assert harness.count(needle) == 1
     harness = harness.replace(needle, needle + '''
     /* Compatibility capture after every existing full-app present. */
@@ -113,7 +113,7 @@ def main():
         elf_class = numeric.read_bytes()[4]
         assert elf_class == (1 if args.m32 else 2)
         includes = ['-I' + str(x) for x in (QJS, ROOT / 'tools/hostshim', ROOT / 'main',
-                    ROOT / 'main/pocket', ROOT / 'main/ui', ROOT / 'main/ui/kasane',
+                    ROOT / 'main/kobako', ROOT / 'main/ui', ROOT / 'main/ui/kasane',
                     ROOT / 'main/text', ROOT / 'main/hal', out)]
         app = folder / 'app'
         cmd = ['gcc', '-std=gnu11', *flags, '-DKSN_PROC_POINTS_PIE_MODEL', '-Wall', '-Wextra',

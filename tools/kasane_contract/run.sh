@@ -74,8 +74,8 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   "$out/shiki-emit"
   # The Shiki region's spare room and reclaim hook (the JIT's code lives
   # there, docs/kasane/shiki-jit.md sec.15).
-  cc -std=c11 -Wall -Wextra -Werror $options -Imain/pocket \
-    main/pocket/shiki_heap.c tools/kasane_contract/test_shiki_heap_spare.c -o "$out/shiki-heap-spare"
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/kobako \
+    main/kobako/shiki_heap.c tools/kasane_contract/test_shiki_heap_spare.c -o "$out/shiki-heap-spare"
   "$out/shiki-heap-spare"
   # sec.2.4's conversion in integers against the libm form (bit for bit).
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
@@ -87,11 +87,11 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     # The @shiki compiler against the C engine and its AST evaluation: data
     # regions (v1.3-v2.0 LOAD/STORE/DRAW_INDEX/start records) and the v2.0
     # vector syntax (D7; shiki_ref.mjs stops at op 29, so for ops 30-45 the C
-    # model is the reference these compare with). And pocket.kasane.shiki's
+    # model is the reference these compare with). And kobako.kasane.shiki's
     # JS surface (apps/shikitest/shiki_api_test.js) on the real adapter.
     node tools/kasane_ir/test_shiki_data_compile.mjs
     node tools/kasane_ir/test_shiki_vector_compile.mjs
-    python3 tools/kasane_contract/run_pocket_shiki_api_qjs.py
+    python3 tools/kasane_contract/run_kobako_shiki_api_qjs.py
     python3 tools/shiki_jit/test_encoder.py
     python3 tools/shiki_jit/test_compile.py
     python3 tools/shiki_jit/test_scalar.py
@@ -150,9 +150,9 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     -Itools/kasane_contract/p0_hostshim -Itools/hostshim \
     tools/kasane_contract/test_p0_histogram.c -o "$out/p0-bus"
   "$out/p0-bus"
-  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Imain/pocket \
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Imain/kobako \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
-    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/pocket/app_notice.c main/ui/kasane/ksn_indicator.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/kobako/app_notice.c main/ui/kasane/ksn_indicator.c \
     tools/kasane_contract/test_notice.c -o "$out/notice"
   "$out/notice"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane \
@@ -172,14 +172,14 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
     main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c tools/kasane_contract/test_view.c -o "$out/view"
   "$out/view"
-  cc -std=c11 -Wall -Wextra -Werror $options -Imain -Imain/ui/kasane -Imain/pocket -Itools/kasane_contract \
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain -Imain/ui/kasane -Imain/kobako -Itools/kasane_contract \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
-    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/pocket/app_legacy_presenter.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/kobako/app_legacy_presenter.c \
     tools/kasane_contract/test_presenter.c -o "$out/presenter"
   "$out/presenter"
-  cc -std=c11 -Wall -Wextra -Werror $options -Imain -Imain/ui/kasane -Imain/pocket -Itools/kasane_contract \
+  cc -std=c11 -Wall -Wextra -Werror $options -Imain -Imain/ui/kasane -Imain/kobako -Itools/kasane_contract \
     main/ui/kasane/ksn_core.c main/ui/kasane/ksn_render.c main/ui/kasane/ksn_blend_pie.c main/ui/kasane/ksn_cache.c \
-    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/pocket/app_legacy_presenter.c \
+    main/ui/kasane/ksn_modal.c main/ui/kasane/ksn_view.c main/kobako/app_legacy_presenter.c \
     tools/kasane_contract/test_music_light_fast.c -o "$out/music-light-fast"
   "$out/music-light-fast"
   cc -std=c11 -Wall -Wextra -Werror $options -Imain/ui/kasane -Itools/kasane_contract \
@@ -378,18 +378,18 @@ for options in '-g -fsanitize=address,undefined' '-O2 -fstrict-aliasing'; do
   "$out/stress" > "$out/stress.bin"
   python3 tools/kasane_contract/stress_reference.py "$out/stress.bin"
 done
-# The whole MEGADEMO app on the real pocket.kasane (loader, view, Shiki).
+# The whole MEGADEMO app on the real kobako.kasane (loader, view, Shiki).
 python3 tools/kasane_contract/run_megademo_app_host.py
-# pocket_shiki_frame.c's frames, surfaces and image port through pocket.kasane.shiki,
+# kobako_shiki_frame.c's frames, surfaces and image port through kobako.kasane.shiki,
 # then its turn boundary, handle limit and segment cap (ASan/UBSan, LSan).
-python3 tools/kasane_contract/run_pocket_proc_qjs.py
-python3 tools/kasane_contract/run_pocket_proc_turn_qjs.py
+python3 tools/kasane_contract/run_kobako_proc_qjs.py
+python3 tools/kasane_contract/run_kobako_proc_turn_qjs.py
 python3 tools/kasane_contract/run_proc_grid_fold_pie_asm.py
 python3 tools/kasane_contract/run_proc_grid_resize.py
-python3 tools/kasane_contract/run_pocket_grid_qjs.py
-python3 tools/kasane_contract/run_pocket_video_qjs.py
-# The three games (tools/games/): scripted play on the real QuickJS, pocket.kasane and
-# pocket.input.keys. The --m32 runs use the device-sized guest heap, which is the
+python3 tools/kasane_contract/run_kobako_grid_qjs.py
+python3 tools/kasane_contract/run_kobako_video_qjs.py
+# The three games (tools/games/): scripted play on the real QuickJS, kobako.kasane and
+# kobako.input.keys. The --m32 runs use the device-sized guest heap, which is the
 # guard on evaluation headroom (docs/apps/derby-watch.md): about 8.5 minutes in
 # all, so GAMES_M32=0 skips the two of them when only the C is being checked.
 bash tools/games/run_lcd_catch.sh

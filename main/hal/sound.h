@@ -26,7 +26,7 @@ void sound_set_enabled(bool enabled);
 
 // The DAC's output level, 0..SOUND_VOLUME_STEPS-1.
 //
-// A DEVICE PROPERTY, NOT AN APP'S. There is no pocket.audio.volume and there
+// A DEVICE PROPERTY, NOT AN APP'S. There is no kobako.audio.volume and there
 // should not be: how loud this machine is belongs to the person holding it, not
 // to whichever program is running, and an app that could turn itself up is an
 // app that can be turned up while nobody is looking at it.

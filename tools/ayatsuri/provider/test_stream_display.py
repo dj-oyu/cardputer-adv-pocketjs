@@ -1,4 +1,4 @@
-"""Linux host: real pocket/Kasane/streaming code, synthetic copied-DMA port."""
+"""Linux host: real kobako/Kasane/streaming code, synthetic copied-DMA port."""
 import argparse
 import os
 import pathlib
@@ -11,7 +11,7 @@ a = p.parse_args()
 root = pathlib.Path(__file__).resolve().parents[3]
 out = a.out.resolve()
 out.mkdir(parents=True, exist_ok=False)
-body = (root/'tools/test_pocket_kasane.c').read_text()
+body = (root/'tools/test_kobako_kasane.c').read_text()
 fixture = (root/'tools/ayatsuri/provider/stream_display_test.inc').read_text()
 fixture += '\n' + (root/'tools/ayatsuri/provider/stream_material_test.inc').read_text()
 assert body.count('int main(void) {') == 1
@@ -25,6 +25,6 @@ flags += ' -I' + str(root)
 if a.sanitize:
     flags += ' -fsanitize=address,undefined'
 env = dict(os.environ, TEST_SOURCE=str(source), OUT=str(out/'test'), CACHE=str(out/'qjs'),
-           CFLAGS=flags, EXTRA_SOURCES='main/pocket/pocket_stream_candidate.c main/ayatsuri/ayatsuri_model_stream_candidate.c')
+           CFLAGS=flags, EXTRA_SOURCES='main/kobako/kobako_stream_candidate.c main/ayatsuri/ayatsuri_model_stream_candidate.c')
 subprocess.run(['bash', 'tools/build_kasane_test.sh'], cwd=root, env=env, check=True)
 subprocess.run([str(out/'test')], check=True)

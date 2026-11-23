@@ -54,7 +54,10 @@ def tier_name(t, hot):
     """The suffix of a part's symbol: classes below `hot` are the hot ones."""
     return ('hot' if t == 0 else f'hot{t}') if t < hot else ('warm' if t == hot else 'cold')
 
-FUNC_SECTION = re.compile(r'^\t\.section\t\.text\.([^,\s]+),"ax",@progbits$')
+# GCC names the section of a function it treats as cold `.text.unlikely.NAME`
+# (an `__attribute__((cold))` function, and a callee reached only from one):
+# the function is still NAME, or the tool would pass it through unprofiled.
+FUNC_SECTION = re.compile(r'^\t\.section\t\.text\.(?:unlikely\.)?([^,\s]+),"ax",@progbits$')
 SIZE = re.compile(r'^\t\.size\t(\S+), \.-(\S+)$')
 CODE_LABEL = re.compile(r'^(\.L\d+):$')
 LEND_LABEL = re.compile(r'^\t?(\.L\d+_LEND):$')

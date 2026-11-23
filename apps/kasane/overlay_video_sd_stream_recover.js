@@ -21,12 +21,12 @@
   }
   let file = null;
   try {
-    if (await pocket.fs.requestFolder('sd') !== 'sd:/')
+    if (await kobako.fs.requestFolder('sd') !== 'sd:/')
       throw new Error('folder grant declined');
-    const entry = await pocket.fs.stat(path);
+    const entry = await kobako.fs.stat(path);
     if (entry.sizeBytes !== size)
       throw new Error('size mismatch; refusing removal');
-    file = await pocket.fs.open(path, {mode: 'read'});
+    file = await kobako.fs.open(path, {mode: 'read'});
     for (let at = 0; at < size;) {
       const chunk = await file.read(Math.min(1024, size - at));
       if (!chunk || !chunk.length)
@@ -35,12 +35,12 @@
         if (chunk[j] !== expected(at + j))
           throw new Error('content mismatch; refusing removal');
       at += chunk.length;
-      await pocket.time.sleep(20);
+      await kobako.time.sleep(20);
     }
     if (await file.read(1) !== null)
       throw new Error('trailing bytes; refusing removal');
     file.close(); file = null;
-    await pocket.fs.remove(path);
+    await kobako.fs.remove(path);
     console.log('D6_AV RECOVER_REMOVED');
   } catch (error) {
     console.log('D6_AV RECOVER_REFUSED ' + ((error && error.code) || error));

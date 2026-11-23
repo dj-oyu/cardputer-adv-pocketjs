@@ -120,7 +120,7 @@ static void sd_probe_task(void *arg) {
         for (int k = 0; k < SD_MAX_FILES; k++) {
             snprintf(path, sizeof path, SD_MOUNT "/probe%d.tmp", k);
             fp[k] = fopen(path, "wb");
-            if (fp[k]) fwrite("pocketjs", 1, 8, fp[k]);
+            if (fp[k]) fwrite("kobakosd", 1, 8, fp[k]);
         }
         unsigned f_open2 = freeb();
         ESP_LOGI("sdprobe", "SDPROBE open2 cost=%d opened=%d%d",

@@ -3,7 +3,7 @@ WSL or Linux; node on PATH).
 
   python3 tools/kasane_ir/q16_error.py [--fuzz N] [--reuse] [--alt ALT.js]
 
-1. Captures the panning draws. pocket.derby.ser() draws from C, so the
+1. Captures the panning draws. kobako.derby.ser() draws from C, so the
    captured game of check_equivalence.py never sees pt, prail or hl. The
    host game (tools/games/test_derby_host.c, 64-bit) runs with
    DERBY_SER_ORACLE=1, which evaluates the JS ser() of

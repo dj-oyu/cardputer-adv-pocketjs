@@ -30,7 +30,7 @@
 
 ## 2. 「3.2ms」の出所
 
-`docs/api/common-api.md` §9.1 の「実機実測（2026-09-08）」はセッション `845f52f4`（2026-09-07 23:30〜23:50Z）のもので、ハーネスはいまも `C:\devs\m5stack\ble-wt\` に残っている: `components/opus/CMakeLists.txt`、`main/opus_probe.c`、`main/opus_test_data.h`、`build_opus/cardputer_pocketjs.elf` と `.map`。ソースとELFから読めるもの（特記なければ実測）:
+`docs/api/common-api.md` §9.1 の「実機実測（2026-09-08）」はセッション `845f52f4`（2026-09-07 23:30〜23:50Z）のもので、ハーネスはいまも `C:\devs\m5stack\ble-wt\` に残っている: `components/opus/CMakeLists.txt`、`main/opus_probe.c`、`main/opus_test_data.h`、`build_opus/cardputer_kobako.elf` と `.map`。ソースとELFから読めるもの（特記なければ実測）:
 
 - **ライブラリ**: `.cache/codecs/opus`（gitignore下）のxiph/opus master `a6128f4`（1.5系の後。DREDのソースは在るがコンパイルされていない）。`-DFIXED_POINT -DVAR_ARRAYS=1`、**`-Os`**（イメージ中969 TUのうち960が-Os。プロジェクト既定 `CONFIG_COMPILER_OPTIMIZATION_SIZE=y`）。celt/silk/silk-fixedを全部globしてリンクし、`--gc-sections` でデコーダーだけが残った。`nm` で `opus_decode` / `celt_decode_with_ec` / `silk_Decode` とベクタがイメージに在ることは当時確認されている。
 - **ベクタ**: 24kHz・mono・24kbps VBR・`OPUS_APPLICATION_AUDIO`、和音＋雑音＋包絡、50パケット＝3,050バイト（⇒3,050 B/s）、パケット長52〜91バイト。エンコーダーは50個全部にCELT WB 20msを選んだ（TOC復号、実測）。
@@ -55,7 +55,7 @@
 | 項目 | 値 | 区分 |
 | --- | --- | --- |
 | libopusの静的DIRAM | 0バイト | 実測（ハーネスのイメージ差分） |
-| 統合時のglue（pocket_av側）の静的DIRAM | 約+150〜200バイト | 仮定。ADPCMプレイヤーの実測+160からの類推 |
+| 統合時のglue（kobako_av側）の静的DIRAM | 約+150〜200バイト | 仮定。ADPCMプレイヤーの実測+160からの類推 |
 | 復号状態（heap、再生中だけ） | 18,436バイト、1ブロック | 実測 |
 | 復号stackの最高水位 | 10,420バイト、CELT WB 20msのみ | 実測。他モードの下限 |
 | 音声タスク `sfx` のstack | 4,096バイト（`sound.c:1042`）、`ui` は32,768 | ソースを読んだ |
@@ -79,7 +79,7 @@
 
 ## 5. 帯域 — 算術であって計測ではない（カードの読みは誰も測っていない）
 
-SDのSPIクロック400kHz、理想400kbit/s に対して: PCM16 384kbit/s（96%、維持できない）、ADPCM 96kbit/s（24%）、**Opus 24.4kbit/s（6%）**。Opusは `pocket_av.c` が書いている `sd:` ストリーミングの問題を解かない——2,048バイトのスロット1本は依然として、それを要求したフレームの中の約41msのバス時間である。変わるのは頻度で、PCM16の16分の1、ADPCMの4分の1（スロット1本≈Opus 0.67秒、PCM16 43ms）。出口は変わらず供給タスクかクロックで、変わらず「まずカードの読みを測る」。
+SDのSPIクロック400kHz、理想400kbit/s に対して: PCM16 384kbit/s（96%、維持できない）、ADPCM 96kbit/s（24%）、**Opus 24.4kbit/s（6%）**。Opusは `kobako_av.c` が書いている `sd:` ストリーミングの問題を解かない——2,048バイトのスロット1本は依然として、それを要求したフレームの中の約41msのバス時間である。変わるのは頻度で、PCM16の16分の1、ADPCMの4分の1（スロット1本≈Opus 0.67秒、PCM16 43ms）。出口は変わらず供給タスクかクロックで、変わらず「まずカードの読みを測る」。
 
 Opusが席を得るのは置き場のほうである: `app:/` の24,576バイトで8.06秒（符号化して計数、実測）対ADPCM 2.05秒。供給がタスクに移れば、バスの6%占有はEXT SPIをほぼ空けたままにする。
 
@@ -112,7 +112,7 @@ libopusはBSD-3-Clause（`COPYING`）で、Xiph・Microsoft・Skype・Broadcom�
 | この文書が言っていたこと | 実装後 | 区分 |
 | --- | --- | --- |
 | §3「libopusの静的DIRAMは0」 | **0**（`size-components` の `libopus.a` 行がDIRAM/.bss/.data全部0） | 実測、一致 |
-| §3「glueは約+150〜200バイト」（仮定） | **+100バイト**（`pocket_av.c.obj` .bss 190→266、`opus_feed.c.obj` +24） | 実測、予測より少ない |
+| §3「glueは約+150〜200バイト」（仮定） | **+100バイト**（`kobako_av.c.obj` .bss 190→266、`opus_feed.c.obj` +24） | 実測、予測より少ない |
 | §2「Flash +80,376」 | **75,362**（デコーダー限定のソース表。ハーネスは全globに `--gc-sections`） | 実測、約4.2KB少ない |
 | §3「復号タスク案は再生中約36KiB」 | **約45.6KiB**。stackを16,384→14,336に減らし、圧縮パケット用に6,144を足した | 導出、予測より多い |
 | §3「stackは10,420＋余裕」 | **14,336**（実測10,420＋3,916）。タスクが毎回自分の最高水位を出す | — |

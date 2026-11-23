@@ -5,7 +5,7 @@ for(const batch of [1,4,32])for(const state of ['absent','pass','fail']){
  const calls=Math.ceil(10153/batch);
  const report={done:true,ok:state==='pass',checkpoints:3376};
  // Include every native numeric key, including macro-expanded reports/stats.
- const native=fs.readFileSync('main/pocket/pocket_shiki.c','utf8');
+ const native=fs.readFileSync('main/kobako/kobako_shiki.c','utf8');
  const keys=new Set([...native.matchAll(/q7_num\(ctx,o,"([^"]+)"/g)].map(m=>m[1]));
  for(const m of native.matchAll(/Q7_(?:REPORT|STAT)\((\w+)\)/g))if(m[1]!=='k')keys.add(m[1]);
  for(const prefix of ['last','max'])for(const key of ['Phase','Scene','Fixture','Row'])keys.add(prefix+key);
@@ -30,7 +30,7 @@ for(const batch of [1,4,32])for(const state of ['absent','pass','fail']){
  const actor={evaluate(){evaluate++;},submit(){submit++;}};
  const P={resource:()=>({}),beginMeshFrame(){},commit(){}};
  const V={shiki:P,replace(fn){fn({background(){},image(){}});}};
- const ctx=vm.createContext({console:{log:x=>logs.push(x)},pocket:{kasane:V,shikiDebug:D,ayatsuri:{modelOpen:()=>({instance:()=>actor})}}});
+ const ctx=vm.createContext({console:{log:x=>logs.push(x)},kobako:{kasane:V,shikiDebug:D,ayatsuri:{modelOpen:()=>({instance:()=>actor})}}});
  vm.runInContext(src,ctx);assert.equal(preflight,0);
  if(state!=='absent'){
   assert.equal(logs.some(x=>x.startsWith('MB READY')),false);

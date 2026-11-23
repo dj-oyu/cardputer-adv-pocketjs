@@ -73,7 +73,7 @@ print('   parked', m.group(1), 'bytes for slot', m.group(2))
 assert int(m.group(1)) == base + len(TYPED), (base, m.group(1))
 
 print('--- care for the pet')
-to_row(5, 'FRAME_PRESENTED')                 # 5 = POCKET PET
+to_row(5, 'FRAME_PRESENTED')                 # 5 = KOBAKO PET
 time.sleep(6)
 send('q', 'HOME_READY')
 

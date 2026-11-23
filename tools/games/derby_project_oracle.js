@@ -1,6 +1,6 @@
 // Host-only exact-double and lifetime oracle; never embedded in firmware.
 (() => {
-  const S=pocket.derby, has=typeof S.project==='function', oldCRS=CRS, oldPc=pc;
+  const S=kobako.derby, has=typeof S.project==='function', oldCRS=CRS, oldPc=pc;
   let checked=0, failures=0;
   const check=v=>{if(!v)throw Error('projection contract');};
   const rejected=(f,code)=>{let error;try{f();}catch(e){error=e;}

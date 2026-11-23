@@ -94,7 +94,7 @@
 
 ## 外したもの（メモリ）
 
-ZENITH の **munching squares の小窓**（`pocket.kasane.pixel`）と **レーダーの縮小画像**（面1を `nearest` で 60×34 にして `setRotation`）。どちらも物語に役がなく、HEAVY では縮小画像の回転は 0° だった。
+ZENITH の **munching squares の小窓**（`kobako.kasane.pixel`）と **レーダーの縮小画像**（面1を `nearest` で 60×34 にして `setRotation`）。どちらも物語に役がなく、HEAVY では縮小画像の回転は 0° だった。
 
 - ゲスト: 型付き配列を 1 つでも作ると、その機構だけで約 1.3 KB が常駐する（host m32、`new Uint16Array` 2 つで +1,312 B、`pixel.open` で +688 B）。2 つを外して評価後 −3.0 KB（host m32、103,488 → 100,464 B）。
 - ネイティブ: pixel のプール 1,888 B（`sizeof(ksn_pixel_pool)`、host m32）と、縮小のソース行 `resize_stream`（約 1.3 KB）が確保されなくなる。
@@ -159,7 +159,7 @@ ZENITH の **munching squares の小窓**（`pocket.kasane.pixel`）と **レー
 
 ### 実機で起動しなかった件（2026-10-28）
 
-CORE を入れた版は、実機で起動に失敗した（`EVAL_ERROR PocketError: frame allocation failed at beginFrame`）。MEGADEMO は手続き面のフレーム（10,246 B の連続領域）を起動時にまとめて確保していたが、2 面（面1 = ZENITH のレーダー）で 5 枚、約 51 KB が要る。評価後の実機の空きは 102,088 B あったが、最大の連続領域が 31,744 B で、5 枚が入らなかった（JS 88,692 B。#103 の版は 82,784 B で通っていた）。
+CORE を入れた版は、実機で起動に失敗した（`EVAL_ERROR KobakoError: frame allocation failed at beginFrame`）。MEGADEMO は手続き面のフレーム（10,246 B の連続領域）を起動時にまとめて確保していたが、2 面（面1 = ZENITH のレーダー）で 5 枚、約 51 KB が要る。評価後の実機の空きは 102,088 B あったが、最大の連続領域が 31,744 B で、5 枚が入らなかった（JS 88,692 B。#103 の版は 82,784 B で通っていた）。
 
 - 確保を評価中から最初の `frame()` に移した（コンパイル後の一時メモリが消えてから）。これだけでは足りなかった（同じ失敗）。
 - **面1をやめた。** ZENITH のレーダーは、面1に描いて `animate` で回していたのを、面0の左下に直接描く（plan `rd` = 多角形の輪 + 十字、`sw` = 掃引と輝点、中心 (28, 108)）。フレームは 3 枚（約 31 KB）になり、常駐の native も 2 枚分（約 20 KB）減る。レーダーの回転表示（HEAVY のみ）と、その帯の再描画（実機で約 23 ms/フレーム）も無くなる。`MEGADEMO ANIM` のログも無くなった。
@@ -169,7 +169,7 @@ CORE を入れた版は、実機で起動に失敗した（`EVAL_ERROR PocketErr
 
 ブローカーの `app_session` で MEGADEMO を HEAVY で 90 秒（約 5 周）動かした。
 
-- DEGRADE・OOM・`PocketError`・例外は 0。停止・後片付けまで正常（`stop`/`close` ok、HOME へ戻る）。1 周 17.3 秒。
+- DEGRADE・OOM・`KobakoError`・例外は 0。停止・後片付けまで正常（`stop`/`close` ok、HOME へ戻る）。1 周 17.3 秒。
 - fps（`KASANE_PAINT` の 30 フレーム窓）: NEWS・TWIST・LOST 約 30、**ZENITH 約 30**（面1をやめる前は 18〜19）、**CORE 24〜29**（臨界の後半ほど重い。JS のターン 9 → 21 ms、描画 8〜12 ms）。
 - 空き heap: 評価直後 104,012 B（最大連続 31,744 B）、JS 86,720 B。この後の最初のフレームで 3 枚のフレームを確保して通った。終了後 208,224 B。
 - 面1あり・評価中に確保していた版は `frame allocation failed` で起動しなかった（上の節）。
@@ -209,7 +209,7 @@ LIMIT の平均が下がったのは、序盤で層を足していくため（�
 | `run_proc_megademo_scenes.py`（3 段階 × 7 場面 × 全 1,296 フレーム、plan・単歩・VM の一致、Act I は C 参照と全画素一致、上限の検査、15 opcode） | PASS。ハッシュ programs `6472050e2a2dbf89` pixels は版ごとに変わる |
 | `run_proc_megademo_js.py`（Act I の programs と C 参照、0〜95 フレームの draw、ズームの切替、942 フレームの読み込み） | PASS（拍を 2 回ずつ、縮小ソース 1 つ、部屋の組み直しに合わせて試験を更新） |
 | `run_megademo_app_host.py`（ASan/UBSan と `--m32`、1,264 フレーム、ズーム・段階・場面送り） | PASS。例外 0・DEGRADE 0・表示失敗 0、同時 plan 最大 16 |
-| `run_pocket_proc_qjs.py`（実 `pocket_shiki_frame.c` で 0〜95 フレームが Act I の参照と全画素一致、ズーム往復） | PASS（拍を 2 回ずつ、部屋から始まるカメラ、部屋の組み直しの REPLACE に合わせて試験を更新。`--out` の書き出しは参照フレームの番号で 1 回ずつ） |
+| `run_kobako_proc_qjs.py`（実 `kobako_shiki_frame.c` で 0〜95 フレームが Act I の参照と全画素一致、ズーム往復） | PASS（拍を 2 回ずつ、部屋から始まるカメラ、部屋の組み直しの REPLACE に合わせて試験を更新。`--out` の書き出しは参照フレームの番号で 1 回ずつ） |
 | Kasane のコマンド数（表示中） | 最大 43（ZENITH を部屋から見たとき）。上限 80 |
 
 `MEGA_PICKS=0,8,…` を付けると `run_megademo_app_host.py --ppm` の書き出すフレームを選べる（このために足した）。
@@ -218,7 +218,7 @@ LIMIT の平均が下がったのは、序盤で層を足していくため（�
 
 PR #93（ブローカーからアプリを起動する app-control-v1、ドラフト）を一時的に重ねたファームで、ブローカーの `app_session` から MEGADEMO を HEAVY で 90 秒（4 周半）動かした。終わった後は `main` のファームに戻した。
 
-- DEGRADE・OOM・`PocketError`・JS の例外は 0。場面の切替と plan の読み込み（同時最大 16 本、ZENITH）は毎周同じ。1 周 19.1 秒。
+- DEGRADE・OOM・`KobakoError`・JS の例外は 0。場面の切替と plan の読み込み（同時最大 16 本、ZENITH）は毎周同じ。1 周 19.1 秒。
 - fps（`KASANE_PAINT` の 30 フレーム窓の間隔から）: NEWS・TWIST・LOST 約 30、ZENITH 約 18〜19（帯の描画 40〜44 ms、レーダーの回転）、LIMIT 約 23〜27。
 - 空き heap: 評価直後（描画用の領域を取る前）50,620 B（最大連続 20,480 B）、JS 82,784 B。終了後 208,280 B。ターン内の最小はこの image では出ない。
 - Enter の操作は送れなかった（起動 ID が大きな整数で、道具を通すと桁が丸まる）。
@@ -301,10 +301,10 @@ PR #93（ブローカーからアプリを起動する app-control-v1、ドラ�
 
 ### メモリ: チャンクへの分割
 
-物語を足す前に、アプリを `pocket.app.load` のチャンクに分けた（[評価のピーク](../vm/eval-peak.md) §7、DERBY と同じ仕組み）。QuickJS は 1 つのスクリプトの関数の解析用の構造を、そのスクリプトの解析が終わるまで全部保つので、38.6 KB を 1 本で評価するとピークが全体分になる。
+物語を足す前に、アプリを `kobako.app.load` のチャンクに分けた（[評価のピーク](../vm/eval-peak.md) §7、DERBY と同じ仕組み）。QuickJS は 1 つのスクリプトの関数の解析用の構造を、そのスクリプトの解析が終わるまで全部保つので、38.6 KB を 1 本で評価するとピークが全体分になる。
 
-- `proc_megademo.js` は入口だけ（`pocket.kasane` の文字列を持ち、Kasane の arena を先取りさせる）。`chunks.txt` の `act1`（Act I・負荷の段階・plan の復号器とひな形）、`act2`（Act II の場面。host の試験が読む `procMegademo` は 2026-10-29 から `tools/kasane_contract/megademo_host.js`）、`view`（部屋・HUD・シャッター・読み込み）、`loop`（最初の場面と `frame()`）を順に読む。トップレベルの名前はグローバルになる（view の章の表は `CHAP`、`CH` は回廊の段階の表）。
-- host の試験は同じチャンクのファイルを同じ順に 1 本ずつ評価する（`tools/kasane_contract/megademo_chunks.py`）。`test_megademo_app_host.c` は `pocket.app.load` を `chunks.txt` から真似て入口そのものを評価する。比較の基準（`--baseline-rev`）がチャンクの版なら、その版の `chunks.txt` とファイルを git から取り出して使う。
+- `proc_megademo.js` は入口だけ（`kobako.kasane` の文字列を持ち、Kasane の arena を先取りさせる）。`chunks.txt` の `act1`（Act I・負荷の段階・plan の復号器とひな形）、`act2`（Act II の場面。host の試験が読む `procMegademo` は 2026-10-29 から `tools/kasane_contract/megademo_host.js`）、`view`（部屋・HUD・シャッター・読み込み）、`loop`（最初の場面と `frame()`）を順に読む。トップレベルの名前はグローバルになる（view の章の表は `CHAP`、`CH` は回廊の段階の表）。
+- host の試験は同じチャンクのファイルを同じ順に 1 本ずつ評価する（`tools/kasane_contract/megademo_chunks.py`）。`test_megademo_app_host.c` は `kobako.app.load` を `chunks.txt` から真似て入口そのものを評価する。比較の基準（`--baseline-rev`）がチャンクの版なら、その版の `chunks.txt` とファイルを git から取り出して使う。
 
 | 版（host m32、TLSF の課金） | 評価のピーク | 評価後 | 実行中の最大 |
 | --- | ---: | ---: | ---: |
@@ -333,7 +333,7 @@ PR #93（ブローカーからアプリを起動する app-control-v1、ドラ�
 
 ### I BRIEFING（`megademo_brief.js`、場面 0〜2 のログ名は NEWS のまま）
 
-テレビはコックピットの表示。**世界**（`pocket.shapes` の 3D: 床の格子、曲がりくねった航路に立つ 12 枚のゲート、遠くで回る八面体の LETHE）の上に **HUD**（手続き面の plan 6 本、`megademo_act1.js` の `T` の `cv` `ch` `eg` `cw` `sp` `sc`）。計器は多いが、全部が 16 フレームの拍に乗り、5 本の脳波は拍で揃ってスパイクする（統制）。
+テレビはコックピットの表示。**世界**（`kobako.shapes` の 3D: 床の格子、曲がりくねった航路に立つ 12 枚のゲート、遠くで回る八面体の LETHE）の上に **HUD**（手続き面の plan 6 本、`megademo_act1.js` の `T` の `cv` `ch` `eg` `cw` `sp` `sc`）。計器は多いが、全部が 16 フレームの拍に乗り、5 本の脳波は拍で揃ってスパイクする（統制）。
 
 | 場面 | フレーム | 中身 |
 | --- | ---: | --- |
@@ -343,7 +343,7 @@ PR #93（ブローカーからアプリを起動する app-control-v1、ドラ�
 
 - 文字: 左上の `RX`、数字の読み取り値 3 つ（速度・高度・コード）、`LETHE`。旧版の `INCOMING ORDER` などのテロップと `ASTRAL COMMAND` はやめた。
 - 3 場面は plan を共有する（`enter()` が登録し直さない）。WAKE の最後の 16 フレームで 6 本を先読みする。
-- 旧 Act I の VM プログラムは、VM の参照の負荷として試験に残した（`tools/kasane_contract/proc_megademo_news_ref.js`、`proc_megademo.h` と全画素一致）。`run_pocket_proc_qjs.py` と `run_proc_megademo_js.py` はアプリではなくそれを直接動かす。
+- 旧 Act I の VM プログラムは、VM の参照の負荷として試験に残した（`tools/kasane_contract/proc_megademo_news_ref.js`、`proc_megademo.h` と全画素一致）。`run_kobako_proc_qjs.py` と `run_proc_megademo_js.py` はアプリではなくそれを直接動かす。
 
 ### II CROSSING（`megademo_brief.js` の `river()`、回廊の plan の上に描く）
 
@@ -396,7 +396,7 @@ host の glibc の丸めは実機の TLSF より粗い（上の節: 実機のゲ
 
 | 変更 | 効き目（host m32） |
 | --- | --- |
-| **draw に配列を渡さない**: `draw()` は入力を数の引数でも受ける（`pocket_shiki_frame.c` の `draw_impl`、`numeric`）。全場面を `E(plan, 入力...)` と `BG(背景)`（`megademo_act1.js`）で描くようにした。場面関数はリストを返さない。`procMegademo.frame()`（host の試験が読む形）だけが `[plan, [入力]]` のリストに集める | 1 フレームの確保 331 → 91 回、12.4 → 4.5 KB |
+| **draw に配列を渡さない**: `draw()` は入力を数の引数でも受ける（`kobako_shiki_frame.c` の `draw_impl`、`numeric`）。全場面を `E(plan, 入力...)` と `BG(背景)`（`megademo_act1.js`）で描くようにした。場面関数はリストを返さない。`procMegademo.frame()`（host の試験が読む形）だけが `[plan, [入力]]` のリストに集める | 1 フレームの確保 331 → 91 回、12.4 → 4.5 KB |
 | フレームごとのクロージャ・配列を消した: 複素数の補助関数（`cmul`/`zp`/`lerp`）を式に展開、`map`/`concat`/`filter`/`parseInt`、カメラのキーの `map`、波ごとの配列リテラル、目のクロージャ、`[W_CORE, 16]` のような毎回のリテラル、艦隊の `[0,1,0,-1,0][…]`、`WQ.set([...])`。表は平たい配列に（`POSE`・`EAR`・`WHISK`・`K`）、作業用は使い回しの配列（`PJ`・`QQ`・`EP`・`CC`・`BR`） | 同上。host の JS 時間 −30%（内容を足した後も 245 → 約 190 µs/フレーム） |
 | CORE の面の頂点を `parseInt(IFS[i], 16)` ではなく `charCodeAt` で引く（`hx()`）。面ごとの縮み `h` をループの外へ | 同上 |
 | `patch()` は値が変わったときだけ ref に書く（画像の矩形、猫の矩形とコマ、ランプ・輪の色、残機の位置、語りと章名の `setReveal`）。読み取り値は全画面で 2 フレームに 1 回、`'SIGNAL …'` などの文字列もそのときだけ作る。`V.patch`/`V.replace` に渡す関数は 1 回だけ作る | view のコマンドとゲストの確保が減る |
@@ -517,7 +517,7 @@ host の glibc の丸めは実機の TLSF より粗い（上の節: 実機のゲ
 - `run_proc_megademo_scenes.py`: PASS。HEAVY の CORE は線分最大 511（app の資源は 768）、1 フレームのラスタ最大 8,195、1 回の draw の最大 5,304（上限 8,192）。ZENITH 508・12,767。
 - `run_megademo_app_host.py --m32`（作業前 = 843496c）: 評価後 137,904 → 140,632 B（+2.7 KB）、実行中の live 最大 151,560 → 154,760 B（+3.2 KB）、評価のピーク 135,328 → 139,400 B。`MEGA_HEAP_LIMIT=163840` で 2.4 周、例外・DEGRADE なし。
 - view のコマンド: 部屋の CORE は 1 晩目で 42（刻み 20 本で 73、推定）、部屋の ZENITH は札が 1 つ増えレーダーの枠が 1 つ減って、刻み 20 本で 75（推定、上限 80）。
-- `run_proc_megademo_js.py`・`run_pocket_proc_qjs.py`・`run_proc_megademo_preview.py`・`run_megademo_temporal_sampling.py` も通る。
+- `run_proc_megademo_js.py`・`run_kobako_proc_qjs.py`・`run_proc_megademo_preview.py`・`run_megademo_temporal_sampling.py` も通る。
 
 ### 実機（2026-10-29、497ba2b、broker の `app_session` 90 秒、HEAVY）
 
@@ -544,7 +544,7 @@ III・IV の作り直しで、ゲストの heap の余裕がほぼ無くなっ�
 
 - **テンプレートは `apps/kasane/megademo_plans.js`**（`T` と復号器 `prog`）。アプリのチャンクではない: `chunks.txt` の `rom-text megademo_plans.js` の行を見て、`tools/make_app_chunks.py` が `APP_CHUNK_ROM` に `kasane=text:…` を足し、`tools/kasane_ir/emit_rom_plans.mjs` の `textEntries()` が 24 本を `kasane.<名前>` として DERBY と同じ表（`ksn_proc_rom_plans.c`）に書く。引数（`$n`）の欄は、引数を 1 つずつ 0 → 7 に変えて変わった欄（a・value・color のどれか）を patch にする。全部の引数を同時に変えた行と、patch を当てた行が一致しなければビルドが止まる。
 - **アプリ**は `H.register('kasane.' + 名前, 引数)`（`sh` だけは点列: `H.register('kasane.sh', [], points(b))`）。`prog`・`T`・`plan()` はゲストに無い（`megademo_act1.js` は 7.0 → 1.7 KB）。
-- **host の試験**: `megademo_chunks.py` が `megademo_plans.js` を act1 の次に、`megademo_host.js`（`procMegademo` と `plan()`）を最後に読ませる。`rom_table()` が同じ生成器で表を書き、`run_megademo_app_host.py`・`run_pocket_proc_qjs.py` がリンクして `pocket_proc_rom_plans()` に渡す（`app_session.c` と同じ）。`test_proc_megademo_js.c` の代役の `register` は名前・引数・点列を受け、`kasane.` で始まる名前を求める。
+- **host の試験**: `megademo_chunks.py` が `megademo_plans.js` を act1 の次に、`megademo_host.js`（`procMegademo` と `plan()`）を最後に読ませる。`rom_table()` が同じ生成器で表を書き、`run_megademo_app_host.py`・`run_kobako_proc_qjs.py` がリンクして `kobako_proc_rom_plans()` に渡す（`app_session.c` と同じ）。`test_proc_megademo_js.c` の代役の `register` は名前・引数・点列を受け、`kasane.` で始まる名前を求める。
 - **CMake**: Node を探す条件を `APP_CHUNK_LOWER OR APP_CHUNK_ROM` にした（`@plan` のアプリが無くなっても、テンプレートがあれば表を作る）。
 
 | host m32（同じハーネス、上限 163,840 B） | 配列で登録（6b33404） | 名前で登録 |
@@ -584,7 +584,7 @@ III・IV の作り直しで、ゲストの heap の余裕がほぼ無くなっ�
 
 ### host のハーネスの直し
 
-- **ターンの終わりの `JS_VMStackTrim`**: ファーム（`components/pocketjs_guest/src/guest.c`、D43）はターンごとにスタックのセグメントのキャッシュを返すが、ハーネスは返していなかった。`core()` のフレームが大きくなったとき、ハーネスだけが位置の合わないセグメントを 11 KB 抱え、上限 163,840 B で CORE の頭から OOM になった（実機では起きない形）。
+- **ターンの終わりの `JS_VMStackTrim`**: ファーム（`components/kobako_guest/src/guest.c`、D43）はターンごとにスタックのセグメントのキャッシュを返すが、ハーネスは返していなかった。`core()` のフレームが大きくなったとき、ハーネスだけが位置の合わないセグメントを 11 KB 抱え、上限 163,840 B で CORE の頭から OOM になった（実機では起きない形）。
 - `MEGA_TIMES`（フレームごとの host の時間）、`MEGA_MEMDUMP_AT=t`（そのフレームの後の内訳と VM スタックの統計）。
 
 ## 行番号表を落とす（`option strip-debug`、2026-10-29）
@@ -597,7 +597,7 @@ CORE の JS を詰めた分（表で +1.7 KB）を取り返し、さらに余裕
 | 上限で通る最小の heap | 150,468 B | 153,125 B | **146,250 B**（余裕 17.6 KB） |
 | 行番号表（pc2line） | 6.3 KB | 6.3 KB | 50 B（入口とハーネスのみ） |
 
-## CORE の投影を `pocket.shapes.project` へ（2026-10-29）
+## CORE の投影を `kobako.shapes.project` へ（2026-10-29）
 
 実機で区間ごとに測った（診断の版。`performance.now()` で frame() の中を分けて 30 フレームの平均。ブランチ `claude/megademo-prof`、マージしない）。CORE の重い窓（t = 63〜123）: frame() 22.6 ms のうち、**JS 14.2 ms**、plan の draw 5.0 ms（48 回）、patch 1.6、commit 1.4。CORE はまだ JS が詰まっている。NEWS は逆で、frame() 17.5 ms のうち **draw 10.2 ms（18 回、1 回 0.56 ms）**、JS 4.4 ms。
 
@@ -611,7 +611,7 @@ CORE の JS を詰めた分（表で +1.7 KB）を取り返し、さらに余裕
 
 （ms、実測・実機、6639708 の上に計測だけを足した版。JS は play() から draw を引いたもの）
 
-CORE の殻・コア・自機の投影を、WAKE と Act I が使っている `pocket.shapes.project`（3×4 の射影行列、C で計算）に移した。
+CORE の殻・コア・自機の投影を、WAKE と Act I が使っている `kobako.shapes.project`（3×4 の射影行列、C で計算）に移した。
 
 - **殻**: JS は面ごとのモデルの点（縮めて法線方向へ押し出した 3 角）を `WM` に書くだけ。ねじりの向き（面の偶奇）ごとに並べ、ヨーと合わせた行列で 2 回 `project` する。明暗（面の深さの和）は中心の深さで決める（3 角の和は中心の 3 倍なので符号が同じ）。
 - **コア**: 28 個の角は固定のモデルの点（`FC` から `WM.set` で写すだけ）。立方体と八面体で 1 回ずつ `project`。
@@ -650,7 +650,7 @@ CORE の殻・コア・自機の投影を、WAKE と Act I が使っている `p
 
 ## 壁の刻みを 1 つの画像に（2026-10-30）
 
-部屋の壁の刻み（1 晩に 1 本、5 本で 1 組）は、刻み 1 本が view のコマンド 1 個（組の斜線は 4 個）で、1 場面 80 個の上限のうち 20 晩分しか描けなかった。刻みは一度描いたら変わらない絵なので、firmware の組み込み画像 `"tally"`（`main/pocket/app_view_assets.c`）にした。
+部屋の壁の刻み（1 晩に 1 本、5 本で 1 組）は、刻み 1 本が view のコマンド 1 個（組の斜線は 4 個）で、1 場面 80 個の上限のうち 20 晩分しか描けなかった。刻みは一度描いたら変わらない絵なので、firmware の組み込み画像 `"tally"`（`main/kobako/app_view_assets.c`）にした。
 
 - `V.resource('tally')` は 42 × 82 の画像で、**フレーム n が n 晩分**。画素は表示のときに span ごとに計算する（ビットマップを持たない。刻みの外は透明）。部屋の組み立てでは `tx.image({resource: tally, bounds: [196, 16, 238, 98], frame: min(90, night())})` の **1 コマンド**。
 - 並びは前と同じ（3 組で 1 行、14 px 間隔）で、6 行・**90 晩**まで。最後の 2 行は猫の後ろにかかる。
@@ -665,4 +665,4 @@ CORE の殻・コア・自機の投影を、WAKE と Act I が使っている `p
 - **翻訳の確かめ（host、scratch の採取）**: 全場面・全段・全フレームの draw 47,453 回を、旧い行（double）・`@shiki` の double・固定小数で比べた。旧い行との差は最大 1.5e-4 px、固定小数と double の差は最大 0.053 px（`ry`）。`eg` は直した後 0.022 px。`sh` の点は floor した画素を同じ式で作るので、この比較には入れていない。
 - **host の通し（`run_megademo_app_host.py`）**: 2.4 周、例外 0・劣化 0・転送失敗 0。m32 の評価後のゲスト heap は 115,581 B（旧版 115,486 B、+95 B）、評価のピーク 132,628 B（旧版 132,424 B、+204 B）。host の模型の値で、実機の値ではない。runner は、旧版が `megademo_plans.js` を持っていればその表を浮動小数の VM 側にリンクして、同じバイナリで比べる。
 - **実機（427b308、2026-11-02、入力なしで 90 秒）**: 2,595 フレーム、最高段（tier 2）で 2 周半、失敗なし。読み込み後の空き 36,820 B（ゲスト 102,856 B、最大の連続 23,552 B）、Shiki heap 49,152 B。30 フレーム平均のターンは WAKE 15.3 ms、NEWS 5.0〜10.5 ms、TWIST 7.6〜13.2 ms、ZENITH 6.1〜7.3 ms、CORE 8.2〜13.4 ms、LOST 3.8 ms。ログは docs/kasane/logs/megademo-shiki-20261102-427b308.txt。旧版との同じ条件の比較はしていない。
-- **残り**: 浮動小数の VM の行を読む host の検査（`run_proc_megademo_scenes.py`・`run_proc_megademo_js.py`・`run_pocket_proc_qjs.py` と `megademo_host.js` の `plan()`）は、手順5で旧 API と一緒に消す。
+- **残り**: 浮動小数の VM の行を読む host の検査（`run_proc_megademo_scenes.py`・`run_proc_megademo_js.py`・`run_kobako_proc_qjs.py` と `megademo_host.js` の `plan()`）は、手順5で旧 API と一緒に消す。

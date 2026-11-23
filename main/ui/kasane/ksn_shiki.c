@@ -4,7 +4,7 @@
 #include "sdkconfig.h"
 #endif
 /* __xtensa__ (lowercase) is the compiler's own predefine: host builds that
- * fake the target with -D__XTENSA__ (the fake-PIE runs of the pocket_proc
+ * fake the target with -D__XTENSA__ (the fake-PIE runs of the kobako_proc
  * harness) must not reach the asm below. */
 #if defined(__xtensa__) && defined(__XTENSA__) && defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_IDF_TARGET_ESP32S3
 #define KSN_SHIKI_HAS_PIE 1
@@ -69,10 +69,10 @@ const int32_t ksn_shiki_sin_table[257]={
     65457,65476,65492,65505,65516,65525,65531,65535,
     65536
 };
-/* The image's one copy of the table: pocket_trig.h (Math.sin/cos/tan, DERBY's
- * series) defines pocket_sin_q16 weakly with the same values
- * (tools/check_pocket_trig_table.py); this strong alias replaces it. */
-extern const int32_t pocket_sin_q16[257] __attribute__((alias("ksn_shiki_sin_table")));
+/* The image's one copy of the table: lean_trig.h (Math.sin/cos/tan, DERBY's
+ * series) defines lean_sin_q16 weakly with the same values
+ * (tools/check_lean_trig_table.py); this strong alias replaces it. */
+extern const int32_t lean_sin_q16[257] __attribute__((alias("ksn_shiki_sin_table")));
 
 /* ---- arithmetic, as sec.2.2/2.3 define it: on exact 64-bit values, with
  * floor division by powers of two written out (C's >> on a negative value

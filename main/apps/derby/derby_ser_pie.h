@@ -1,8 +1,8 @@
 /* DERBY WATCH ser(): the chord cull (ou()) and the chord-end rotation in
  * int16 lanes, as a PIE kernel and as the scalar integer reference it must
  * match bit for bit. Stage S3 of docs/apps/derby-ser-division.md (sec.6.3,
- * sec.10, sec.13, sec.14): pocket_derby.c's view() rotates once a frame and
- * culls every series in one batch with these when CONFIG_POCKET_DERBY_SER_PIE
+ * sec.10, sec.13, sec.14): kobako_derby.c's view() rotates once a frame and
+ * culls every series in one batch with these when CONFIG_KOBAKO_DERBY_SER_PIE
  * is on (default y);
  * the up key's A/B swaps them for derby_ser_int.c's scalar rotation and cull.
  * The host and r5sim (no PIE) run the scalar reference in the kernels' place
@@ -43,13 +43,13 @@
 #endif
 /* The per-frame PIE functions (dsp_set_camera, dsp_rotate_pie,
  * dsp_cull_frame, dsp_cull_series, dsp_cull_pie) in IRAM instead of flash: a
- * measurement build's (CONFIG_POCKET_DERBY_SER_PIE_IRAM, default n, or
- * POCKET_DERBY_SER_PIE_IRAM defined here). +1,092 B of DIRAM taken from
+ * measurement build's (CONFIG_KOBAKO_DERBY_SER_PIE_IRAM, default n, or
+ * KOBAKO_DERBY_SER_PIE_IRAM defined here). +1,092 B of DIRAM taken from
  * every app (idf.py size); docs/apps/derby-ser-division.md sec.14. */
-#if defined(CONFIG_POCKET_DERBY_SER_PIE_IRAM) && !defined(POCKET_DERBY_SER_PIE_IRAM)
-#define POCKET_DERBY_SER_PIE_IRAM 1
+#if defined(CONFIG_KOBAKO_DERBY_SER_PIE_IRAM) && !defined(KOBAKO_DERBY_SER_PIE_IRAM)
+#define KOBAKO_DERBY_SER_PIE_IRAM 1
 #endif
-#if defined(POCKET_DERBY_SER_PIE_IRAM) && defined(ESP_PLATFORM)
+#if defined(KOBAKO_DERBY_SER_PIE_IRAM) && defined(ESP_PLATFORM)
 #include "esp_attr.h"
 #define DSP_HOT IRAM_ATTR
 #else
@@ -60,7 +60,7 @@
 #define DSP_CBLK_MAX 4                        /* chord blocks: 32 chords */
 #define DSP_EBLK_MAX (DSP_CBLK_MAX + 1)       /* end blocks: 40 ends */
 #define DSP_CHORDS_MAX (DSP_CBLK_MAX * DSP_LANES)
-#define DSP_ENDS_MAX (DSP_CHORDS_MAX + 1)     /* pocket_derby.c's DERBY_ENDS_MAX is 32 */
+#define DSP_ENDS_MAX (DSP_CHORDS_MAX + 1)     /* kobako_derby.c's DERBY_ENDS_MAX is 32 */
 #define DSP_REL_MAX_Q3 16376                  /* 2,047 m */
 
 typedef struct { int16_t v[4][DSP_LANES]; } dsp_blk;
@@ -86,7 +86,7 @@ typedef struct __attribute__((aligned(16))) {
 } dsp_cull_k;
 
 /* Setup (scalar, every build). */
-/* Once per course: the chord ends' unit normals, Q30 (pocket_derby.c's pose()
+/* Once per course: the chord ends' unit normals, Q30 (kobako_derby.c's pose()
  * gives the tangent (c, d); the normal is (-d, c)). Clears in/out. */
 void dsp_set_course(dsp_ends *E, unsigned ends, const int32_t *nx_q30, const int32_t *nz_q30);
 /* Per frame: the ends' world positions (end i at px_q16[i * stride],
@@ -114,15 +114,15 @@ void dsp_rotate_ref(dsp_ends *E, const dsp_rot_k *rk);
  * result is already masked with it. */
 uint32_t dsp_cull_ref(const dsp_ends *E, const dsp_cull_k *k);
 
-/* The PIE kernels (ESP32-S3 with CONFIG_POCKET_DERBY_SER_PIE only). Same
+/* The PIE kernels (ESP32-S3 with CONFIG_KOBAKO_DERBY_SER_PIE only). Same
  * contract as the references; E, rk and k must be 16-byte aligned. */
-#if defined(__XTENSA__) && defined(CONFIG_POCKET_DERBY_SER_PIE)
+#if defined(__XTENSA__) && defined(CONFIG_KOBAKO_DERBY_SER_PIE)
 void dsp_rotate_pie(dsp_ends *E, const dsp_rot_k *rk);
 uint32_t dsp_cull_pie(const dsp_ends *E, const dsp_cull_k *k);
-#ifdef CONFIG_POCKET_DERBY_SER_PIE_SELFTEST
+#ifdef CONFIG_KOBAKO_DERBY_SER_PIE_SELFTEST
 /* The device self-test (docs/apps/derby-ser-division.md sec.10.4): logs one
  * "SERPIE ok=... mismatch=... scalar_cy=... pie_cy=..." line. A measurement
- * build's (CONFIG_POCKET_DERBY_SER_PIE_SELFTEST, default n): its test copies
+ * build's (CONFIG_KOBAKO_DERBY_SER_PIE_SELFTEST, default n): its test copies
  * are about 1.5 KB of .bss. */
 void dsp_selftest(void);
 #endif

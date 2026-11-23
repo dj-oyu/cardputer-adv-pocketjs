@@ -13,9 +13,9 @@ static void boundary(void){
  }
  eval("lcdCatch.mode=0;lcdCatch.wait=100",strlen("lcdCatch.mode=0;lcdCatch.wait=100"),"lamp.js");frame();
  eval("lcdCatch.mode=1;lcdCatch.hi=[-1,-1]",strlen("lcdCatch.mode=1;lcdCatch.hi=[-1,-1]"),"hi.js");frame();tap("s");
- eval("globalThis.__aborts=0;globalThis.__patch=pocket.kasane.patch;pocket.kasane.patch=function(f){return __patch(function(tx){f(tx);__aborts++;throw Error('intentional abort')})};lcdCatch.mode=2;lcdCatch.score=100",strlen("globalThis.__aborts=0;globalThis.__patch=pocket.kasane.patch;pocket.kasane.patch=function(f){return __patch(function(tx){f(tx);__aborts++;throw Error('intentional abort')})};lcdCatch.mode=2;lcdCatch.score=100"),"abort.js");frame();
+ eval("globalThis.__aborts=0;globalThis.__patch=kobako.kasane.patch;kobako.kasane.patch=function(f){return __patch(function(tx){f(tx);__aborts++;throw Error('intentional abort')})};lcdCatch.mode=2;lcdCatch.score=100",strlen("globalThis.__aborts=0;globalThis.__patch=kobako.kasane.patch;kobako.kasane.patch=function(f){return __patch(function(tx){f(tx);__aborts++;throw Error('intentional abort')})};lcdCatch.mode=2;lcdCatch.score=100"),"abort.js");frame();
  CHECK(num("__aborts")==1,"one actual transaction aborted after callback");
- eval("pocket.kasane.patch=__patch",strlen("pocket.kasane.patch=__patch"),"restore.js");frame();frame();
+ eval("kobako.kasane.patch=__patch",strlen("kobako.kasane.patch=__patch"),"restore.js");frame();frame();
  close_session();printf("LCD7_BOUNDARY %s\n",fails||exceptions||bad_present?"FAIL":"PASS");
 }
 '''

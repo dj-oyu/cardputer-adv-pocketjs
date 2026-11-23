@@ -16,7 +16,7 @@ parser.add_argument('--seconds', type=int, default=180)
 args = parser.parse_args()
 args.out.parent.mkdir(parents=True, exist_ok=True)
 
-interesting = ('PLAYER_', 'MP3DEC', 'pocket.av', 'sd_media', 'sd:',
+interesting = ('PLAYER_', 'MP3DEC', 'kobako.av', 'sd_media', 'sd:',
                'sound:', 'Guru Meditation', 'E (', 'W (')
 deadline = time.monotonic() + args.seconds
 failure_at = None
