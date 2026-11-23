@@ -30,7 +30,7 @@ unsigned jpfont_baseline(jpfont_id_t font);
 bool jpfont_has(jpfont_id_t font, uint32_t codepoint);
 
 // Expands one glyph into `out` as cell_w*cell_h alpha bytes, 0 or 255, which
-// is the shape PocketJS's font atlas wants. An unmapped codepoint gives the
+// is the shape the Kasane text atlas wants. An unmapped codepoint gives the
 // tofu box. Returns the advance in px, or 0 when the face is missing.
 unsigned jpfont_glyph(jpfont_id_t font, uint32_t codepoint, uint8_t *out);
 

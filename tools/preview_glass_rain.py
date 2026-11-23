@@ -14,7 +14,7 @@ for i in range(45):
     label(data,16,37,'APPS',1,1)
     label(data,112,37,'SETTINGS',1,.35)
     label(data,16,69,'HELLO WORLD',2,1)
-    label(data,16,89,'JAVASCRIPT / POCKETJS',1,.75)
+    label(data,16,89,'JAVASCRIPT / KOBAKO',1,.75)
     label(data,16,110,'SKK PRACTICE',2,.3)
     png+=chunk(b'fcTL',struct.pack('>IIIIIHHBB',sequence,240,135,0,0,1,15,0,0));sequence+=1
     raw=b''.join(b'\0'+data[y*720:(y+1)*720] for y in range(135))

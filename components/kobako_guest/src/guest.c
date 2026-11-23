@@ -981,7 +981,7 @@ esp_err_t kobako_guest_create(const kobako_guest_config_t *config,
     JS_SetGCThreshold(guest->runtime, config->heap_limit / 2U);
   }
   JS_SetMaxStackSize(guest->runtime, config->stack_limit);
-  JS_SetRuntimeInfo(guest->runtime, "PocketJS ESP-IDF guest");
+  JS_SetRuntimeInfo(guest->runtime, "kobako ESP-IDF guest");
   JS_SetInterruptHandler(guest->runtime, guest_interrupt, guest);
   JS_SetHostPromiseRejectionTracker(guest->runtime, promise_rejection, guest);
   js_std_init_handlers(guest->runtime);

@@ -1791,7 +1791,7 @@ void app_main(void) {
     usb_serial_jtag_driver_config_t usb={.tx_buffer_size=1024,.rx_buffer_size=256};
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb));
     ESP_ERROR_CHECK(usb_console_init());
-    ESP_LOGI("boot","Cardputer ADV PocketJS M1; app=3MiB skk=2MiB fonts=512KiB");
+    ESP_LOGI("boot","Cardputer ADV kobako M1; app=3MiB skk=2MiB fonts=512KiB");
 #if KOBAKO_PROBES
     { extern void ble_probe(void); ble_probe(); }
 #endif

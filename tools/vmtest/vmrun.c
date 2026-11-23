@@ -1185,7 +1185,7 @@ int main(int argc, char **argv) {
   if (heap_limit != 0 && heap_limit / 2U < JS_GetGCThreshold(G.runtime))
     JS_SetGCThreshold(G.runtime, heap_limit / 2U);
   JS_SetMaxStackSize(G.runtime, stack_limit);
-  JS_SetRuntimeInfo(G.runtime, "PocketJS ESP-IDF guest");
+  JS_SetRuntimeInfo(G.runtime, "kobako ESP-IDF guest");
   if (reloc_keep_old) JS_VMStackRelocKeepOld(G.runtime, 1);
   if (reloc_pin) { force_reloc = true; JS_VMStackPin(G.runtime, +1); }
   if (reloc_fault != JS_VM_RELOC_FAULT_NONE) JS_VMStackRelocFault(G.runtime, reloc_fault);

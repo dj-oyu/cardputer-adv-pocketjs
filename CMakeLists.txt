@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 # path, no EXTRA_COMPONENT_DIRS needed). Every app draws through Kasane
 # (main/ui/kasane); the Rust UI core, its QuickJS binding and the rgb565
 # renderer are no longer part of the image, so nothing is built out of the
-# pinned .cache/pocketjs checkout.
+# PocketJS (third-party) checkout that once lived in .cache/pocketjs.
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
 project(cardputer_kobako)

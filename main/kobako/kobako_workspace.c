@@ -929,7 +929,7 @@ static JSValue js_app_info(JSContext *ctx, JSValueConst this_val,
     JS_SetPropertyStr(ctx,out,"title",JS_NewString(ctx,m->title));
     JS_SetPropertyStr(ctx,out,"entry",JS_NewString(ctx,m->entry));
     JS_SetPropertyStr(ctx,out,"runtime",
-        JS_NewString(ctx,m->runtime==APP_RUNTIME_KOBAKO?"kobako-app":"legacy-pocketjs"));
+        JS_NewString(ctx,m->runtime==APP_RUNTIME_KOBAKO?"kobako-app":"native"));
     JS_SetPropertyStr(ctx,out,"api",m->api?JS_NewString(ctx,m->api):JS_NULL);
     for(int which=0;which<2;which++) {
         const char *const *names=which?m->optional:m->required;

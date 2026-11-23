@@ -241,7 +241,7 @@ static const char *apps[]={"HELLO WORLD","SKK PRACTICE","PLAYGROUND","TUTORIAL",
                           "IMU CALIBRATION","KOBAKO PET","PET COMPANION","STRESS TEST",
                           "MEGADEMO","GRID LAB","VIDEO LAB",
                           "LCD CATCH","DERBY WATCH","BIG WAVE"};
-static const char *app_details[]={"JAVASCRIPT / POCKETJS","JAPANESE INPUT DRILL",
+static const char *app_details[]={"JAVASCRIPT / KOBAKO","JAPANESE INPUT DRILL",
                                   "WRITE AND RUN JAVASCRIPT","LEARN TO WRITE IT",
                                   "FIND THE SENSOR AXES","CHOOSE AND CARE FOR YOUR PET",
                                   "AI USAGE / ALARM / TIMER","HEAP CHURN + DRAWING LOAD",

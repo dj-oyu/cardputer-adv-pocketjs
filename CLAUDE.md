@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-M5Stack Cardputer ADV（ESP32-S3FN8、PSRAMなし、240×135 LCD）向けのESP-IDFファームウェア。QuickJS版PocketJSでJSアプリを1つずつ実行する。設計ドキュメントは日本語、**コード内のコメントは英語**で、密度と「なぜ」を説明する文体に揃える。
+M5Stack Cardputer ADV（ESP32-S3FN8、PSRAMなし、240×135 LCD）向けのESP-IDFファームウェア。fork の QuickJS でJSアプリを1つずつ実行する（プロジェクト名は kobako。第三者の PocketJS とは別物で、`components/kobako_guest` だけがその `pocketjs_guest` から派生している）。設計ドキュメントは日本語、**コード内のコメントは英語**で、密度と「なぜ」を説明する文体に揃える。
 
 **ドキュメントの入口は `docs/README.md`。** 導入・操作と分野別索引を入口で分け、`api/` `platform/` `scenes/` `apps/` `vm/` `perf/` `kasane/` の索引から仕様・設計と計測記録を辿る。`docs/archive/` は廃止した（役目を終えた記録は削除し、git 履歴に残す）。新しい文書は分野別の索引へ追加する。コードが参照するファイル名・節番号・決定番号は保つ。移動時はリポジトリ全体の参照を修復し `python tools/check_docs.py` を実行する。JSソースのコメントと上流パッチはヒープ・原本性のため変更せず、必要なら元パスに移動案内を残す。
 

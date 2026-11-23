@@ -2692,7 +2692,7 @@ static esp_err_t app_tick_body(uint32_t buttons) {
      * The next owner turn retries without interrupting the guest. */
     (void)kobako_kasane_update_notice(have_notice?&notice:NULL,pet_hub_selected());
     // A top-level replace() is submitted while the source is evaluated, before
-    // there is a PocketJS frame to hand to present_frame(). Present that image
+    // there is a Kasane frame to hand to present_frame(). Present that image
     // as its own owner turn. The same gate retries a partial LCD transfer
     // without letting another JS update race repair. An invalidated committed
     // screen also reaches this gate when no JS submission exists.

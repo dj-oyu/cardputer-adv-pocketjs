@@ -1,6 +1,6 @@
-# Cardputer ADV PocketJS
+# Cardputer ADV kobako
 
-M5Stack Cardputer ADV向けの、QuickJS版PocketJSを使うファームウェアプロジェクトです。
+M5Stack Cardputer ADV向けの、QuickJS（fork [dj-oyu/quickjs](https://github.com/dj-oyu/quickjs)）でJSアプリを動かすファームウェアプロジェクト kobako です。第三者の OSS である [PocketJS](https://github.com/pocket-stack/pocketjs) とは別のプロジェクトで、ゲストの部品（`components/kobako_guest`）だけがその `pocketjs_guest`（MIT）から派生しています。
 
 XMBホーム（背景は LEVEL WAVE / OCEAN + STARS / SOLAR SAIL / FLOWER）、JSアプリ、SKK日本語入力、JavaScript Playground、共通JS API `kobako.*` を実装しています。アプリの一覧は `main/ui/shell.c` の `apps[]` が正です。
 
@@ -41,9 +41,9 @@ SDKはESP-IDF 6.0.1を使います。
 ## プラットフォームの方針
 
 - 対象はCardputer ADV（ESP32-S3FN8、240×135 LCD）。PSRAMなしのメモリ予算で検証します。
-- Pocket Vaporの事前C変換ではなく、QuickJS版PocketJSを使用します。
+- Pocket Vaporの事前C変換ではなく、QuickJSでJSをそのまま実行します。
 - アプリ管理は、JSの読み込み、実行環境の生成・終了、状態管理を担当します。
-- UI管理は、入力の受け渡し、PocketJS描画、液晶更新を担当します。
+- UI管理は、入力の受け渡し、Kasane描画、液晶更新を担当します。
 - ネイティブ側にホームとエラー画面を置き、アプリは一度に1つ動かします。
 - 終了やエラー時はアプリの資源を解放し、元のホーム選択位置へ戻します。
 - JSヒープの上限・空きヒープ・Flash配分はビルドごとに動くので、ここに数字を書きません。現在値は `CLAUDE.md` と `tools/memlog.py`、パーティションは `partitions.csv` を見てください。任意アプリのOOM復帰は保証していません。
