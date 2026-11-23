@@ -12,6 +12,6 @@ dependencies:
 direct_dependencies:
 - idf
 - kobako_guest
-manifest_hash: 256c45f2cbdd3da18b437febede119445ad2d544cef65353c71f2d50701dc733
+manifest_hash: 5030fe2d7159c3053a3ee2f772fb25e730d6ee8da31d2e3947dc5c4840bf6fff
 target: esp32s3
 version: 3.0.0
